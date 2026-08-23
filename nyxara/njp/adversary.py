@@ -196,12 +196,26 @@ class SelfAttacker:
             if report.refuted_by:
                 self.refuted += 1
                 report.retracted = self._retract(report, claim=claim)
+            # The verdict outlives the call. Without this the report was returned and dropped, so
+            # an UNDECIDED claim could be re-held with fresh testimony on any later turn and climb
+            # — repetition finishing what the evidence could not.
+            self._remember_verdict(report, claim=claim)
             return report
         except Exception:  # noqa: BLE001 — a failed attack leaves the belief exactly as it was
             report.confidence_after = report.confidence_before
             return report
         finally:
             report.ms = (time.perf_counter() - t0) * 1000.0
+
+    def _remember_verdict(self, report: "AttackReport", *, claim: str = "") -> None:
+        """Hand the verdict to the belief ledger, where it can still constrain things later."""
+        try:
+            if self.beliefs is None:
+                return
+            wanted = str(claim or "").strip() or f"{report.cause} causes {report.effect}"
+            self.beliefs.record_attack(wanted, report)
+        except Exception:  # noqa: BLE001 — an unrecordable verdict is not a failed attack
+            return
 
     def attack_strongest(self, *, limit: int = 1) -> List[AttackReport]:
         """Go after the causal claims she is currently most committed to.

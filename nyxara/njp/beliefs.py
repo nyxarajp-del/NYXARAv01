@@ -134,6 +134,21 @@ class Belief:
     created: float = field(default_factory=time.time)
     updated: float = field(default_factory=time.time)
     outcome: Optional[bool] = None            # set once reality settled it, for calibration
+    #: What the adversary made of this claim, and how often.
+    #:
+    #: The leak these close is real and was reproduced. `adversary.attack` returns an
+    #: `AttackReport` and the caller drops it, so nothing durable records that a claim was tested
+    #: and came back UNDECIDED. A claim in that state can then be re-held with TESTIMONY support
+    #: by `field._record_beliefs` on any later turn where the Master restates it, and `earned`
+    #: rises — so UNDECIDED becomes true by repetition, through a route that never consults the
+    #: attack record. Being told a thing ten times is exactly what the SOFT_CEILING exists to
+    #: refuse, and this is the hole in the floor beneath it.
+    tested: int = 0
+    undecided: int = 0
+    last_stance: str = ""
+    #: What `earned` had reached when the attack came back undecided. Testimony may not carry it
+    #: past this until something other than testimony arrives.
+    earned_at_test: Optional[float] = None
 
     @property
     def key(self) -> str:
@@ -166,7 +181,18 @@ class Belief:
             total += support.weight * (0.6 ** i)
         earned = total / (1.0 + total) * 1.6
         ceiling = 0.97 if self.hard_support else self.SOFT_CEILING
-        return min(ceiling, earned)
+        earned = min(ceiling, earned)
+
+        # A claim that was tested and came back undecided does not climb on being repeated.
+        #
+        # The SOFT_CEILING already refuses "ten tellings make it true" in general. This is the
+        # narrower and sharper case: the adversary went looking, the record could not settle it,
+        # and every subsequent telling is the same testimony arriving again. Hard evidence — a
+        # proof, an observation, a surviving prediction — lifts it as it always could, because
+        # that is a different kind of thing arriving rather than the same kind arriving twice.
+        if self.undecided > 0 and not self.hard_support and self.earned_at_test is not None:
+            earned = min(earned, float(self.earned_at_test))
+        return earned
 
     @property
     def unsupported(self) -> bool:
@@ -326,6 +352,36 @@ class BeliefLedger:
         self.revise(other, confidence=b.confidence * (1.0 - min(0.9, a_earned)),
                     why=f"{reason}: {a.claim[:40]}")
         return a, b
+
+    def record_attack(self, claim: str, report: Any) -> Optional[Belief]:
+        """Store what the adversary made of a claim, so the verdict survives the turn.
+
+        `AttackReport` was returned and dropped. The consequence is not that she forgot an opinion
+        — it is that the same claim is re-attacked from scratch on every encounter, each attempt
+        an independent coin-flip against a thin record, and that an UNDECIDED verdict has no way
+        of constraining what happens to the belief afterwards.
+
+        Only the undecided case pins ``earned_at_test``. SURVIVED needs no ceiling and REFUTED is
+        handled by retraction, which is a different and stronger thing than a cap.
+        """
+        try:
+            belief = self.beliefs.get(_key(claim))
+            if belief is None or report is None:
+                return None
+            stance = str(getattr(report, "stance", "") or "")
+            belief.tested += 1
+            belief.last_stance = stance
+            from nyxara.njp.adversary import Stance
+            if stance == Stance.UNDECIDED:
+                belief.undecided += 1
+                if belief.earned_at_test is None:
+                    belief.earned_at_test = float(belief.earned)
+            belief.history.append(Revision(
+                confidence=belief.confidence,
+                why=f"attacked: {stance or 'no verdict'}"))
+            return belief
+        except Exception:  # noqa: BLE001 — an unrecordable attack records nothing
+            return None
 
     def retract(self, claim: str, *, why: str = "falsified") -> Optional[Belief]:
         """Drive a belief to zero and keep it. What she used to think is data about her."""

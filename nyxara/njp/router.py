@@ -118,9 +118,18 @@ class DisagreementKind:
     #: about *what is true* — the fabric never claimed anything about that — but about whether
     #: there is any ground under the answer at all.
     RECOGNITION = "unrecognised_situation"
+    #: Same slot, different filler. Distinct from RECOGNITION, which is about whether there is
+    #: ground under the answer at all rather than about what the answer is.
+    #:
+    #: This kind was unreachable in practice and the reason is worth stating: the fabric seat
+    #: returns a bare concept *name* and the njp seat returns a sentence, so `_norm` was comparing
+    #: a word to a clause. AGREE was effectively impossible between them and every pairing landed
+    #: in UNCLASSIFIED — a channel that always disagrees carries no information, which is the
+    #: other edge of "disagreement is not failure".
+    SUBSTRATE = "substrate_disagrees"
     UNCLASSIFIED = "unclassified"          # it differs and the record cannot say why
 
-    ALL = (EVIDENCE, CAUSAL_MODEL, ASSUMPTIONS, RECOGNITION, UNCLASSIFIED)
+    ALL = (EVIDENCE, CAUSAL_MODEL, ASSUMPTIONS, RECOGNITION, SUBSTRATE, UNCLASSIFIED)
 
 
 #: Problem kind → the NJP faculty whose posterior speaks for the NJP seat. ``reasoning`` is the

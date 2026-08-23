@@ -297,6 +297,97 @@ class EpistemicCompiler:
         return out
 
     @staticmethod
+    def from_answer(answer: Any, *, claim: str = "") -> Any:
+        """Adapt a symbolic :class:`~nyxara.njp.grounding.Answer` into a discriminable candidate.
+
+        The blocker that made the three-way comparison unreachable on every input.
+        :meth:`_observations` reads ``predicts`` and ``forbids``, and only
+        :class:`~nyxara.njp.cortex.CortexHypothesis` has them. The njp seat is an ``Answer`` and
+        the fabric seat is a ``(name, score)`` tuple, so for two of the three candidates the power
+        arithmetic computed ``p == 0 or f == 0`` and ``compile`` refused — which reads exactly
+        like "nothing would settle this" and was actually "two of your three accounts do not
+        speak the language".
+
+        A symbolic answer **predicts** the triples it rests on and **forbids** its own object slot
+        being something else. That second half is what makes it discriminable at all: a candidate
+        that forbids nothing risks nothing, and `CortexHypothesis.forbids` says so in its own
+        docstring.
+        """
+        from nyxara.njp.cortex import CortexHypothesis
+        predicts: List[str] = []
+        forbids: List[str] = []
+        try:
+            text = str(claim or getattr(answer, "text", "") or "").strip()
+            for triple in list(getattr(answer, "triples", None) or [])[:6]:
+                subject = str(getattr(triple, "subject", "") or "")
+                predicate = str(getattr(triple, "predicate", "") or "")
+                obj = str(getattr(triple, "object", "") or "")
+                if subject and predicate:
+                    predicts.append(f"{subject} {predicate} {obj}".strip())
+                    if obj:
+                        forbids.append(f"{subject} {predicate} not {obj}".strip())
+            if text and not predicts:
+                predicts.append(text)
+            return CortexHypothesis(claim=text or "symbolic account",
+                                    predicts=predicts, forbids=forbids)
+        except Exception:  # noqa: BLE001
+            return CortexHypothesis(claim=str(claim or ""))
+
+    @staticmethod
+    def rivals_for_slot(subject: str, predicate: str,
+                        fillers: Dict[str, str]) -> List[Any]:
+        """Turn several seats' answers to *one slot* into candidates evidence can choose between.
+
+        Adapting each seat on its own is not enough, and the first attempt at this failed for a
+        reason worth keeping. :meth:`discriminate` scores an observation by how evenly it splits
+        the set — ``p`` predicting, ``f`` forbidding — so candidates that never commit to the
+        *same* observation all score zero and :meth:`compile` refuses. Three accounts each
+        predicting their own sentence and forbidding nothing is three monologues, and no
+        experiment separates monologues.
+
+        A slot is what makes them rivals: ``(subject, predicate)`` has one filler, so a seat
+        claiming ``water`` is claiming ``light`` is wrong. Stating that explicitly is what turns
+        three answers into a question evidence can settle, and it is a fact about slots rather
+        than an assumption about the seats.
+
+        ``fillers`` maps seat name → what that seat says fills the slot. Seats agreeing on a
+        filler collapse into one candidate, because they are one account with two supporters.
+        """
+        from nyxara.njp.cortex import CortexHypothesis
+        out: List[Any] = []
+        try:
+            by_filler: Dict[str, List[str]] = {}
+            for seat, filler in (fillers or {}).items():
+                value = _norm(filler)
+                if value:
+                    by_filler.setdefault(value, []).append(str(seat))
+            if len(by_filler) < 2:
+                return out          # one account is not a disagreement, whoever holds it
+            for filler, seats in sorted(by_filler.items()):
+                said = f"{subject} {predicate} {filler}".strip()
+                rivals = [f"{subject} {predicate} {other}".strip()
+                          for other in sorted(by_filler) if other != filler]
+                out.append(CortexHypothesis(
+                    claim=f"{said} (from {', '.join(sorted(seats))})",
+                    predicts=[said], forbids=rivals))
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    @staticmethod
+    def from_slot(subject: str, predicate: str, filler: str) -> Any:
+        """Adapt the fabric's slot claim into a candidate.
+
+        It **predicts** its filler and forbids nothing, and that asymmetry is correct rather than
+        a gap to paper over: the head associates, it does not derive. A candidate that forbids
+        nothing gets zero power on its own, which is the honest score — it can only be
+        discriminated *against* something that forbids what it predicts.
+        """
+        from nyxara.njp.cortex import CortexHypothesis
+        said = f"{subject} {predicate} {filler}".strip()
+        return CortexHypothesis(claim=said, predicts=[said] if said else [], forbids=[])
+
+    @staticmethod
     def _observations(candidates: Sequence[Any]) -> List[Observation]:
         """Every distinct thing the candidates commit to, deduplicated by text."""
         seen: Dict[str, Observation] = {}

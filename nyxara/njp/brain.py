@@ -59,6 +59,11 @@ log = logging.getLogger("nyxara.njp.brain")
 _ANOMALY_FAMILIARITY = 0.2
 _ANOMALY_CONFIDENCE = 0.7
 
+#: What a claim may still be worth once the substrate names a different filler for its slot. A cap
+#: rather than a retraction: the fabric associates and is measured at MRR 0.238, so it may make her
+#: less sure and may never take a grounded answer away.
+_SUBSTRATE_CEILING = 0.5
+
 __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
 
 # What a counterfactual question asks her to *do* to a variable, and by how much.
@@ -212,6 +217,10 @@ class NJPThought:
     #: before it they never met at all, and the one that could reach the causal engine was the
     #: one that knew least.
     op: Any = None
+    #: Set when the symbolic and neural seats named different fillers for one slot — a
+    #: ``router.DisagreementKind``. ``None`` means they agreed, or only one of them spoke, and
+    #: those are deliberately the same thing here: neither is a clash.
+    substrate: Any = None
     relevance: List[Any] = dc_field(default_factory=list)
     # The meta-reasoner's own record of how this answer was reached, kept so that when reality
     # grades the answer later the credit can reach the strategy that actually produced it.
@@ -714,6 +723,72 @@ class NJPBrain:
                 "rendering is njp.voice's, and it has a faithfulness check but nothing that learns")
             return engine
         except Exception:  # noqa: BLE001 — she still learns per-organ, just without the diagnosis
+            return None
+
+    def _slot_claims(self, thought: NJPThought) -> Tuple[str, str, Dict[str, str]]:
+        """What each seat says fills this turn's ``(subject, predicate)`` slot.
+
+        The one place a word and a sentence are commensurable, and the reason the seats could
+        never be compared before. ``fabric_proposes`` returns a bare concept *name*;
+        ``grounding.Answer`` is a clause; the comparison ran ``_norm`` over both, so AGREE was
+        effectively unreachable and every pairing landed in UNCLASSIFIED. A channel that always
+        disagrees carries exactly as little information as one that always agrees.
+
+        The slot is borrowed from what :meth:`nyxara.njp.integrate.LearningLoop._open_deferred`
+        already keys a deferred question on, rather than parsed a second time here.
+        """
+        empty: Tuple[str, str, Dict[str, str]] = ("", "", {})
+        try:
+            if self.grounder is None:
+                return empty
+            reader = getattr(self.grounder, "_read_question", None)
+            if reader is None:
+                return empty
+            subject, predicate = reader(str(thought.stimulus or "").lower())
+            if not subject or not predicate:
+                return empty
+
+            fillers: Dict[str, str] = {}
+            said = str(thought.answer or "").strip()
+            if said:
+                # The last token of a short answer is the filler; a long one is a sentence rather
+                # than a slot claim and is left out instead of being guessed at.
+                words = said.split()
+                if len(words) <= 3:
+                    fillers["njp"] = words[-1].strip(".,;:")
+            if self._gate("fabric_prior", True):
+                for name, _score in self.fabric_proposes(thought.stimulus, k=1):
+                    if name:
+                        fillers["fabric"] = str(name)
+            return subject, predicate, fillers
+        except Exception:  # noqa: BLE001 — an unreadable slot is simply not compared
+            return empty
+
+    def _substrate_disagreement(self, thought: NJPThought) -> Optional[str]:
+        """Compare the seats on one slot, and open a question where they differ.
+
+        Two invariants, and they are the Master's own point cutting both ways:
+
+        * **Agreement raises nothing.** Two seats saying the same thing is mostly evidence about
+          their shared inputs. :meth:`~nyxara.njp.grounding.Provenance.weakest` is already the
+          precedent — a composition is only as sourced as its weakest part.
+        * **Disagreement never refutes.** It lowers confidence and opens an experiment. The
+          fabric associates; it does not derive, and it is measured at MRR 0.238. A channel that
+          wrong must not be able to retract a grounded claim.
+        """
+        try:
+            subject, predicate, fillers = self._slot_claims(thought)
+            if len(set(fillers.values())) < 2:
+                return None            # agreement, or only one seat spoke. Neither is a clash.
+            if self.epistemic is not None:
+                rivals = self.epistemic.rivals_for_slot(subject, predicate, fillers)
+                if rivals:
+                    self.epistemic.compile(thought.stimulus, rivals)
+            thought.epistemic_confidence = min(
+                float(thought.epistemic_confidence or 0.0), _SUBSTRATE_CEILING)
+            from nyxara.njp.router import DisagreementKind
+            return DisagreementKind.SUBSTRATE
+        except Exception:  # noqa: BLE001
             return None
 
     # ---- promoting a reasoning form into a strategy ------------------------ #
@@ -2107,6 +2182,9 @@ class NJPBrain:
             # confidence is settled, because both halves of the condition have to be known, and it
             # produces a question rather than touching the answer.
             self._wonder_at_anomaly(out)
+            # And: the two substrates naming different fillers for one slot. Also after the
+            # confidence is settled, because what it does is cap it.
+            out.substrate = self._substrate_disagreement(out)
 
             # 4.5 CONSULT THE CORTEX — the one step that makes a stronger model buy stronger
             # reasoning rather than better sentences. It proposes; the gate below still decides.
