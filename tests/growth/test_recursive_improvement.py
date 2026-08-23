@@ -13,6 +13,17 @@ from nyxara.kernel.config import get_settings
 def _rsi_with_parallel(parallel: bool) -> RecursiveSelfImprovement:
     s = get_settings().model_copy(deep=True)
     s.self_improvement.parallel_cycle = parallel
+    # This test asserts that parallel and sequential OBSERVATION agree, and it only reads
+    # `code["files_scanned"]` and `architecture["n_modules"]` — both produced by the observe
+    # steps. Validation is a fourth step that runs a benchmark through the whole orchestrator,
+    # including real online learning (`run_validation` → `benchmark.run` → `core.process` →
+    # `_grow` → `flush_online_learning`), twice over, and it cannot change either number.
+    #
+    # Left on, it took the test past `pyproject.toml`'s 300s per-test budget, and because the
+    # timeout method is `thread` the whole session died here rather than this one test failing.
+    # Measured: the run stopped around 70% of tests/growth, and it stops in the same place at the
+    # merge base — this is not new, it is just never reached because nothing ran the full suite.
+    s.self_improvement.validation_enabled = False
     return RecursiveSelfImprovement(settings=s)
 
 
