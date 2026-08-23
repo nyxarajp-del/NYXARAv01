@@ -2384,6 +2384,13 @@ class NJPConfig(BaseModel):
     #: and nothing else, so it stays off until a battery says otherwise.
     fabric_strategy_enabled: bool = False        # unfamiliar ground buys a second opinion
 
+    #: Giving up a causal model that keeps being surprised. OFF by default, and not because the
+    #: trial is unsafe — it is archived, judged on the held-out fold and reverted on a tie — but
+    #: because a wrong death criterion destroys working structure, and
+    #: `concepts.restructure` records a measured instance of exactly that failure. Reversible is a
+    #: reason to allow switching it on, not a reason to switch it on for everyone.
+    model_death_enabled: bool = False
+
     holo_dim: int = Field(default=4096, ge=64)
     holo_capacity: int = Field(default=20000, ge=16)
     recall_k: int = Field(default=5, ge=1, le=128)

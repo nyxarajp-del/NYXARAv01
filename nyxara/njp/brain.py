@@ -221,6 +221,10 @@ class NJPThought:
     #: ``router.DisagreementKind``. ``None`` means they agreed, or only one of them spoke, and
     #: those are deliberately the same thing here: neither is a clash.
     substrate: Any = None
+    #: The retirement trial run this turn, where the gate is on — a ``field.Trial``. ``None``
+    #: means the gate is off or the slow count was not due, and those are both "nothing was
+    #: proposed" rather than "a proposal was refused".
+    retirement: Any = None
     relevance: List[Any] = dc_field(default_factory=list)
     # The meta-reasoner's own record of how this answer was reached, kept so that when reality
     # grades the answer later the credit can reach the strategy that actually produced it.
@@ -2250,6 +2254,15 @@ class NJPBrain:
                 # survives. Reverted unless it strictly wins.
                 if self.field.due_for_meta():
                     out.trial = self.field.meta_cycle()
+                    # And, on the same slow count and behind its own gate, the riskiest thing
+                    # here: giving up a causal model that keeps being surprised. Off by default,
+                    # because a wrong death criterion destroys working structure and
+                    # `concepts.restructure` records a measured instance of exactly that. The
+                    # trial itself is reversible — archived, benchmarked on held-out, reverted on
+                    # a tie — but "reversible" is a reason to allow it to be switched on, not a
+                    # reason to switch it on for everyone.
+                    if self._gate("model_death", False):
+                        out.retirement = self.field.retire_cycle()
 
             # 12. THE CORE — induce schemas over the kinds the field just formed, score the
             # standing ones against facts they were never built from, and drop the ones that
