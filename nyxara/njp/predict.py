@@ -152,14 +152,28 @@ class Diagnosis:
     evidence: str = ""
     confidence: float = 0.0
     repaired: bool = False           # did the routed update actually run?
+    #: How deep a repair this calls for — a :class:`~nyxara.njp.field.ErrorClass`.
+    #:
+    #: Two taxonomies have been running side by side and never speaking. This one answers *which
+    #: organ*, and `field.ErrorClass` answers *how deep*: a wrong coefficient is refitted, a
+    #: missing arrow is declared, a concept system that cannot express what she met is
+    #: restructured. Those are orthogonal questions — a GROUNDING miss can be a bad number or a
+    #: missing kind — and reporting only the first means a repair chooses its own depth with no
+    #: evidence about which was called for.
+    depth: str = ""
 
     @property
     def attributed(self) -> bool:
         return self.kind != ErrorKind.UNATTRIBUTED
 
+    @property
+    def route(self) -> Tuple[str, str]:
+        """``(organ, depth)`` — the pair that decides both who repairs and how far."""
+        return (self.kind, self.depth or "unknown")
+
     def to_dict(self) -> Dict[str, Any]:
         return {"kind": self.kind, "evidence": self.evidence[:200],
-                "confidence": round(self.confidence, 4),
+                "confidence": round(self.confidence, 4), "depth": self.depth,
                 "attributed": self.attributed, "repaired": self.repaired}
 
 
@@ -233,6 +247,10 @@ class PredictionEngine:
         # A miss that was attributed to an organ and then reached no repair at all. Counted
         # because it used to be invisible: `_repair` returned on a missing key and nothing said so.
         self.unrepaired: Dict[str, int] = {}
+        #: (organ, depth) counts. The cross-product the two taxonomies never formed: a GROUNDING
+        #: miss that is a wrong number and one that is a missing kind call for different repairs,
+        #: and counting only the organ made them the same event.
+        self.by_route: Dict[Tuple[str, str], int] = {}
         self._repair_owner: Dict[str, str] = {}
         self._defaulted: Dict[str, bool] = {}
         self._unrepairable: Dict[str, str] = {}
@@ -283,7 +301,13 @@ class PredictionEngine:
                 self.correct += 1
             else:
                 out.diagnosis = self.diagnose(out, evidence)
+                # Which organ, and how deep. Attached here rather than inside `diagnose` so the
+                # eight-way ladder stays exactly what it was and the second axis is visibly a
+                # second axis rather than a branch inside the first.
+                out.diagnosis.depth = self._depth_from(evidence)
                 self.by_kind[out.diagnosis.kind] = self.by_kind.get(out.diagnosis.kind, 0) + 1
+                key = out.diagnosis.route
+                self.by_route[key] = self.by_route.get(key, 0) + 1
                 if learn:
                     self._repair(out)
 
@@ -295,6 +319,29 @@ class PredictionEngine:
             return None
 
     # ---- diagnose ----------------------------------------------------------- #
+    @staticmethod
+    def _depth_from(evidence: Dict[str, Any]) -> str:
+        """How deep a repair the evidence calls for, in :class:`~nyxara.njp.field.ErrorClass` terms.
+
+        Read from the caller's own critic where it ran, and inferred from the evidence otherwise.
+        The inference is deliberately coarse and only claims the two cases the evidence can
+        actually settle: nothing extracted at all is a concept system that could not express the
+        turn; a right subject and predicate with a wrong value is a coefficient. Everything else
+        is ``unknown``, which is a real answer — guessing a depth picks a repair size at random.
+        """
+        try:
+            from nyxara.njp.field import ErrorClass
+        except Exception:  # noqa: BLE001
+            return ""
+        stated = str(evidence.get("depth") or "").strip()
+        if stated:
+            return stated
+        if evidence.get("expected_triples") and not evidence.get("triples"):
+            return ErrorClass.CONCEPTUAL
+        if evidence.get("derived") and evidence.get("triples"):
+            return ErrorClass.NUMERIC
+        return ErrorClass.UNKNOWN
+
     def diagnose(self, outcome: Outcome, evidence: Dict[str, Any]) -> Diagnosis:
         """Which organ owns this miss? Read from what each one produced, never guessed.
 
@@ -538,6 +585,8 @@ class PredictionEngine:
             # Attributed to an organ and acted on by nobody. The gap between `by_kind` and
             # `repaired` used to have no name, so it looked like the repairs were simply failing.
             "unrepaired": {k: n for k, n in self.unrepaired.items() if n},
+            "by_route": {f"{organ}/{depth}": n
+                         for (organ, depth), n in self.by_route.items() if n},
             "worst_kind": self.worst_kind(),
             "calibration": self.calibration().to_dict(),
         }

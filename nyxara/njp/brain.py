@@ -2360,6 +2360,13 @@ class NJPBrain:
                 # three strategies empirical selects cannot answer an intervention.
                 if thought.op is not None and getattr(thought.op, "kind", ""):
                     context["kind_hint"] = thought.op.kind
+                # What this speech act permits at all. `CognitivePolicy` has held the right table
+                # since it was written and it was read only to decide whether the cortex could
+                # speak; strategy selection never asked. So the only thing keeping `simulate` away
+                # from a greeting was the problem kind coming out differently, which is a
+                # coincidence rather than a rule.
+                if thought.op is not None and getattr(thought.op, "pathways", ()):
+                    context["pathways"] = tuple(thought.op.pathways)
                 # How unrecognised the substrate found this turn. Gated: whether spending a second
                 # strategy on unfamiliar ground pays for itself is a question for the ablation.
                 # Default OFF, on measurement rather than preference — see `NJPConfig`. Novelty

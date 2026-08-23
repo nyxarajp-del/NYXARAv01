@@ -59,6 +59,24 @@ __all__ = [
 
 _ARITHMETIC = set("0123456789+-*/^=%")
 
+#: Which cognitive pathway each registered strategy actually drives, so
+#: :class:`~nyxara.njp.relevance.CognitivePolicy`'s table can reach strategy selection and not
+#: only the cortex. Names rather than a guess from the callable, because the mapping is a fact
+#: about which organ a strategy uses and nothing about a function object says that.
+#:
+#: A strategy absent from this table is unconstrained on purpose. Gating by an incomplete table
+#: would make a newly registered arm silently unreachable, which is worse than not gating it.
+_STRATEGY_PATHWAY: Dict[str, str] = {
+    "simulate": "simulate",
+    "experiment": "experiment",
+    "recall": "recall",
+    "introspect": "self_state",
+    "ladder": "reason",
+    "causal": "reason",
+    "derive": "reason",
+    "calculate": "reason",
+}
+
 #: How unrecognised a turn must be before it is worth spending a second strategy on. High, because
 #: a second opinion is real compute and most turns early in a session look novel to a fabric that
 #: has barely grown.
@@ -414,9 +432,37 @@ class MetaReasoner:
         general = [s for s in self.strategies.values() if not s.kinds]
         return exact or general or list(self.strategies.values())
 
-    def choose(self, kind: str, *, exclude: Sequence[str] = ()) -> Optional[Strategy]:
-        """UCB1 over the strategies eligible for this kind of problem."""
+    @staticmethod
+    def _permitted(pool: List[Strategy], pathways: Sequence[str]) -> List[Strategy]:
+        """Drop the strategies this turn's *speech act* does not allow at all.
+
+        :class:`~nyxara.njp.relevance.CognitivePolicy` has held the right table from the start —
+        a greeting is permitted the relationship and her own state and nothing else — and it was
+        read only to decide whether the LLM cortex could speak. Strategy selection never asked, so
+        the only thing keeping `simulate` away from a greeting was the problem *kind* coming out
+        differently, which is a coincidence rather than a rule.
+
+        Named per strategy rather than inferred, because the mapping is a fact about which organ
+        each one drives. A strategy nobody mapped is unconstrained — an unmapped arm should not be
+        silently unreachable, which is the failure mode of gating by an incomplete table.
+
+        Empty ``pathways`` means no act was read, and an unread act constrains nothing.
+        """
+        allowed = set(pathways or ())
+        if not allowed:
+            return pool
+        # An empty result is a real answer and must not be softened into the full pool. That
+        # softening was the first version of this method and it defeated the gate in exactly the
+        # case the gate exists for: a greeting permits neither `simulate` nor `derive`, every
+        # candidate is excluded, and falling back to "all of them" hands the turn straight to the
+        # simulator. A turn whose speech act permits no reasoning is a turn that gets none.
+        return [s for s in pool if _STRATEGY_PATHWAY.get(s.name, "") in ("", *allowed)]
+
+    def choose(self, kind: str, *, exclude: Sequence[str] = (),
+               pathways: Sequence[str] = ()) -> Optional[Strategy]:
+        """UCB1 over the strategies eligible for this kind of problem, and permitted by the act."""
         pool = [s for s in self._candidates(kind) if s.name not in set(exclude)]
+        pool = self._permitted(pool, pathways)
         if not pool:
             return None
         if self.meta_learner is not None:
@@ -452,10 +498,17 @@ class MetaReasoner:
             # end of the chain, the critic threw it out for naming a cause the world model does
             # not hold — and `simulate`, which had the answer, was never the third attempt because
             # the loop stops as soon as anything at all comes back.
-            strategy = self._preferred(ctx) or self.choose(out.kind)
+            pathways = tuple(ctx.get("pathways") or ())
+            strategy = self._preferred(ctx) or self.choose(out.kind, pathways=pathways)
             if strategy is None or strategy.solve is None:
                 self.abstained += 1
-                out.critique.defects.append("no strategy registered for this kind")
+                # Two different reasons, and conflating them hides the interesting one: nothing
+                # registered for this kind is a gap in the brain, and a speech act that permits
+                # no reasoning is the relevance gate working.
+                out.critique.defects.append(
+                    "this speech act permits no reasoning pathway" if pathways
+                    and not self._permitted(self._candidates(out.kind), pathways)
+                    else "no strategy registered for this kind")
                 return out
 
             out.strategy = strategy.name
@@ -471,7 +524,7 @@ class MetaReasoner:
             # it was so the bandit stops leading with it.
             tried = [strategy.name]
             while not out.answered and len(tried) < self.max_attempts:
-                nxt = self.choose(out.kind, exclude=tried)
+                nxt = self.choose(out.kind, exclude=tried, pathways=pathways)
                 if nxt is None or nxt.solve is None:
                     break
                 self._miss(strategy)
@@ -500,7 +553,7 @@ class MetaReasoner:
             # disagreement lowers it and agreement leaves it alone.
             unfamiliar = float(ctx.get("novelty", 0.0) or 0.0) >= _NOVEL_FLOOR
             if out.classification.mixed or not out.critique.clean or unfamiliar:
-                second = self.choose(out.kind, exclude=[strategy.name])
+                second = self.choose(out.kind, exclude=[strategy.name], pathways=pathways)
                 if second is not None and second.solve is not None:
                     self.second_opinions += 1
                     out.alternative = second.name
