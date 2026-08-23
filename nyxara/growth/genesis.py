@@ -2809,9 +2809,18 @@ class NeuralArchitectureSearch:
         for gen in range(gens):
             scored = self._score_population(population, folds, backend, seen, surrogate)
             scored.sort(key=lambda c: c.fitness, reverse=True)
-            improved = best is None or scored[0].fitness > best.fitness
+            # Crown only from FULL evaluations. Under successive halving all but `keep` of
+            # `scored` are cheap screens trained at a fraction of the budget and flagged
+            # `predicted`; a screen score orders the rung, it does not measure a brain.
+            # Crowning one would quote a fraction-of-budget perplexity as the champion's own,
+            # and would put the champion outside `seen` — the very set the Pareto front is
+            # built from — so `champion` and `pareto_front` would contradict each other in the
+            # same report. `keep` is at least 1, so a rung always has a real score; `or scored`
+            # is a safety net, not a path.
+            real = [c for c in scored if not c.predicted] or scored
+            improved = best is None or real[0].fitness > best.fitness
             if improved:
-                best, best_gen = scored[0], gen
+                best, best_gen = real[0], gen
             history.append(best.fitness)          # best-so-far -> monotonic non-decreasing
             leaderboard = scored
             if surrogate is not None:             # learn from everything scored so far

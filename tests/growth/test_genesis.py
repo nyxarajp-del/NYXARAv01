@@ -8,6 +8,7 @@ re-implements or weakens a safety check."""
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 
 import pytest
 
@@ -144,6 +145,34 @@ def test_search_report_exposes_pareto_front():
     # the scalar champion cannot be strictly dominated, so it lies on the frontier
     champ_fps = {c.genome.fingerprint() for c in report.pareto_front}
     assert report.champion.fingerprint() in champ_fps
+
+
+def test_a_cheap_screen_is_never_crowned(monkeypatch):
+    """Successive halving trains all but ``1/factor`` of each rung at a fraction of the budget and
+    flags the result ``predicted``. Those scores order the rung; they do not measure a brain.
+
+    Two things go wrong if one is crowned. The report quotes a fraction-of-budget perplexity as the
+    champion's own, and the champion is absent from ``seen`` — the set the Pareto front is built
+    from — so ``pareto_front`` and ``champion`` contradict each other in the same report. That is
+    not hypothetical: on the default config it happened in about one search in six, decided by
+    wall-clock jitter between candidates that were otherwise identical.
+
+    Here every screen is rigged to out-score every full evaluation, so the naive pick is always a
+    screen."""
+    nas = NeuralArchitectureSearch(cfg=_cfg(successive_halving=True, halving_factor=3),
+                                   seed_corpus=_CORPUS)
+    unrigged = NeuralArchitectureSearch._evaluate
+
+    def rigged(self, genome, folds, backend, *, steps=None):
+        cand = unrigged(self, genome, folds, backend, steps=steps)
+        return cand if steps is None else replace(cand, fitness=cand.fitness + 10.0)
+
+    monkeypatch.setattr(NeuralArchitectureSearch, "_evaluate", rigged)
+    report = nas.search()
+
+    assert not nas._champion.predicted                # crowned on a real score
+    assert report.champion_fitness < 10.0             # not the rigged screen score
+    assert report.champion.fingerprint() in {c.genome.fingerprint() for c in report.pareto_front}
 
 
 def test_leaderboard_is_sorted_by_fitness():
