@@ -50,6 +50,9 @@ from nyxara.eval.benchmark import Benchmark, BenchmarkReport, Solver
 __all__ = [
     "Faculty",
     "attr_faculty",
+    "gate_faculty",
+    "ablate_njp",
+    "NJP_FABRIC_FACULTIES",
     "AblationResult",
     "AblationReport",
     "mcnemar_exact",
@@ -316,6 +319,138 @@ def ablate(faculty: Faculty, benchmark: Benchmark,
     disabled_ok = bool(faculty.disable(off_core))
     t0 = time.monotonic()
     off_report = benchmark.run(_solver(off_core))
+    off_wall = time.monotonic() - t0
+
+    on_by_id, off_by_id = _outcomes(on_report), _outcomes(off_report)
+    shared = [tid for tid in on_by_id if tid in off_by_id]
+
+    helped = hurt = differed = 0
+    for tid in shared:
+        on_pass, on_text, _ = on_by_id[tid]
+        off_pass, off_text, _ = off_by_id[tid]
+        if on_text != off_text:
+            differed += 1
+        if on_pass and not off_pass:
+            helped += 1
+        elif off_pass and not on_pass:
+            hurt += 1
+
+    n = len(shared) or 1
+    return AblationResult(
+        faculty=faculty.name,
+        n_tasks=len(shared),
+        with_passed=sum(1 for t in shared if on_by_id[t][0]),
+        without_passed=sum(1 for t in shared if off_by_id[t][0]),
+        helped=helped, hurt=hurt,
+        p_value=mcnemar_exact(helped, hurt),
+        responses_differed=differed,
+        with_latency_s=on_wall / n, without_latency_s=off_wall / n,
+        disabled_ok=disabled_ok, alpha=alpha, min_discordant=min_discordant,
+        note=faculty.note)
+
+
+def _gate_default(attribute: str) -> bool:
+    """What ``NJPConfig`` says this gate is when nobody has set it.
+
+    Read rather than assumed, because not every gate ships on: an arm that measurement says never
+    fires is honestly defaulted off, and an ablation that assumed otherwise would report having
+    disabled something that was never enabled.
+    """
+    try:
+        from nyxara.kernel.config import NJPConfig
+        field = NJPConfig.model_fields.get(attribute)
+        return bool(getattr(field, "default", True)) if field is not None else True
+    except Exception:  # noqa: BLE001 — no config class reachable; assume the usual
+        return True
+
+
+def gate_faculty(name: str, gate: str, note: str = "") -> Faculty:
+    """A faculty disabled by turning off one config gate on a built :class:`NJPBrain`.
+
+    :func:`attr_faculty` is the right instrument wherever the call sites guard with ``is None``.
+    For the fabric they do not: ``NJPBrain._build_fabric``'s docstring calls it *"the one organ
+    that is never optional"* and ``perceive`` calls ``anticipate``/``stimulate``/``settle``
+    unguarded, so nulling it raises inside a blanket ``except`` and yields an empty percept. That
+    is silent-exception degradation, not the designed degraded path — and an ablation running down
+    it would report a difference caused by breakage rather than by absence, which is the one error
+    this module is mostly built to avoid.
+
+    A gate is read at the point of *use*, so switching it on a live brain exercises the same code
+    the configuration would. Reports ``False`` when the gate is already off or cannot be set,
+    which is the validity check: a toggle that no-ops is a broken experiment, not a null result.
+    """
+
+    def _disable(brain: Any) -> bool:
+        try:
+            config = getattr(brain, "config", None)
+            if config is None:
+                # A brain built with no config reads every gate as its default, so there is no
+                # attribute to clear. Give it one rather than reporting a disable that did not
+                # happen — the alternative is an arm that silently never turned anything off.
+                from types import SimpleNamespace
+                config = SimpleNamespace()
+                brain.config = config
+            attribute = f"{gate}_enabled"
+            # The field's real default, not an assumed one. A gate that ships OFF is already
+            # disabled, and reporting `True` for it would claim an arm was switched off when it
+            # was never on — precisely the silently-failed ablation this module refuses.
+            default = _gate_default(attribute)
+            if getattr(config, attribute, default) is False:
+                return False
+            setattr(config, attribute, False)
+            return getattr(config, attribute, True) is False
+        except Exception:  # noqa: BLE001 — a gate that cannot be set was not set
+            return False
+
+    return Faculty(name=name, disable=_disable,
+                   note=note or f"njp config {gate}_enabled = False")
+
+
+#: The four ways the fabric is allowed to affect a turn, each its own arm.
+#:
+#: One gate covering all four would answer "does the fabric help?" with a single number over four
+#: independent claims, and the interesting answer is almost certainly that some of them earn their
+#: place and some do not.
+NJP_FABRIC_FACULTIES: Tuple[Faculty, ...] = (
+    gate_faculty("fabric_retrieval", "fabric_retrieval",
+                 "co-activation re-ranks a recall the content-addressed hit left undecided"),
+    gate_faculty("fabric_prior", "fabric_prior",
+                 "the fabric's own claim competes as a seat"),
+    gate_faculty("fabric_strategy", "fabric_strategy",
+                 "unfamiliar ground buys a second strategy rather than choosing one"),
+    gate_faculty("fabric_anomaly", "fabric_anomaly",
+                 "a confident answer on unrecognised ground becomes a question"),
+)
+
+
+def ablate_njp(faculty: Faculty, benchmark: Benchmark,
+               brain_factory: Callable[[], Any], *,
+               alpha: float = 0.05, min_discordant: int = 6) -> AblationResult:
+    """:func:`ablate`, but against a bare :class:`NJPBrain` rather than the whole core.
+
+    Same paired method, same validity guards; only the solver differs. ``ablate``'s solver runs
+    ``core.process``, which builds and drives every kernel organ — minutes per arm. A brain-level
+    arm is the cheap path :mod:`nyxara.eval.intelligence` already uses, and it is the only one
+    that can run eight times in CI.
+    """
+
+    def _solver(brain: Any) -> Solver:
+        def _solve(prompt: str) -> str:
+            try:
+                return str(getattr(brain.think(prompt), "answer", "") or "")
+            except Exception:  # noqa: BLE001 — a crashing turn is a failing turn, not a crash
+                return ""
+        return _solve
+
+    on_brain = brain_factory()
+    t0 = time.monotonic()
+    on_report = benchmark.run(_solver(on_brain))
+    on_wall = time.monotonic() - t0
+
+    off_brain = brain_factory()
+    disabled_ok = bool(faculty.disable(off_brain))
+    t0 = time.monotonic()
+    off_report = benchmark.run(_solver(off_brain))
     off_wall = time.monotonic() - t0
 
     on_by_id, off_by_id = _outcomes(on_report), _outcomes(off_report)

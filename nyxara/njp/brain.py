@@ -52,6 +52,13 @@ from nyxara.njp.truth import Judgement, TruthGauntlet
 
 log = logging.getLogger("nyxara.njp.brain")
 
+#: When the fabric's recognition of a turn counts as "I have not met this", and when an answer
+#: counts as confident. Both floors are needed together: unfamiliar ground is most turns early on
+#: and a confident answer is the ordinary case, and it is the combination that is worth asking
+#: about — sure of herself on ground she does not recognise.
+_ANOMALY_FAMILIARITY = 0.2
+_ANOMALY_CONFIDENCE = 0.7
+
 __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
 
 # What a counterfactual question asks her to *do* to a variable, and by how much.
@@ -1970,8 +1977,22 @@ class NJPBrain:
 
                 if self.memory is not None:
                     try:
+                        # What is firing right now, handed to recall. It was computed one line
+                        # above and thrown away on every turn: the fabric settled, produced its
+                        # fired set, and then recall ran on the raw cue string alone. Two memories
+                        # whose text looks alike but that were met in entirely different states
+                        # are indistinguishable to content addressing, and the thing that tells
+                        # them apart was already in scope.
+                        #
+                        # Gated, because whether it *helps* is a question for the ablation rather
+                        # than for anyone's intuition, and it is the one fabric arm that can
+                        # change an answer rather than only lower a confidence.
+                        fired: Tuple[int, ...] = ()
+                        if self._gate("fabric_retrieval", True):
+                            fired = tuple(int(c) for c in (out.cells or ()))
                         out.recall = self.memory.recall(out.stimulus,
-                                                        k=int(spend["recall_k"]))
+                                                        k=int(spend["recall_k"]),
+                                                        context=fired)
                     except Exception:  # noqa: BLE001
                         out.recall = None
                 return out
@@ -2082,6 +2103,10 @@ class NJPBrain:
                         out.epistemic_confidence, out)
                 else:
                     self._ask_back(out)
+            # Sure of herself on ground the substrate does not recognise. Asked after the
+            # confidence is settled, because both halves of the condition have to be known, and it
+            # produces a question rather than touching the answer.
+            self._wonder_at_anomaly(out)
 
             # 4.5 CONSULT THE CORTEX — the one step that makes a stronger model buy stronger
             # reasoning rather than better sentences. It proposes; the gate below still decides.
@@ -2335,6 +2360,13 @@ class NJPBrain:
                 # three strategies empirical selects cannot answer an intervention.
                 if thought.op is not None and getattr(thought.op, "kind", ""):
                     context["kind_hint"] = thought.op.kind
+                # How unrecognised the substrate found this turn. Gated: whether spending a second
+                # strategy on unfamiliar ground pays for itself is a question for the ablation.
+                # Default OFF, on measurement rather than preference — see `NJPConfig`. Novelty
+                # does not discriminate among the turns that reach here.
+                if self._gate("fabric_strategy", False):
+                    context["novelty"] = float(
+                        getattr(thought.percept, "novelty", 0.0) or 0.0)
                 # Whether there is a closed sum in here at all. A parse result rather than a
                 # keyword, for the same reason the intervention above is: the classifier can
                 # count digits and operators but cannot tell "2+2" from "100 degree at 3pm", and
@@ -2398,12 +2430,17 @@ class NJPBrain:
                 self.levels.remember(
                     f"turn-{self.turns}", thought.answer,
                     level=self._level_for(thought), cue=thought.stimulus,
-                    source=f"turn-{self.turns}", claim=self._claim_of(thought))
+                    source=f"turn-{self.turns}", claim=self._claim_of(thought),
+                    cells=tuple(getattr(thought.percept, "cells", ()) or ()))
                 return
             if self.memory is not None:
                 self.memory.remember(f"turn-{self.turns}", thought.answer,
                                      kind=("conclusion" if thought.verified else "episode"),
-                                     cue=thought.stimulus)
+                                     cue=thought.stimulus,
+                                     # The state she was in when she learned this. Without it
+                                     # stored there is nothing for the recall side to compare a
+                                     # later state against.
+                                     cells=tuple(getattr(thought.percept, "cells", ()) or ()))
         except Exception:  # noqa: BLE001
             pass
 
@@ -2892,7 +2929,9 @@ class NJPBrain:
                     state=str(getattr(claim, "state", "") or "unknown"),
                     support=list(getattr(claim, "triples", None) or [])))
 
-            for name, probability in self.fabric_proposes(thought.stimulus, k=1):
+            seats = (self.fabric_proposes(thought.stimulus, k=1)
+                     if self._gate("fabric_prior", True) else [])
+            for name, probability in seats:
                 accounts.append(Hypothesis(
                     seat="fabric", claim=name, confidence=float(probability),
                     # No provenance and no support, stated rather than implied: the head
@@ -2945,6 +2984,52 @@ class NJPBrain:
             return max(0.0, min(1.0, float(base) * factor))
         except Exception:  # noqa: BLE001 — an unreadable percept discounts nothing
             return max(0.0, min(1.0, float(base)))
+
+    def _wonder_at_anomaly(self, thought: NJPThought) -> bool:
+        """A confident answer on ground the substrate does not recognise becomes a question.
+
+        The fabric's three existing edges all point the same way: they lower a confidence and stop.
+        That is right as far as it goes and it is not learning — nothing follows from the fabric
+        having been surprised, so a turn she answered firmly on a state she has never met leaves
+        no trace that anything was odd about it.
+
+        This is the other direction, and it is deliberately *not* the confidence: an anomaly
+        produces a **question**, which cannot raise a confidence and cannot become an answer. It
+        goes to :mod:`nyxara.njp.curiosity`, which already prices questions by value of
+        information and already refuses to re-raise one that has been answered.
+
+        Both halves are required. Low familiarity alone is most turns early on, and a confident
+        answer alone is the ordinary case; it is the *combination* — sure of herself on ground she
+        does not recognise — that is worth asking about.
+        """
+        if not self._gate("fabric_anomaly", True) or self.curiosity is None:
+            return False
+        try:
+            percept = getattr(thought, "percept", None)
+            anticipated = getattr(percept, "anticipated", None) if percept else None
+            if anticipated is None or bool(getattr(anticipated, "trusted", False)):
+                return False
+            familiarity = float(getattr(anticipated, "familiarity", 1.0) or 0.0)
+            if familiarity >= _ANOMALY_FAMILIARITY or not thought.answer:
+                return False
+            if float(getattr(thought, "epistemic_confidence", 0.0) or 0.0) < _ANOMALY_CONFIDENCE:
+                return False
+
+            from nyxara.njp.curiosity import Gap, Question
+            subject = ""
+            grounding = getattr(percept, "grounding", None)
+            triples = list(getattr(grounding, "triples", None) or [])
+            if triples:
+                subject = str(getattr(triples[0], "subject", "") or "")
+            raised = self.curiosity._raise(Question(
+                text=(f"answered confidently on ground the substrate does not recognise: "
+                      f"{thought.stimulus[:120]}"),
+                gap=Gap.UNKNOWN, subject=subject,
+                uncertainty=max(0.0, 1.0 - familiarity),
+                stakes=0.4, cost=0.2, action="gather"))
+            return raised is not None
+        except Exception:  # noqa: BLE001 — an unaskable anomaly asks nothing
+            return False
 
     def _temper_by_shape(self, base: float, thought: NJPThought) -> float:
         """Discount an answer by how the *form of reasoning* behind it has actually done.
@@ -3275,7 +3360,10 @@ class NJPBrain:
                 out[name] = {"error": "stats failed"}
         if self.memory is not None:
             try:
-                out["memory"] = {"traces": len(self.memory)}
+                # The whole surface, not just the count. `recalls_undecided` and
+                # `recalls_rescored` are what separate "this arm never fires" from "this arm
+                # fires and changes nothing", and those are different findings.
+                out["memory"] = self.memory.stats()
             except Exception:  # noqa: BLE001
                 pass
         return out

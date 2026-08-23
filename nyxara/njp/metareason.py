@@ -58,6 +58,11 @@ __all__ = [
 ]
 
 _ARITHMETIC = set("0123456789+-*/^=%")
+
+#: How unrecognised a turn must be before it is worth spending a second strategy on. High, because
+#: a second opinion is real compute and most turns early in a session look novel to a fabric that
+#: has barely grown.
+_NOVEL_FLOOR = 0.85
 _CAUSAL_WORDS = frozenset({
     "why", "because", "cause", "causes", "caused", "kyun", "kyon", "kyunki", "kyonki",
     "wajah", "reason", "leads", "due", "se", "isliye", "therefore", "hence",
@@ -487,7 +492,14 @@ class MetaReasoner:
             # A second opinion is not free, so it is spent where it changes something: a genuinely
             # mixed problem, or an answer the critic already doubts. Running two strategies on
             # every trivial lookup is how a careful system becomes a slow one.
-            if out.classification.mixed or not out.critique.clean:
+            # Novelty buys deliberation, never an answer. This is the fabric's one route into
+            # strategy, and the obvious version of it — feeding novelty into `choose` — would be
+            # wrong: `choose` returns the strategy whose answer is taken, so a substrate steering
+            # it steers content through a path nothing measures. Spending a *second* strategy on
+            # unfamiliar ground instead costs time and can only lower confidence, because
+            # disagreement lowers it and agreement leaves it alone.
+            unfamiliar = float(ctx.get("novelty", 0.0) or 0.0) >= _NOVEL_FLOOR
+            if out.classification.mixed or not out.critique.clean or unfamiliar:
                 second = self.choose(out.kind, exclude=[strategy.name])
                 if second is not None and second.solve is not None:
                     self.second_opinions += 1

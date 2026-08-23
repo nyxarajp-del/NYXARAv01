@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["Level", "LevelPolicy", "ConsolidationReport", "HierarchicalMemory"]
 
@@ -196,7 +196,8 @@ class HierarchicalMemory:
 
     # ---- write ------------------------------------------------------------ #
     def remember(self, key: str, text: str, *, level: str = Level.EPISODIC,
-                 cue: str = "", source: str = "", claim: str = "") -> Optional[Entry]:
+                 cue: str = "", source: str = "", claim: str = "",
+                 cells: Sequence[int] = ()) -> Optional[Entry]:
         """Store one memory at a level. The level decides how long it lives, not where it is found.
 
         ``claim`` is what this memory *asserts*, where the caller knows it — a canonical
@@ -214,7 +215,11 @@ class HierarchicalMemory:
             policy = self.policies[level]
 
             if self.store is not None:
-                self.store.remember(key, text, kind=level, cue=cue)
+                # The firing state travels with the memory. This is the only path a turn's
+                # memory actually takes when levels are on — the brain's direct `memory.remember`
+                # is the fallback for when they are not — so without it here the substrate's
+                # record of the moment is never stored at all.
+                self.store.remember(key, text, kind=level, cue=cue, cells=cells)
 
             identity = str(claim or "").strip().lower() or _claim_of(text)
             entry = self.entries.get(key)
