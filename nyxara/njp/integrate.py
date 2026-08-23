@@ -79,6 +79,10 @@ __all__ = ["LoopReport", "LearningLoop"]
 _CONSOLIDATE_EVERY = 8
 _DISCOVER_EVERY = 12
 _WONDER_EVERY = 16
+# How often the abstraction library gets a WAKE/SLEEP cycle. Rarest of the cadences: it searches
+# for programs and then tries to compress them, which is the most expensive thing here, and a
+# library does not become worth compressing between one turn and the next.
+_DREAM_EVERY = 32
 # How often she goes after her own strongest causal claim. Slowest of the four, because an attack
 # reads the whole event record and because a belief does not need challenging every turn — but
 # on a *turn* count like the others, since a wall-clock cadence is exactly what left the slow
@@ -127,6 +131,13 @@ class LoopReport:
     # it worked when called by hand.
     strategies_graded: int = 0
     shapes_graded: int = 0
+    #: Reasoning forms promoted into strategies this cycle. `genome.candidates()` had produced
+    #: these for a long time and nothing consumed them.
+    shapes_promoted: int = 0
+    #: What the abstraction library did on its cycle. Zero here and zero because it never ran are
+    #: different findings, and index term R could not tell them apart.
+    programs_solved: int = 0
+    programs_adopted: int = 0
     beliefs_settled: int = 0
     beliefs_retracted: int = 0
     questions_closed: int = 0
@@ -182,6 +193,9 @@ class LoopReport:
                 "deferred": {"opened": self.deferred_opened, "resolved": self.deferred_resolved,
                              "open": self.deferred_open, "corrections": self.corrections},
                 "diagnoses": dict(self.diagnoses), "repaired": self.repaired,
+                "shapes_promoted": self.shapes_promoted,
+                "programs": {"solved": self.programs_solved,
+                             "adopted": self.programs_adopted},
                 "graded": {"strategies": self.strategies_graded,
                            "beliefs_settled": self.beliefs_settled,
                            "beliefs_retracted": self.beliefs_retracted,
@@ -250,6 +264,7 @@ class LearningLoop:
                  discover_every: int = _DISCOVER_EVERY, wonder_every: int = _WONDER_EVERY,
                  attack_every: int = _ATTACK_EVERY,
                  assess_every: int = _ASSESS_EVERY, ledger_every: int = _LEDGER_EVERY,
+                 dream_every: int = _DREAM_EVERY,
                  train: bool = True, defer_capacity: int = 256) -> None:
         self.brain = brain
         self.consolidate_every = max(1, int(consolidate_every))
@@ -258,6 +273,7 @@ class LearningLoop:
         self.attack_every = max(1, int(attack_every))
         self.assess_every = max(1, int(assess_every))
         self.ledger_every = max(1, int(ledger_every))
+        self.dream_every = max(1, int(dream_every))
         self.train_enabled = bool(train)
         self.defer_capacity = max(8, int(defer_capacity))
 
@@ -310,12 +326,17 @@ class LearningLoop:
                 return
             from nyxara.njp.predict import ErrorKind
 
-            predictor.register_repair(ErrorKind.PERCEPTION, self._repair_perception)
-            predictor.register_repair(ErrorKind.GROUNDING, self._repair_grounding)
-            predictor.register_repair(ErrorKind.MEMORY, self._repair_memory)
-            predictor.register_repair(ErrorKind.RELATION, self._repair_relation)
-            predictor.register_repair(ErrorKind.WORLD_MODEL, self._repair_world)
-            predictor.register_repair(ErrorKind.REASONING, self._repair_reasoning)
+            # Registered as the owner. The brain registers the same kinds as fallbacks in
+            # `_build_predictor`, for the configuration where this loop is gated off; naming the
+            # owner is what makes the precedence a decision rather than a consequence of which
+            # object was constructed last.
+            for kind, repair in ((ErrorKind.PERCEPTION, self._repair_perception),
+                                 (ErrorKind.GROUNDING, self._repair_grounding),
+                                 (ErrorKind.MEMORY, self._repair_memory),
+                                 (ErrorKind.RELATION, self._repair_relation),
+                                 (ErrorKind.WORLD_MODEL, self._repair_world),
+                                 (ErrorKind.REASONING, self._repair_reasoning)):
+                predictor.register_repair(kind, repair, owner="loop")
         except Exception:  # noqa: BLE001 — an unrepairable brain still runs, it just learns less
             pass
 
@@ -1153,6 +1174,20 @@ class LearningLoop:
         if turn % self.discover_every == 0:
             self._run_experiments(rep)
 
+        if turn % self.consolidate_every == 0:
+            # A reasoning form she keeps re-deriving becomes a strategy she can choose. On the
+            # consolidation cadence rather than every turn, because `candidates()` is a scan over
+            # every shape and a form does not become worth naming between one turn and the next.
+            try:
+                promote = getattr(self.brain, "_promote_shapes", None)
+                if promote is not None:
+                    rep.shapes_promoted = int(promote())
+            except Exception:  # noqa: BLE001
+                pass
+
+        if turn % self.dream_every == 0:
+            self._compress_programs(rep)
+
         if turn % self.wonder_every == 0:
             try:
                 curiosity = getattr(self.brain, "curiosity", None)
@@ -1307,6 +1342,32 @@ class LearningLoop:
         except Exception:  # noqa: BLE001
             return effect
 
+    def _compress_programs(self, rep: LoopReport) -> None:
+        """Give the abstraction library a WAKE/SLEEP cycle.
+
+        `nyxara.growth.noesis` is complete — a typed program search, and a SLEEP pass that adopts
+        an abstraction only on a strict held-out description-length win — and njp never called
+        `step()`. `brain._build_noesis`'s own docstring says so: *"Nothing here drives it."*
+
+        The visible consequence is in `njp/index.py`, whose term **R** reads
+        `noesis.report()["compression_gain"]`. A report from an engine that has never run reports
+        a gain of zero, so one of the eight terms in her own capability index was structurally
+        zero and looked like a measurement.
+
+        This is not "reasoning traces becoming programs" and must not be described as such — that
+        bridge is `_promote_shapes`, and the two are different mechanisms. This is the compression
+        engine finally being run, on its own synthetic corpus.
+        """
+        try:
+            engine = getattr(self.brain, "noesis", None)
+            if engine is None:
+                return
+            report = engine.step()
+            rep.programs_solved = int(getattr(report, "solved", 0) or 0)
+            rep.programs_adopted = int(getattr(report, "abstractions_adopted", 0) or 0)
+        except Exception:  # noqa: BLE001 — a failed compression leaves the library as it was
+            return
+
     def _run_experiments(self, rep: LoopReport) -> None:
         """Settle a designed experiment against the record, and let the losing hypothesis die.
 
@@ -1390,7 +1451,7 @@ class LearningLoop:
             "deferred_open": len(self._deferred),
             "cadence": {"consolidate": self.consolidate_every,
                         "discover": self.discover_every,
-                        "wonder": self.wonder_every},
+                        "wonder": self.wonder_every, "dream": self.dream_every},
             "training": self.train_enabled,
             "last": self.last.to_dict() if self.last is not None else None,
         }

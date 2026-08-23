@@ -2362,6 +2362,34 @@ class NJPConfig(BaseModel):
     ledger_enabled: bool = True                  # the growth record
     evolve_enabled: bool = True                  # self-rewriting
     pulse_enabled: bool = True                   # the continuous beat
+    compiler_enabled: bool = True                # language → one typed executable operation
+
+    # ---- the four ways the fabric is allowed to affect a turn ---- #
+    #
+    # Separate gates rather than one, because they are four different claims and only an ablation
+    # can say which of them earns its place. Until this the fabric could only ever *lower*
+    # confidence — three call sites, all one-way — so no answer's content depended on it and
+    # "is the fabric useful?" had no way of being asked. Nulling `brain.fabric` cannot ask it
+    # either: `perceive` calls it unguarded, so a null lands in a blanket `except` and produces a
+    # broken experiment that reads exactly like a real null result.
+    fabric_prior_enabled: bool = True            # its claim competes as a seat
+    fabric_retrieval_enabled: bool = True        # co-activation re-ranks an undecided recall
+    fabric_anomaly_enabled: bool = True          # a confident answer on unrecognised ground asks
+    #: Off by default, and the reason is a measurement rather than a preference. Novelty is high
+    #: on *statements* (1.00, 0.99, 0.97) and sits near 0.50 on the questions that actually reach
+    #: strategy selection — a question names things she has already met, so it looks familiar
+    #: whatever else is true of it. Any floor that fires on those fires on all of them, which is
+    #: "always spend a second strategy" rather than a signal. Measured over a live session:
+    #: `second_opinions` was 0. Turning it on without a floor that discriminates would buy compute
+    #: and nothing else, so it stays off until a battery says otherwise.
+    fabric_strategy_enabled: bool = False        # unfamiliar ground buys a second opinion
+
+    #: Giving up a causal model that keeps being surprised. OFF by default, and not because the
+    #: trial is unsafe — it is archived, judged on the held-out fold and reverted on a tie — but
+    #: because a wrong death criterion destroys working structure, and
+    #: `concepts.restructure` records a measured instance of exactly that failure. Reversible is a
+    #: reason to allow switching it on, not a reason to switch it on for everyone.
+    model_death_enabled: bool = False
 
     holo_dim: int = Field(default=4096, ge=64)
     holo_capacity: int = Field(default=20000, ge=16)

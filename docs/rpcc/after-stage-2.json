@@ -1,0 +1,254 @@
+{
+  "total": 25,
+  "passed": 16,
+  "failed": 9,
+  "by_category": {
+    "causal": {
+      "passed": 4,
+      "total": 5
+    },
+    "paraphrased": {
+      "passed": 1,
+      "total": 6
+    },
+    "counterfactual": {
+      "passed": 5,
+      "total": 5
+    },
+    "unknown": {
+      "passed": 4,
+      "total": 5
+    },
+    "novel": {
+      "passed": 2,
+      "total": 4
+    }
+  },
+  "cases": [
+    {
+      "category": "causal",
+      "probe": "growth kaise badhti hai",
+      "expect": "contains",
+      "passed": false,
+      "answer": "",
+      "epistemic": "conflicting",
+      "error": ""
+    },
+    {
+      "category": "causal",
+      "probe": "paudhe ko kya chahiye",
+      "expect": "contains",
+      "passed": true,
+      "answer": "paani",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "causal",
+      "probe": "paani se kya hota hai",
+      "expect": "answers",
+      "passed": true,
+      "answer": "growth",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "causal",
+      "probe": "quon kaise badhta hai",
+      "expect": "contains",
+      "passed": true,
+      "answer": "blarf",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "causal",
+      "probe": "blarf se kya hota hai",
+      "expect": "answers",
+      "passed": true,
+      "answer": "quon",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "paraphrased",
+      "probe": "growth kaise badhti hai",
+      "expect": "contains",
+      "passed": false,
+      "answer": "",
+      "epistemic": "conflicting",
+      "error": ""
+    },
+    {
+      "category": "paraphrased",
+      "probe": "growth kis se badhti hai",
+      "expect": "contains",
+      "passed": true,
+      "answer": "noted: growth kis se grows  \u2014 noted: light causes growth \u2014 noted: paani causes growth \u2014 noted: paudhe requires paani",
+      "epistemic": "known",
+      "error": ""
+    },
+    {
+      "category": "paraphrased",
+      "probe": "kya cheez growth badhati hai",
+      "expect": "contains",
+      "passed": false,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    },
+    {
+      "category": "paraphrased",
+      "probe": "what makes growth increase",
+      "expect": "contains",
+      "passed": false,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    },
+    {
+      "category": "paraphrased",
+      "probe": "growth badhane ke liye kya chahiye",
+      "expect": "contains",
+      "passed": false,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    },
+    {
+      "category": "paraphrased",
+      "probe": "paudhe ki growth ka karan kya hai",
+      "expect": "contains",
+      "passed": false,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    },
+    {
+      "category": "counterfactual",
+      "probe": "agar paani aadha kar doon to kya hoga",
+      "expect": "answers",
+      "passed": true,
+      "answer": "paani lower predicts growth lower (confidence 0.35) \u2014 direction only \u2014 no arrow on this path has ever been measured",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "counterfactual",
+      "probe": "agar paani aadha ho to kya hoga",
+      "expect": "answers",
+      "passed": true,
+      "answer": "paani lower predicts growth lower (confidence 0.35) \u2014 direction only \u2014 no arrow on this path has ever been measured",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "counterfactual",
+      "probe": "what if the water is halved",
+      "expect": "answers",
+      "passed": true,
+      "answer": "water lower predicts growth lower (confidence 0.35) \u2014 direction only \u2014 no arrow on this path has ever been measured",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "counterfactual",
+      "probe": "agar paani band kar doon to kya hoga",
+      "expect": "answers",
+      "passed": true,
+      "answer": "paani lower predicts growth lower (confidence 0.35) \u2014 direction only \u2014 no arrow on this path has ever been measured",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "counterfactual",
+      "probe": "agar blarf aadha kar doon to kya hoga",
+      "expect": "answers",
+      "passed": true,
+      "answer": "blarf lower predicts quon lower; drine lower (confidence 0.35) \u2014 direction only \u2014 no arrow on this path has ever been measured",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "unknown",
+      "probe": "mangal grah par kitne log hain",
+      "expect": "abstains",
+      "passed": true,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    },
+    {
+      "category": "unknown",
+      "probe": "paudhe ka rang kya hai",
+      "expect": "abstains",
+      "passed": true,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    },
+    {
+      "category": "unknown",
+      "probe": "drine ka wazan kitna hai",
+      "expect": "abstains",
+      "passed": false,
+      "answer": "blarf",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "unknown",
+      "probe": "growth kaise badhti hai",
+      "expect": "abstains",
+      "passed": true,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    },
+    {
+      "category": "unknown",
+      "probe": "agar zephyr aadha kar doon to kya hoga",
+      "expect": "abstains",
+      "passed": true,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    },
+    {
+      "category": "novel",
+      "probe": "drine kaise badhta hai",
+      "expect": "contains",
+      "passed": true,
+      "answer": "quon",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "novel",
+      "probe": "flump kaise badhta hai",
+      "expect": "contains",
+      "passed": true,
+      "answer": "drine",
+      "epistemic": "believed",
+      "error": ""
+    },
+    {
+      "category": "novel",
+      "probe": "glorp se kya hota hai",
+      "expect": "answers",
+      "passed": false,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    },
+    {
+      "category": "novel",
+      "probe": "what does the widget drive",
+      "expect": "answers",
+      "passed": false,
+      "answer": "",
+      "epistemic": "unknown",
+      "error": ""
+    }
+  ]
+}

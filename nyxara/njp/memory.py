@@ -37,6 +37,13 @@ from nyxara.memory.holographic_field import HolographicMemoryField, HoloRecall
 
 __all__ = ["Trace", "Recall", "HoloMemory"]
 
+#: How much of the firing state two moments must share before one is allowed to stand in for the
+#: other. Jaccard, so it is symmetric and scale-free. Set high deliberately: the cost of being
+#: wrong here is an abstention turned into a confident wrong answer, which this module has
+#: measured happening before, and the cost of being too strict is only that a recall stays
+#: undecided — which it already was.
+_COACTIVATION_FLOOR = 0.5
+
 
 @dataclass
 class Trace:
@@ -55,6 +62,14 @@ class Trace:
     written_tick: int = 0
     recalls: int = 0
     links: Dict[str, float] = field(default_factory=dict)   # other key → association weight
+    #: Which cells were firing in the fabric when this was written.
+    #:
+    #: The substrate's own record of the moment, and until now it was computed every turn and
+    #: thrown away: `perceive` settles the fabric, gets the fired set, and then calls `recall`
+    #: with the raw cue string alone. Two memories whose *text* looks alike but that were learned
+    #: in completely different states are indistinguishable to content-addressed recall, and the
+    #: thing that can tell them apart was sitting one local variable away.
+    cells: Tuple[int, ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
         return {"key": self.key, "text": self.text, "kind": self.kind, "cue": self.cue,
@@ -71,6 +86,11 @@ class Recall:
     decided: bool = False            # False means "I am not confident" — say so, don't guess
     associated: List[Tuple[str, float]] = field(default_factory=list)
     considered: int = 0
+    #: Whether co-activation replaced an undecided content hit, and what it replaced. Recorded
+    #: rather than silent: a recall that came from the substrate rather than from the text is a
+    #: different kind of claim, and the ablation needs to be able to count them.
+    rescored: bool = False
+    hit_key_before: str = ""
 
     @property
     def text(self) -> str:
@@ -104,6 +124,10 @@ class HoloMemory:
         #: entering the similarity space (see `recall_cue`). Whitespace- and case-normalised.
         self._by_cue: Dict[str, str] = {}
         self.spilled: List[Tuple[str, str]] = []   # evicted (key, text) — persist these elsewhere
+        #: Recalls the content-addressed field could not decide, and how many of those the
+        #: firing state settled. The first is the opportunity; the second is the use made of it.
+        self.recalls_undecided = 0
+        self.recalls_rescored = 0
         self.ticks = 0
         self._recent: List[str] = []               # keys written/recalled in the current moment
 
@@ -115,7 +139,8 @@ class HoloMemory:
 
     # ---- write ----------------------------------------------------------- #
     def remember(self, key: str, text: str, *, kind: str = "episode", cue: str = "",
-                 link_to: Sequence[str] = ()) -> Optional[Trace]:
+                 link_to: Sequence[str] = (),
+                 cells: Sequence[int] = ()) -> Optional[Trace]:
         """Store ``text`` under ``key`` and link it to whatever else is live in this moment.
 
         Only ``text`` is encoded into the holographic field. ``cue`` (the question that produced
@@ -133,13 +158,17 @@ class HoloMemory:
             normalised_cue = " ".join(str(cue or "").split()).strip().lower()
             if normalised_cue:
                 self._by_cue[normalised_cue] = key
+            fired = tuple(int(c) for c in (cells or ()))
             if trace is None:
                 trace = Trace(key=key, text=text, kind=kind, cue=str(cue or ""),
-                              written_tick=self.ticks)
+                              written_tick=self.ticks, cells=fired)
                 self.traces[key] = trace
             else:
                 trace.text, trace.kind, trace.written_tick = text, kind, self.ticks
                 trace.cue = str(cue or trace.cue)
+                # Re-remembering under a different state should not erase the first one's record,
+                # but it should update it: this is the state she most recently met it in.
+                trace.cells = fired or trace.cells
 
             partners = list(link_to) + [k for k in self._recent if k != key]
             for other in partners:
@@ -185,10 +214,23 @@ class HoloMemory:
         del self.spilled[:-256]
 
     # ---- read ------------------------------------------------------------ #
-    def recall(self, cue: str, *, k: int = 5) -> Recall:
+    def recall(self, cue: str, *, k: int = 5,
+               context: Sequence[int] = ()) -> Recall:
         """Content-addressed recall: what does this cue bring back, and what hangs off it?
 
         No token window is consulted — the cue is matched against everything stored.
+
+        ``context`` is the set of cells firing right now. It is consulted **only where the
+        content-addressed hit came back undecided**, and that restriction is the whole design.
+        A clean content hit is the strongest evidence there is and must not be second-guessed by
+        an association; an undecided one is the field saying it cannot separate the candidates,
+        and that is exactly when what she was thinking about at the time is worth asking.
+
+        The failure this guard exists to prevent is recorded a few methods down, in
+        :meth:`recall_cue`: a fuzzy path that answered where it should have abstained *"turned
+        three honest abstentions into three confident wrong answers and got none right"*. A
+        re-rank that fires on decided hits is that same failure with a different similarity
+        measure.
         """
         out = Recall(considered=len(self.traces))
         try:
@@ -199,6 +241,15 @@ class HoloMemory:
             trace = self.traces.get(hit.key) if hit.key else None
             out.score = float(hit.score)
             out.decided = bool(hit.decided)
+            if not out.decided:
+                self.recalls_undecided += 1
+            if not out.decided and context:
+                better = self._by_coactivation(context, exclude=hit.key)
+                if better is not None:
+                    self.recalls_rescored += 1
+                    trace = better
+                    out.rescored = True
+                    out.hit_key_before = str(hit.key or "")
             if trace is None:
                 return out
             out.hit = trace
@@ -209,6 +260,38 @@ class HoloMemory:
             return out
         except Exception:  # noqa: BLE001 — recall degrades to "nothing came back", never crashes
             return out
+
+    def _by_coactivation(self, context: Sequence[int],
+                         *, exclude: str = "") -> Optional[Trace]:
+        """The stored trace whose firing state most resembles the present one.
+
+        Jaccard over cell sets, which is the right measure here because both sides are sets and
+        neither's size means anything on its own: a trace written in a rich state should not win
+        every comparison for having more cells in it.
+
+        A floor, and it is doing real work. Two states that barely overlap are two different
+        moments, and returning the best of a bad field is how an association becomes a
+        fabrication. Below the floor this returns ``None`` and the caller keeps the undecided
+        content hit — which is an honest non-answer rather than a confident wrong one.
+        """
+        try:
+            now = {int(c) for c in context}
+            if not now:
+                return None
+            best, best_score = None, 0.0
+            for trace in self.traces.values():
+                if not trace.cells or trace.key == exclude:
+                    continue
+                then = set(trace.cells)
+                overlap = len(now & then)
+                if not overlap:
+                    continue
+                score = overlap / float(len(now | then))
+                if score > best_score:
+                    best, best_score = trace, score
+            return best if best_score >= _COACTIVATION_FLOOR else None
+        except Exception:  # noqa: BLE001 — an unusable context re-ranks nothing
+            return None
 
     def recall_key(self, key: str) -> Optional[Trace]:
         """Exact lookup by key — no similarity involved."""
@@ -331,7 +414,14 @@ class HoloMemory:
             links = sum(len(t.links) for t in self.traces.values())
             return {"traces": len(self.traces), "capacity": self.capacity, "dim": self.dim,
                     "links": links, "spilled": len(self.spilled), "ticks": self.ticks,
-                    "mean_links": round(links / len(self.traces), 3) if self.traces else 0.0}
+                    "mean_links": round(links / len(self.traces), 3) if self.traces else 0.0,
+                    # How often the substrate was consulted and how often it changed the answer.
+                    # Reported because an arm that never fires and an arm that fires and does
+                    # nothing are different findings, and without these two numbers they read
+                    # identically from outside.
+                    "recalls_undecided": self.recalls_undecided,
+                    "recalls_rescored": self.recalls_rescored,
+                    "traces_with_state": sum(1 for t in self.traces.values() if t.cells)}
         except Exception:  # noqa: BLE001
             return {}
 

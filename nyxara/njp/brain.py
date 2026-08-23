@@ -52,6 +52,18 @@ from nyxara.njp.truth import Judgement, TruthGauntlet
 
 log = logging.getLogger("nyxara.njp.brain")
 
+#: When the fabric's recognition of a turn counts as "I have not met this", and when an answer
+#: counts as confident. Both floors are needed together: unfamiliar ground is most turns early on
+#: and a confident answer is the ordinary case, and it is the combination that is worth asking
+#: about — sure of herself on ground she does not recognise.
+_ANOMALY_FAMILIARITY = 0.2
+_ANOMALY_CONFIDENCE = 0.7
+
+#: What a claim may still be worth once the substrate names a different filler for its slot. A cap
+#: rather than a retraction: the fabric associates and is measured at MRR 0.238, so it may make her
+#: less sure and may never take a grounded answer away.
+_SUBSTRATE_CEILING = 0.5
+
 __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
 
 # What a counterfactual question asks her to *do* to a variable, and by how much.
@@ -200,6 +212,19 @@ class NJPThought:
     # it. Carried so a reply that reached for something irrelevant is visible from outside rather
     # than having to be inferred from the reply itself.
     act: Any = None
+    #: This turn compiled into one executable operation — a ``njp.compile.CognitiveOp``. The
+    #: three readings of a turn (intent, speech act, pattern match) meet here and nowhere else;
+    #: before it they never met at all, and the one that could reach the causal engine was the
+    #: one that knew least.
+    op: Any = None
+    #: Set when the symbolic and neural seats named different fillers for one slot — a
+    #: ``router.DisagreementKind``. ``None`` means they agreed, or only one of them spoke, and
+    #: those are deliberately the same thing here: neither is a clash.
+    substrate: Any = None
+    #: The retirement trial run this turn, where the gate is on — a ``field.Trial``. ``None``
+    #: means the gate is off or the slow count was not due, and those are both "nothing was
+    #: proposed" rather than "a proposal was refused".
+    retirement: Any = None
     relevance: List[Any] = dc_field(default_factory=list)
     # The meta-reasoner's own record of how this answer was reached, kept so that when reality
     # grades the answer later the credit can reach the strategy that actually produced it.
@@ -339,6 +364,9 @@ class NJPBrain:
         # an experiment designer that measures information gain; and a belief ledger where every
         # claim carries its own case. Built before `loop` and `field` because both read them.
         self.genesis = self._build_concepts(c)
+        # The one place the three readings of a turn meet. Before `universe`, because the
+        # counterfactual context is compiled through it and the universe is what executes it.
+        self.compiler = self._build_compiler(c)
         self.universe = self._build_universe(c)
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
@@ -673,16 +701,189 @@ class NJPBrain:
         try:
             from nyxara.njp.predict import ErrorKind, PredictionEngine
             engine = PredictionEngine(self)
-            engine.register_repair(ErrorKind.GROUNDING, self._repair_grounding)
-            engine.register_repair(ErrorKind.WORLD_MODEL, self._repair_world)
-            engine.register_repair(ErrorKind.MEMORY, self._repair_memory)
-            engine.register_repair(ErrorKind.RELATION, self._repair_relation)
-            engine.register_repair(ErrorKind.REASONING, self._repair_reasoning)
+            # Registered as fallbacks. `LearningLoop._install_repairs` owns these kinds whenever
+            # the loop is on, and these are what remains when it is off — which is a supported
+            # configuration and was, until this, an undocumented behaviour difference decided by
+            # construction order.
+            for kind, repair in ((ErrorKind.GROUNDING, self._repair_grounding),
+                                 (ErrorKind.WORLD_MODEL, self._repair_world),
+                                 (ErrorKind.MEMORY, self._repair_memory),
+                                 (ErrorKind.RELATION, self._repair_relation),
+                                 (ErrorKind.REASONING, self._repair_reasoning)):
+                engine.register_repair(kind, repair, owner="brain", default=True)
+
+            # The plan did what it predicted would work and it did not work. The action it took is
+            # the thing that was wrong, and `agency._credit` moves exactly that action's record —
+            # one arm, not the model. This kind had no repair at all: it was diagnosed, counted,
+            # and dropped.
+            engine.register_repair(ErrorKind.PLANNING, self._repair_planning, owner="brain")
+
+            # And the one that honestly has no organ. The content was right and the rendering
+            # lost it; rendering belongs to `njp.voice`, which has a faithfulness *check* and no
+            # learning surface of any kind — no counters, nothing that adapts. Inventing a repair
+            # to fill the row would be worse than saying so.
+            engine.mark_unrepairable(
+                ErrorKind.LANGUAGE,
+                "rendering is njp.voice's, and it has a faithfulness check but nothing that learns")
             return engine
         except Exception:  # noqa: BLE001 — she still learns per-organ, just without the diagnosis
             return None
 
+    def _slot_claims(self, thought: NJPThought) -> Tuple[str, str, Dict[str, str]]:
+        """What each seat says fills this turn's ``(subject, predicate)`` slot.
+
+        The one place a word and a sentence are commensurable, and the reason the seats could
+        never be compared before. ``fabric_proposes`` returns a bare concept *name*;
+        ``grounding.Answer`` is a clause; the comparison ran ``_norm`` over both, so AGREE was
+        effectively unreachable and every pairing landed in UNCLASSIFIED. A channel that always
+        disagrees carries exactly as little information as one that always agrees.
+
+        The slot is borrowed from what :meth:`nyxara.njp.integrate.LearningLoop._open_deferred`
+        already keys a deferred question on, rather than parsed a second time here.
+        """
+        empty: Tuple[str, str, Dict[str, str]] = ("", "", {})
+        try:
+            if self.grounder is None:
+                return empty
+            reader = getattr(self.grounder, "_read_question", None)
+            if reader is None:
+                return empty
+            subject, predicate = reader(str(thought.stimulus or "").lower())
+            if not subject or not predicate:
+                return empty
+
+            fillers: Dict[str, str] = {}
+            said = str(thought.answer or "").strip()
+            if said:
+                # The last token of a short answer is the filler; a long one is a sentence rather
+                # than a slot claim and is left out instead of being guessed at.
+                words = said.split()
+                if len(words) <= 3:
+                    fillers["njp"] = words[-1].strip(".,;:")
+            if self._gate("fabric_prior", True):
+                for name, _score in self.fabric_proposes(thought.stimulus, k=1):
+                    if name:
+                        fillers["fabric"] = str(name)
+            return subject, predicate, fillers
+        except Exception:  # noqa: BLE001 — an unreadable slot is simply not compared
+            return empty
+
+    def _substrate_disagreement(self, thought: NJPThought) -> Optional[str]:
+        """Compare the seats on one slot, and open a question where they differ.
+
+        Two invariants, and they are the Master's own point cutting both ways:
+
+        * **Agreement raises nothing.** Two seats saying the same thing is mostly evidence about
+          their shared inputs. :meth:`~nyxara.njp.grounding.Provenance.weakest` is already the
+          precedent — a composition is only as sourced as its weakest part.
+        * **Disagreement never refutes.** It lowers confidence and opens an experiment. The
+          fabric associates; it does not derive, and it is measured at MRR 0.238. A channel that
+          wrong must not be able to retract a grounded claim.
+        """
+        try:
+            subject, predicate, fillers = self._slot_claims(thought)
+            if len(set(fillers.values())) < 2:
+                return None            # agreement, or only one seat spoke. Neither is a clash.
+            if self.epistemic is not None:
+                rivals = self.epistemic.rivals_for_slot(subject, predicate, fillers)
+                if rivals:
+                    self.epistemic.compile(thought.stimulus, rivals)
+            thought.epistemic_confidence = min(
+                float(thought.epistemic_confidence or 0.0), _SUBSTRATE_CEILING)
+            from nyxara.njp.router import DisagreementKind
+            return DisagreementKind.SUBSTRATE
+        except Exception:  # noqa: BLE001
+            return None
+
+    # ---- promoting a reasoning form into a strategy ------------------------ #
+    def _shape_strategy(self, shape: Tuple[str, ...]) -> Any:
+        """Bind one reasoning form into something :mod:`nyxara.njp.metareason` can choose.
+
+        The callable is the walk with the predicate sequence *pinned*, which is the whole content
+        of naming a shape: the search that found this chain the first forty times does not have to
+        run the forty-first. Everything else about it is an ordinary arm — it is scored by the
+        same bandit, on the same outcomes, and a promoted shape that stops working loses its
+        record like any other.
+        """
+        def solve(problem: str, ctx: Dict[str, Any]) -> Any:
+            try:
+                if self.learner is None:
+                    return None
+                subject = str(ctx.get("subject") or "").strip()
+                if not subject and self.grounder is not None:
+                    reader = getattr(self.grounder, "_read_question", None)
+                    if reader is not None:
+                        subject = str(reader(str(problem or "").lower())[0] or "")
+                if not subject:
+                    return None
+                derived = self.learner.walk_shape(subject, shape)
+                return derived.answer or None if derived.ok else None
+            except Exception:  # noqa: BLE001
+                return None
+        return solve
+
+    def _promote_shapes(self) -> int:
+        """Register every reasoning form the genome says is worth naming. Returns how many are new.
+
+        :meth:`~nyxara.njp.genome.ReasoningGenome.candidates` has computed this for a long time —
+        enough real uses to be a pattern, a success rate that says following it is a good idea, and
+        a positive MDL saving so naming it costs less than re-deriving it — and had no consumer
+        anywhere. A shape she had re-derived forty times appeared in a stats dict and was
+        re-derived a forty-first.
+
+        ``liabilities()`` is never promoted, and that is not the same as merely not being a
+        candidate: a form that recurs constantly and is usually *wrong* would, if named, teach her
+        to make the same mistake faster.
+        """
+        if self.genome is None or self.metareason is None:
+            return 0
+        added = 0
+        try:
+            from nyxara.njp.metareason import ProblemKind
+            liabilities = {tuple(s.shape) for s in self.genome.liabilities()}
+            for candidate in self.genome.candidates():
+                shape = tuple(candidate.shape)
+                if not shape or shape in liabilities:
+                    continue
+                name = "shape:" + ">".join(shape)
+                if name in self.metareason.strategies:
+                    continue
+                self.metareason.register(
+                    name, (ProblemKind.FACTUAL, ProblemKind.CAUSAL),
+                    self._shape_strategy(shape),
+                    # Its own measured success rate, not a number anyone picked. A shape promoted
+                    # on a strong record starts believed to that degree and no further.
+                    prior=float(candidate.success if candidate.success is not None else 0.5))
+                added += 1
+        except Exception:  # noqa: BLE001 — a failed promotion leaves the registry as it was
+            return added
+        return added
+
     # ---- the repairs, one per error kind ---------------------------------- #
+    def _repair_planning(self, outcome: Any) -> bool:
+        """A plan reached the wrong state: charge the action it took, and only that action.
+
+        `ActionValue` is a tried/worked pair per action, and `agency._credit` is the one call that
+        moves it. That makes this the same shape of surgery as `_repair_relation` — one arm of one
+        organ, chosen by what the failure names — rather than a scalar fed back into everything,
+        which is the generic repair the whole error taxonomy exists to avoid.
+
+        An outcome that does not name an action is not repaired. Guessing which action to blame
+        would train against a plan she may never have run.
+        """
+        try:
+            agent = getattr(self, "agent", None)
+            if agent is None:
+                return False
+            context = getattr(outcome, "context", None) or {}
+            action = str(context.get("action") or "").strip()
+            if not action:
+                return False
+            agent._credit(action, worked=False)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def _repair_grounding(self, outcome: Any) -> bool:
         """A sentence that should have grounded and did not: try again with the fluent surface.
 
@@ -913,14 +1114,37 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — without it she has facts and no kinds
             return None
 
+    def _build_compiler(self, c: Any) -> Any:
+        """Language into a typed operation. See :mod:`nyxara.njp.compile`."""
+        if not self._gate("compiler", True):
+            return None
+        try:
+            from nyxara.njp.compile import ThoughtCompiler
+            return ThoughtCompiler()
+        except Exception:  # noqa: BLE001 — without it interventions simply are not compiled
+            return None
+
     def _build_universe(self, c: Any) -> Any:
         """The internal simulation universe. Takes the world model as its causal skeleton."""
         if not self._gate("universe", True):
             return None
         try:
             from nyxara.njp.universe import InternalUniverse
-            return InternalUniverse(world=self.world,
-                                    max_depth=self._cfg("universe_depth", 6))
+            universe = InternalUniverse(world=self.world,
+                                        max_depth=self._cfg("universe_depth", 6))
+            # Import the skeleton the world model already holds, rather than only holding a
+            # reference to it. `InternalUniverse(world=...)` uses the world for `_permitted` —
+            # which arrows *may* be fitted — and nothing else, so a brain-built universe knew
+            # every stated law was permissible and had not declared a single one. `sync_from_world`
+            # is the call that turns "this arrow is allowed" into "this arrow exists, and runs
+            # this way", and the only two places it was called from were the field loop and a
+            # demo. A stated law with no quantities attached is exactly what a text corpus gives
+            # her, and until this it reached the simulator as nothing at all.
+            try:
+                universe.sync_from_world()
+            except Exception:  # noqa: BLE001 — an empty skeleton is not a broken universe
+                pass
+            return universe
         except Exception:  # noqa: BLE001 — without it she can remember but not imagine
             return None
 
@@ -1507,17 +1731,45 @@ class NJPBrain:
             if not variable or self.universe is None:
                 return None
             value = float(ctx.get("value", 0.0))
-            out = self.universe.what_if(variable, value)
+            direction = int(ctx.get("direction", 0) or 0)
+            out = self.universe.intervene({variable: value},
+                                          stated_direction={variable: direction})
             if not out.answerable:
                 return None
-            effects = [d for d in out.changed() if d.variable != variable]
+            effects = [d for d in out.deltas
+                       if d.variable != variable
+                       and (d.qualitative or (d.change is not None and abs(d.change) > 1e-6))]
             if not effects:
                 return None
+
             was = out.factual.get(variable)
-            done = (f"{variable} {float(was):g} → {value:g}" if was is not None
-                    else f"{variable} = {value:g}")
-            entails = "; ".join(f"{d.variable} {d.before:g} → {d.after:g}" for d in effects[:3])
-            return f"{done} predicts {entails} (confidence {out.confidence:.2f})"
+            if was is not None:
+                done = f"{variable} {float(was):g} → {value:g}"
+            elif direction:
+                # No quantity was ever observed for this variable, so there is no "6 → 3" to
+                # state. The sentence still said which way, and saying that is not the same as
+                # inventing a number for it.
+                done = f"{variable} {'lower' if direction < 0 else 'higher'}"
+            else:
+                done = f"{variable} = {value:g}"
+
+            said: List[str] = []
+            for delta in effects[:3]:
+                if delta.qualitative or delta.after is None or delta.before is None:
+                    # Direction only. Rendered as a direction, never as a number she does not
+                    # have — the old rendering formatted `before`/`after` unconditionally and
+                    # raised on exactly this case, so a qualitative answer became no answer.
+                    if delta.direction > 0:
+                        said.append(f"{delta.variable} higher")
+                    elif delta.direction < 0:
+                        said.append(f"{delta.variable} lower")
+                    else:
+                        said.append(f"{delta.variable} changes, direction unknown")
+                else:
+                    said.append(f"{delta.variable} {delta.before:g} → {delta.after:g}")
+            entails = "; ".join(said)
+            note = f" — {out.reason}" if out.reason else ""
+            return f"{done} predicts {entails} (confidence {out.confidence:.2f}){note}"
         except Exception:  # noqa: BLE001
             return None
 
@@ -1537,46 +1789,55 @@ class NJPBrain:
             for variable in list(getattr(self.universe, "state", None) or {}):
                 if variable == want or variable.rsplit(".", 1)[-1] == want:
                     return variable
+            # A variable she has an *arrow* for but has never put a number to. Measured: over a
+            # session where every stated law reached the skeleton, `state` was `{}` and stayed
+            # `{}`, because it is filled only from concepts carrying numbers and a text corpus
+            # states laws without quantities. Resolving against observed values alone therefore
+            # rejected every variable she actually knew about, and "paani" — sitting in three
+            # relations — came back unresolvable.
+            #
+            # Second, and only second: a measured variable is the better answer whenever there is
+            # one, because it can be intervened on quantitatively.
+            for (cause, effect) in list(getattr(self.universe, "relations", None) or {}):
+                for variable in (cause, effect):
+                    if variable == want or variable.rsplit(".", 1)[-1] == want:
+                        return variable
         except Exception:  # noqa: BLE001 — an unresolvable name simply is not simulated
             return ""
         return ""
 
-    def _counterfactual_context(self, question: str) -> Dict[str, Any]:
-        """The intervention a question asks for, as a variable and the value to set it to.
+    def _counterfactual_context(self, question: str, *, intent: Any = None,
+                                act: Any = None) -> Dict[str, Any]:
+        """The intervention a question asks for, compiled rather than pattern-matched.
 
-        Empty where the question names no intervention, names a variable she has never observed,
-        or names an intervention whose size it does not state — each of which is a reason to
-        decline rather than to simulate something adjacent. This is the dict that makes
-        :meth:`_strategy_simulate` reachable at all; without a ``variable`` key it returns ``None``
-        on every call, which is why the do-operator went unused while working perfectly.
+        This used to be four bare regexes joined by ``or``, and it is the whole reason
+        :mod:`nyxara.njp.compile` exists: ``or`` short-circuits, the English word-order pattern
+        matched a Hinglish sentence and took the verb as the variable, and the pattern written for
+        that word order never ran. Without a ``variable`` key :meth:`_strategy_simulate` returns
+        ``None`` on every call, so the do-operator was registered, chosen, run, and unable to do
+        anything — and ``metareason._miss`` charged each of those losses to ``simulate``.
 
-        A factor resolves against what was actually observed, so "halve the water" means half of
-        what this plant has been getting rather than half of an arbitrary unit.
+        A factor still resolves against what was actually observed, so "halve the water" means
+        half of what this plant has been getting rather than half of an arbitrary unit. What is
+        new is that a sentence stating a direction and no quantity now compiles too: *"paani aadha
+        kar doon"* is a decrease whether or not anything has ever been measured.
         """
-        out: Dict[str, Any] = {}
-        if self.universe is None:
-            return out
+        if self.universe is None or self.compiler is None:
+            return {}
         try:
-            text = str(question or "")
-            absolute = _INTERVENTION_ABSOLUTE.search(text)
-            if absolute is not None:
-                variable = self._resolve_variable(absolute.group("var"))
-                if variable:
-                    return {"variable": variable, "value": float(absolute.group("val"))}
-
-            match = _INTERVENTION.search(text) or _INTERVENTION_TRAILING.search(text)
-            if match is None:
-                return out
-            variable = self._resolve_variable(match.group("var"))
-            factor = _INTERVENTION_FACTOR.get(match.group("op").lower())
-            if not variable or factor is None:
-                return out
-            current = getattr(self.universe, "state", None) or {}
-            observed = current.get(variable)
-            if observed is None:
-                return out
-            return {"variable": variable, "value": float(observed) * factor}
-        except Exception:  # noqa: BLE001 — an unparsed intervention is simply not simulated
+            # Laws stated earlier in this session reach the simulator here. The field loop also
+            # syncs, but it runs at step 11 — after this — so without it a law stated on turn N
+            # was unusable until turn N+1, which reads from outside as her having forgotten it.
+            try:
+                self.universe.sync_from_world()
+            except Exception:  # noqa: BLE001
+                pass
+            op = self.compiler.compile(
+                str(question or ""), intent=intent, act=act,
+                resolve=self._resolve_variable,
+                state=getattr(self.universe, "state", None) or {})
+            return op.to_context()
+        except Exception:  # noqa: BLE001 — an uncompiled intervention is simply not simulated
             return {}
 
     def _strategy_ladder(self, problem: str, ctx: Dict[str, Any]) -> Any:
@@ -1795,8 +2056,22 @@ class NJPBrain:
 
                 if self.memory is not None:
                     try:
+                        # What is firing right now, handed to recall. It was computed one line
+                        # above and thrown away on every turn: the fabric settled, produced its
+                        # fired set, and then recall ran on the raw cue string alone. Two memories
+                        # whose text looks alike but that were met in entirely different states
+                        # are indistinguishable to content addressing, and the thing that tells
+                        # them apart was already in scope.
+                        #
+                        # Gated, because whether it *helps* is a question for the ablation rather
+                        # than for anyone's intuition, and it is the one fabric arm that can
+                        # change an answer rather than only lower a confidence.
+                        fired: Tuple[int, ...] = ()
+                        if self._gate("fabric_retrieval", True):
+                            fired = tuple(int(c) for c in (out.cells or ()))
                         out.recall = self.memory.recall(out.stimulus,
-                                                        k=int(spend["recall_k"]))
+                                                        k=int(spend["recall_k"]),
+                                                        context=fired)
                     except Exception:  # noqa: BLE001
                         out.recall = None
                 return out
@@ -1907,6 +2182,13 @@ class NJPBrain:
                         out.epistemic_confidence, out)
                 else:
                     self._ask_back(out)
+            # Sure of herself on ground the substrate does not recognise. Asked after the
+            # confidence is settled, because both halves of the condition have to be known, and it
+            # produces a question rather than touching the answer.
+            self._wonder_at_anomaly(out)
+            # And: the two substrates naming different fillers for one slot. Also after the
+            # confidence is settled, because what it does is cap it.
+            out.substrate = self._substrate_disagreement(out)
 
             # 4.5 CONSULT THE CORTEX — the one step that makes a stronger model buy stronger
             # reasoning rather than better sentences. It proposes; the gate below still decides.
@@ -1972,6 +2254,15 @@ class NJPBrain:
                 # survives. Reverted unless it strictly wins.
                 if self.field.due_for_meta():
                     out.trial = self.field.meta_cycle()
+                    # And, on the same slow count and behind its own gate, the riskiest thing
+                    # here: giving up a causal model that keeps being surprised. Off by default,
+                    # because a wrong death criterion destroys working structure and
+                    # `concepts.restructure` records a measured instance of exactly that. The
+                    # trial itself is reversible — archived, benchmarked on held-out, reverted on
+                    # a tie — but "reversible" is a reason to allow it to be switched on, not a
+                    # reason to switch it on for everyone.
+                    if self._gate("model_death", False):
+                        out.retirement = self.field.retire_cycle()
 
             # 12. THE CORE — induce schemas over the kinds the field just formed, score the
             # standing ones against facts they were never built from, and drop the ones that
@@ -2149,7 +2440,31 @@ class NJPBrain:
                 # two keys `_strategy_simulate` returns None on every call, so the do-operator
                 # was registered, chosen, run and unable to do anything — the gap that made a
                 # working causal engine unreachable from a causal question.
-                context.update(self._counterfactual_context(thought.stimulus))
+                compiled = self._counterfactual_context(
+                    thought.stimulus, intent=thought.intent, act=thought.act)
+                thought.op = compiled.get("op")
+                context.update(compiled)
+                # The speech act already decided what kind of question this is, with a margin.
+                # Letting `ProblemClassifier` re-derive it from a bag of words is two classifiers
+                # with no shared channel, and on the reported sentence they disagreed: the act
+                # reader said causal_query at 0.85, the classifier said empirical at 0.50, and the
+                # three strategies empirical selects cannot answer an intervention.
+                if thought.op is not None and getattr(thought.op, "kind", ""):
+                    context["kind_hint"] = thought.op.kind
+                # What this speech act permits at all. `CognitivePolicy` has held the right table
+                # since it was written and it was read only to decide whether the cortex could
+                # speak; strategy selection never asked. So the only thing keeping `simulate` away
+                # from a greeting was the problem kind coming out differently, which is a
+                # coincidence rather than a rule.
+                if thought.op is not None and getattr(thought.op, "pathways", ()):
+                    context["pathways"] = tuple(thought.op.pathways)
+                # How unrecognised the substrate found this turn. Gated: whether spending a second
+                # strategy on unfamiliar ground pays for itself is a question for the ablation.
+                # Default OFF, on measurement rather than preference — see `NJPConfig`. Novelty
+                # does not discriminate among the turns that reach here.
+                if self._gate("fabric_strategy", False):
+                    context["novelty"] = float(
+                        getattr(thought.percept, "novelty", 0.0) or 0.0)
                 # Whether there is a closed sum in here at all. A parse result rather than a
                 # keyword, for the same reason the intervention above is: the classifier can
                 # count digits and operators but cannot tell "2+2" from "100 degree at 3pm", and
@@ -2213,12 +2528,17 @@ class NJPBrain:
                 self.levels.remember(
                     f"turn-{self.turns}", thought.answer,
                     level=self._level_for(thought), cue=thought.stimulus,
-                    source=f"turn-{self.turns}", claim=self._claim_of(thought))
+                    source=f"turn-{self.turns}", claim=self._claim_of(thought),
+                    cells=tuple(getattr(thought.percept, "cells", ()) or ()))
                 return
             if self.memory is not None:
                 self.memory.remember(f"turn-{self.turns}", thought.answer,
                                      kind=("conclusion" if thought.verified else "episode"),
-                                     cue=thought.stimulus)
+                                     cue=thought.stimulus,
+                                     # The state she was in when she learned this. Without it
+                                     # stored there is nothing for the recall side to compare a
+                                     # later state against.
+                                     cells=tuple(getattr(thought.percept, "cells", ()) or ()))
         except Exception:  # noqa: BLE001
             pass
 
@@ -2707,7 +3027,9 @@ class NJPBrain:
                     state=str(getattr(claim, "state", "") or "unknown"),
                     support=list(getattr(claim, "triples", None) or [])))
 
-            for name, probability in self.fabric_proposes(thought.stimulus, k=1):
+            seats = (self.fabric_proposes(thought.stimulus, k=1)
+                     if self._gate("fabric_prior", True) else [])
+            for name, probability in seats:
                 accounts.append(Hypothesis(
                     seat="fabric", claim=name, confidence=float(probability),
                     # No provenance and no support, stated rather than implied: the head
@@ -2760,6 +3082,52 @@ class NJPBrain:
             return max(0.0, min(1.0, float(base) * factor))
         except Exception:  # noqa: BLE001 — an unreadable percept discounts nothing
             return max(0.0, min(1.0, float(base)))
+
+    def _wonder_at_anomaly(self, thought: NJPThought) -> bool:
+        """A confident answer on ground the substrate does not recognise becomes a question.
+
+        The fabric's three existing edges all point the same way: they lower a confidence and stop.
+        That is right as far as it goes and it is not learning — nothing follows from the fabric
+        having been surprised, so a turn she answered firmly on a state she has never met leaves
+        no trace that anything was odd about it.
+
+        This is the other direction, and it is deliberately *not* the confidence: an anomaly
+        produces a **question**, which cannot raise a confidence and cannot become an answer. It
+        goes to :mod:`nyxara.njp.curiosity`, which already prices questions by value of
+        information and already refuses to re-raise one that has been answered.
+
+        Both halves are required. Low familiarity alone is most turns early on, and a confident
+        answer alone is the ordinary case; it is the *combination* — sure of herself on ground she
+        does not recognise — that is worth asking about.
+        """
+        if not self._gate("fabric_anomaly", True) or self.curiosity is None:
+            return False
+        try:
+            percept = getattr(thought, "percept", None)
+            anticipated = getattr(percept, "anticipated", None) if percept else None
+            if anticipated is None or bool(getattr(anticipated, "trusted", False)):
+                return False
+            familiarity = float(getattr(anticipated, "familiarity", 1.0) or 0.0)
+            if familiarity >= _ANOMALY_FAMILIARITY or not thought.answer:
+                return False
+            if float(getattr(thought, "epistemic_confidence", 0.0) or 0.0) < _ANOMALY_CONFIDENCE:
+                return False
+
+            from nyxara.njp.curiosity import Gap, Question
+            subject = ""
+            grounding = getattr(percept, "grounding", None)
+            triples = list(getattr(grounding, "triples", None) or [])
+            if triples:
+                subject = str(getattr(triples[0], "subject", "") or "")
+            raised = self.curiosity._raise(Question(
+                text=(f"answered confidently on ground the substrate does not recognise: "
+                      f"{thought.stimulus[:120]}"),
+                gap=Gap.UNKNOWN, subject=subject,
+                uncertainty=max(0.0, 1.0 - familiarity),
+                stakes=0.4, cost=0.2, action="gather"))
+            return raised is not None
+        except Exception:  # noqa: BLE001 — an unaskable anomaly asks nothing
+            return False
 
     def _temper_by_shape(self, base: float, thought: NJPThought) -> float:
         """Discount an answer by how the *form of reasoning* behind it has actually done.
@@ -3080,6 +3448,7 @@ class NJPBrain:
                             ("field", self.field), ("learner", self.learner),
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),
+                            ("compiler", self.compiler),
                             ("epistemic", self.epistemic)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
@@ -3089,9 +3458,85 @@ class NJPBrain:
                 out[name] = {"error": "stats failed"}
         if self.memory is not None:
             try:
-                out["memory"] = {"traces": len(self.memory)}
+                # The whole surface, not just the count. `recalls_undecided` and
+                # `recalls_rescored` are what separate "this arm never fires" from "this arm
+                # fires and changes nothing", and those are different findings.
+                out["memory"] = self.memory.stats()
             except Exception:  # noqa: BLE001
                 pass
+        return out
+
+    def pipeline_report(self) -> Dict[str, Dict[str, str]]:
+        """Every arrow of the cognitive loop: closed, open, or absent — and why.
+
+        The point of this is the arrows that are **not** closed. Every other report here counts
+        what happened; this one names what cannot. An organ that is gated off is *absent* rather
+        than reported as a broken arrow, which is the same discipline :meth:`stats` keeps — the
+        distinction between "off" and "failing" is one a report has no business blurring.
+
+        Each entry is read from something real rather than declared: an arrow is closed when the
+        organ that would carry it exists and the counter that proves it ran is non-zero, and open
+        with a reason otherwise. A hardcoded "closed" would make this the sort of documentation
+        the rest of the package is written against.
+        """
+        out: Dict[str, Dict[str, str]] = {}
+
+        def arrow(name: str, organ: Any, reason_if_open: str = "",
+                  ran: Optional[bool] = None) -> None:
+            if organ is None:
+                return                    # absent, not broken — the caller sees it is not listed
+            if ran is False:
+                out[name] = {"state": "open", "why": reason_if_open or "never ran"}
+            else:
+                out[name] = {"state": "closed", "why": ""}
+
+        try:
+            compiler = getattr(self.compiler, "stats", lambda: {})()
+            grounded = getattr(self.grounder, "stats", lambda: {})()
+            universe = getattr(self.universe, "stats", lambda: {})()
+            predict = getattr(self.predictor, "stats", lambda: {})()
+
+            arrow("reality→language", self.grounder)
+            arrow("language→compiler", self.compiler,
+                  "no turn has compiled into an executable operation",
+                  ran=bool(compiler.get("executable", 0)))
+            arrow("compiler→symbolic", self.world,
+                  "no causal link has been recorded",
+                  ran=bool(getattr(self.world, "stats", lambda: {})().get("causal_links", 0)))
+            arrow("compiler→neural", self.fabric)
+            arrow("symbolic⟷neural", self.epistemic,
+                  "the two seats have not both spoken on one slot yet")
+            arrow("→hypotheses", self.reasoner)
+            arrow("qwythos→proposals", self.cortex,
+                  "no cortex reachable — weights are not on disk",
+                  ran=bool(getattr(self.cortex, "available", lambda: False)()))
+            arrow("njp→proposals", self.metareason)
+            arrow("→causal simulation", self.universe,
+                  "no arrow is both fitted and oriented",
+                  ran=bool(universe.get("oriented_relations", 0)))
+            arrow("→counterfactual", self.universe,
+                  "no intervention has been compiled and run",
+                  ran=bool(compiler.get("executable", 0)))
+            arrow("→plan", self.predictive,
+                  "the state encoder cannot carry identity — see njp.predictive._encode_state",
+                  ran=False)
+            arrow("test→prediction error", self.predictor,
+                  "nothing has been scored", ran=bool(predict.get("scored", 0)))
+            arrow("error→diagnosis", self.predictor,
+                  "nothing has been diagnosed", ran=bool(predict.get("by_kind")))
+            arrow("diagnosis→revision", self.predictor,
+                  "no diagnosis has reached a repair", ran=bool(predict.get("repaired")))
+            arrow("→concept", self.genesis)
+            arrow("→program", self.noesis,
+                  "the abstraction library has never been stepped",
+                  ran=bool(getattr(self.noesis, "cycles", 0)))
+            arrow("→meta-reasoning", self.metareason)
+            arrow("meta→strategy learning", self.metareason,
+                  "no kind has enough trials to name a winner",
+                  ran=bool(getattr(self.metareason, "stats", lambda: {})().get("by_kind")))
+            arrow("↺", self.loop)
+        except Exception:  # noqa: BLE001 — an unreadable organ is left out, not guessed at
+            pass
         return out
 
     def report(self) -> Dict[str, Any]:
@@ -3123,6 +3568,7 @@ class NJPBrain:
                             ("field", self.field), ("learner", self.learner),
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),
+                            ("compiler", self.compiler),
                             ("epistemic", self.epistemic)):
             if organ is None:
                 continue

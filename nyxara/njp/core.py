@@ -65,7 +65,7 @@ import hashlib
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Collection, Dict, List, Optional, Set, Tuple
+from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple
 
 from nyxara.njp.canon import canonical_entity
 
@@ -768,6 +768,65 @@ class CognitiveLearningCore:
             return out
         except Exception:  # noqa: BLE001
             return out
+
+    def walk_shape(self, subject: str, shape: Sequence[str]) -> Derivation:
+        """Follow one named reasoning *form* from a subject: ``('is_a', 'needs')`` and so on.
+
+        :meth:`_compose` chains a predicate with *itself* — ``A causes B``, ``B causes C`` —
+        which is the right walk for transitivity and the wrong one for a shape. A shape as
+        :mod:`nyxara.njp.genome` records it is a sequence of *different* predicates, one per hop,
+        and it is the thing she keeps re-deriving: ``sparrow is_a bird``, ``bird needs water``
+        ⊢ ``sparrow needs water``. There was no walk for it, which is part of why the genome's
+        `candidates()` had no consumer — the promotion had nothing to promote *to*.
+
+        Priced exactly as composition is, and for the same reason: the product of the edge
+        confidences and the transitivity of each predicate, capped below the knowledge threshold.
+        A four-hop shape is therefore worth visibly less than a two-hop one rather than merely
+        being allowed. It is `composed`, never `direct`: a chain is defeasible by construction and
+        an answer that reads like a stated fact is the failure this whole layer avoids.
+        """
+        out = Derivation()
+        try:
+            steps = [str(p).strip().lower() for p in (shape or []) if str(p).strip()]
+            start = _norm(subject)
+            if not steps or not start:
+                return out
+
+            by_key: Dict[Tuple[str, str], List[Tuple[str, float]]] = {}
+            for s, p, o, conf in self._edges():
+                by_key.setdefault((s, p), []).append((o, conf))
+
+            node, confidence = start, 1.0
+            support: List[Tuple[str, str, str]] = []
+            visited = {start}
+            for predicate in steps:
+                options = by_key.get((node, predicate)) or []
+                # Deterministic and best-first: the strongest edge this hop offers, and never one
+                # that doubles back. `a causes b` and `b causes a` are both perfectly sayable, and
+                # without the visited set a two-step shape would derive that a causes itself.
+                options = sorted((o for o in options if o[0] not in visited),
+                                 key=lambda pair: (-pair[1], pair[0]))
+                if not options:
+                    return Derivation()
+                nxt, edge_conf = options[0]
+                confidence *= edge_conf * self._transitivity(predicate).value
+                if confidence < _MIN_LINK_CONFIDENCE:
+                    return Derivation()
+                support.append((node, predicate, nxt))
+                visited.add(nxt)
+                node = nxt
+
+            out.answer = node
+            out.kind = "composed"
+            out.confidence = min(_COMPOSED_CEILING, confidence)
+            out.support = support
+            out.steps = [f"{a} —{p}→ {b}" for a, p, b in support]
+            out.steps.append(f"therefore {start} —{'>'.join(steps)}→ {node} "
+                             f"({len(support)} hops)")
+            out.why = f"walked the shape {'>'.join(steps)} over {len(support)} stated facts"
+            return out
+        except Exception:  # noqa: BLE001 — a shape that does not walk simply answers nothing
+            return Derivation()
 
     def _compose(self, subject: str, predicate: str) -> Derivation:
         """Chain the relation with itself: ``A→B``, ``B→C`` ⊢ ``A→C``. Novel recombination.

@@ -14,10 +14,18 @@ from nyxara.njp.universe import ExperimentDesigner, InternalUniverse
 
 
 def _plant_universe() -> InternalUniverse:
-    """growth = 2·water + 1, with light held constant so only one arrow can explain anything."""
+    """growth = 2·water + 1, with light held constant so only one arrow can explain anything.
+
+    The observations arrive in a stated order, because that is the one thing about a joint
+    observation that can say which way an arrow runs. Without it these numbers are Markov
+    equivalent — growth regresses on water exactly as well as water regresses on growth — and the
+    do-operator abstains rather than picking whichever slot happened to be filled first. That
+    abstention is tested directly in `test_a_bare_universe_with_no_stated_order_abstains`.
+    """
     universe = InternalUniverse()
     for water in range(7):
-        universe.observe({"water": water, "light": 5, "growth": 2.0 * water + 1.0})
+        universe.observe({"water": water, "light": 5, "growth": 2.0 * water + 1.0},
+                         order=("water", "light", "growth"))
     return universe
 
 
@@ -90,10 +98,52 @@ def test_the_intervened_variable_is_severed_not_conditioned():
 
 
 def test_a_direction_observational_data_cannot_settle_is_reported_not_hidden():
-    universe = _plant_universe()
+    # Numbers alone, with nothing stating an order and no skeleton: growth regresses on water
+    # exactly as well as water regresses on growth. That is Markov equivalence, it is not a
+    # defect, and the honest thing is to report the pair rather than pick a slot.
+    universe = InternalUniverse()
+    for water in range(7):
+        universe.observe({"water": water, "growth": 2.0 * water + 1.0})
     pairs = universe.ambiguous()
     assert ("growth", "water") in pairs or ("water", "growth") in pairs
     assert universe.stats()["ambiguous_pairs"] >= 1
+
+
+def test_a_bare_universe_with_no_stated_order_abstains_instead_of_guessing():
+    """The cost of the rule above, stated plainly: fewer answers, and none of them invented.
+
+    This is the behaviour change. Before, this returned a number — picked, in effect, by which
+    variable the caller happened to name first, since both arrows fit and only `usable` was
+    consulted. `abstained` names the arrow it declined to run and why.
+    """
+    universe = InternalUniverse()
+    for water in range(7):
+        universe.observe({"water": water, "growth": 2.0 * water + 1.0})
+
+    out = universe.what_if("water", 3.0)
+    assert not out.answerable
+    assert "direction unverified" in out.reason
+    assert "water→growth" in out.abstained
+    assert universe.stats()["abstained_for_direction"] == 1
+
+
+def test_one_stated_order_is_not_enough_and_a_contradicting_one_ends_it():
+    """Word order is weak per sentence and strong in aggregate, and both halves are enforced."""
+    universe = InternalUniverse()
+    for water in range(3):
+        universe.observe({"water": water, "growth": 2.0 * water + 1.0},
+                         order=("water", "growth"))
+    assert universe.relations[("water", "growth")].oriented
+
+    flipped = InternalUniverse()
+    for water in range(3):
+        flipped.observe({"water": water, "growth": 2.0 * water + 1.0},
+                        order=("water", "growth"))
+    flipped.observe({"water": 9.0, "growth": 19.0}, order=("growth", "water"))
+    for water in range(4, 9):
+        flipped.observe({"water": water, "growth": 2.0 * water + 1.0},
+                        order=("water", "growth"))
+    assert flipped.relations[("water", "growth")].contradicted == 1
 
 
 def test_extrapolation_is_reported_as_less_trustworthy():

@@ -58,6 +58,29 @@ __all__ = [
 ]
 
 _ARITHMETIC = set("0123456789+-*/^=%")
+
+#: Which cognitive pathway each registered strategy actually drives, so
+#: :class:`~nyxara.njp.relevance.CognitivePolicy`'s table can reach strategy selection and not
+#: only the cortex. Names rather than a guess from the callable, because the mapping is a fact
+#: about which organ a strategy uses and nothing about a function object says that.
+#:
+#: A strategy absent from this table is unconstrained on purpose. Gating by an incomplete table
+#: would make a newly registered arm silently unreachable, which is worse than not gating it.
+_STRATEGY_PATHWAY: Dict[str, str] = {
+    "simulate": "simulate",
+    "experiment": "experiment",
+    "recall": "recall",
+    "introspect": "self_state",
+    "ladder": "reason",
+    "causal": "reason",
+    "derive": "reason",
+    "calculate": "reason",
+}
+
+#: How unrecognised a turn must be before it is worth spending a second strategy on. High, because
+#: a second opinion is real compute and most turns early in a session look novel to a fabric that
+#: has barely grown.
+_NOVEL_FLOOR = 0.85
 _CAUSAL_WORDS = frozenset({
     "why", "because", "cause", "causes", "caused", "kyun", "kyon", "kyunki", "kyonki",
     "wajah", "reason", "leads", "due", "se", "isliye", "therefore", "hence",
@@ -284,6 +307,16 @@ class ProblemClassifier:
             # conditional, and only the parse can tell them apart.
             scores[ProblemKind.CAUSAL] += 0.6
 
+        if ctx.get("kind_hint") in scores:
+            # What the *speech act* reader made of this turn. It read the sentence as a speech
+            # act — with a margin — before any of this ran, and this scores a bag of words. On the
+            # sentence that started all of this the two disagreed: causal_query at 0.85 against
+            # empirical at 0.50, and empirical selects three strategies that cannot answer an
+            # intervention. Weighted to outrank the word cues without erasing them, because a
+            # speech act names what the turn is *doing* and this names what it is *about*, and a
+            # turn can do one while being about the other.
+            scores[str(ctx["kind_hint"])] += 0.55
+
         if words & _SELF_WORDS:
             scores[ProblemKind.INTROSPECTIVE] += 0.4
         if ctx.get("about_self"):
@@ -325,6 +358,9 @@ class MetaReasoner:
         self.beliefs = beliefs                  # optional njp.beliefs.BeliefLedger
         self.world = world                      # optional njp.world.WorldView
         self.strategies: Dict[str, Strategy] = {}
+        # Records loaded from a snapshot for strategies that are not registered yet. See
+        # `load_dict`: a runtime-registered arm's history is held here until `register` claims it.
+        self._orphaned: Dict[str, Dict[str, Any]] = {}
         self.solved = 0
         self.abstained = 0
         self.second_opinions = 0
@@ -357,6 +393,15 @@ class MetaReasoner:
         """
         strategy = Strategy(name=str(name), kinds=tuple(kinds), solve=solve,
                             prior=min(1.0, max(0.0, float(prior))))
+        # A record held from a snapshot for a strategy that had not been registered yet. Applied
+        # here so an arm added at runtime resumes with its history instead of looking brand new —
+        # `ucb` returns `prior + 1.0` at zero trials, so a restored arm that kept looking untried
+        # would be explored ahead of everything else on every single restart.
+        held = self._orphaned.pop(strategy.name, None)
+        if held is not None:
+            strategy.wins = float(held.get("wins", 0.0))
+            strategy.trials = int(held.get("trials", 0))
+            strategy.cost_ms = float(held.get("cost_ms", 0.0))
         self.strategies[strategy.name] = strategy
         if self.meta_learner is not None:
             for kind in strategy.kinds:
@@ -366,6 +411,20 @@ class MetaReasoner:
                     break
         return strategy
 
+    def _preferred(self, ctx: Dict[str, Any]) -> Optional[Strategy]:
+        """The strategy the *caller's parse* named, when it named one and it is registered.
+
+        ``ctx["prefer"]`` is set only where a turn compiled into an operation with machinery
+        behind it (see :mod:`nyxara.njp.compile`). It is not a hint from a keyword and it is not
+        the bandit being overruled — the strategy still has to exist, still has to run, and its
+        outcome is still scored, so preferring one that keeps failing costs it its record.
+        """
+        name = str(ctx.get("prefer") or "").strip()
+        if not name:
+            return None
+        strategy = self.strategies.get(name)
+        return strategy if (strategy is not None and strategy.solve is not None) else None
+
     def _candidates(self, kind: str) -> List[Strategy]:
         exact = [s for s in self.strategies.values() if kind in s.kinds]
         # A strategy that names no kinds is a generalist and is always eligible — otherwise a
@@ -373,9 +432,37 @@ class MetaReasoner:
         general = [s for s in self.strategies.values() if not s.kinds]
         return exact or general or list(self.strategies.values())
 
-    def choose(self, kind: str, *, exclude: Sequence[str] = ()) -> Optional[Strategy]:
-        """UCB1 over the strategies eligible for this kind of problem."""
+    @staticmethod
+    def _permitted(pool: List[Strategy], pathways: Sequence[str]) -> List[Strategy]:
+        """Drop the strategies this turn's *speech act* does not allow at all.
+
+        :class:`~nyxara.njp.relevance.CognitivePolicy` has held the right table from the start —
+        a greeting is permitted the relationship and her own state and nothing else — and it was
+        read only to decide whether the LLM cortex could speak. Strategy selection never asked, so
+        the only thing keeping `simulate` away from a greeting was the problem *kind* coming out
+        differently, which is a coincidence rather than a rule.
+
+        Named per strategy rather than inferred, because the mapping is a fact about which organ
+        each one drives. A strategy nobody mapped is unconstrained — an unmapped arm should not be
+        silently unreachable, which is the failure mode of gating by an incomplete table.
+
+        Empty ``pathways`` means no act was read, and an unread act constrains nothing.
+        """
+        allowed = set(pathways or ())
+        if not allowed:
+            return pool
+        # An empty result is a real answer and must not be softened into the full pool. That
+        # softening was the first version of this method and it defeated the gate in exactly the
+        # case the gate exists for: a greeting permits neither `simulate` nor `derive`, every
+        # candidate is excluded, and falling back to "all of them" hands the turn straight to the
+        # simulator. A turn whose speech act permits no reasoning is a turn that gets none.
+        return [s for s in pool if _STRATEGY_PATHWAY.get(s.name, "") in ("", *allowed)]
+
+    def choose(self, kind: str, *, exclude: Sequence[str] = (),
+               pathways: Sequence[str] = ()) -> Optional[Strategy]:
+        """UCB1 over the strategies eligible for this kind of problem, and permitted by the act."""
         pool = [s for s in self._candidates(kind) if s.name not in set(exclude)]
+        pool = self._permitted(pool, pathways)
         if not pool:
             return None
         if self.meta_learner is not None:
@@ -399,10 +486,29 @@ class MetaReasoner:
             out.classification = self.classifier.classify(out.problem, context=ctx)
             out.kind = out.classification.kind
 
-            strategy = self.choose(out.kind)
+            # A turn that compiled into an executable operation names the strategy that can run
+            # it, and that is a parse result rather than a preference — the same standing the
+            # `variable` key has in the classifier. It does not override the bandit's learning: it
+            # constrains which strategy goes *first* on the turns where something was actually
+            # compiled, and the outcome is scored exactly as any other, so a preferred strategy
+            # that keeps failing still loses its record.
+            #
+            # Without it, measured: an intervention on a stated law classified CAUSAL, the bandit
+            # led with `causal`, that returned nothing, `derive` answered with a fact from the far
+            # end of the chain, the critic threw it out for naming a cause the world model does
+            # not hold — and `simulate`, which had the answer, was never the third attempt because
+            # the loop stops as soon as anything at all comes back.
+            pathways = tuple(ctx.get("pathways") or ())
+            strategy = self._preferred(ctx) or self.choose(out.kind, pathways=pathways)
             if strategy is None or strategy.solve is None:
                 self.abstained += 1
-                out.critique.defects.append("no strategy registered for this kind")
+                # Two different reasons, and conflating them hides the interesting one: nothing
+                # registered for this kind is a gap in the brain, and a speech act that permits
+                # no reasoning is the relevance gate working.
+                out.critique.defects.append(
+                    "this speech act permits no reasoning pathway" if pathways
+                    and not self._permitted(self._candidates(out.kind), pathways)
+                    else "no strategy registered for this kind")
                 return out
 
             out.strategy = strategy.name
@@ -418,7 +524,7 @@ class MetaReasoner:
             # it was so the bandit stops leading with it.
             tried = [strategy.name]
             while not out.answered and len(tried) < self.max_attempts:
-                nxt = self.choose(out.kind, exclude=tried)
+                nxt = self.choose(out.kind, exclude=tried, pathways=pathways)
                 if nxt is None or nxt.solve is None:
                     break
                 self._miss(strategy)
@@ -439,8 +545,15 @@ class MetaReasoner:
             # A second opinion is not free, so it is spent where it changes something: a genuinely
             # mixed problem, or an answer the critic already doubts. Running two strategies on
             # every trivial lookup is how a careful system becomes a slow one.
-            if out.classification.mixed or not out.critique.clean:
-                second = self.choose(out.kind, exclude=[strategy.name])
+            # Novelty buys deliberation, never an answer. This is the fabric's one route into
+            # strategy, and the obvious version of it — feeding novelty into `choose` — would be
+            # wrong: `choose` returns the strategy whose answer is taken, so a substrate steering
+            # it steers content through a path nothing measures. Spending a *second* strategy on
+            # unfamiliar ground instead costs time and can only lower confidence, because
+            # disagreement lowers it and agreement leaves it alone.
+            unfamiliar = float(ctx.get("novelty", 0.0) or 0.0) >= _NOVEL_FLOOR
+            if out.classification.mixed or not out.critique.clean or unfamiliar:
+                second = self.choose(out.kind, exclude=[strategy.name], pathways=pathways)
                 if second is not None and second.solve is not None:
                     self.second_opinions += 1
                     out.alternative = second.name
@@ -601,9 +714,96 @@ class MetaReasoner:
 
     # ---- reporting ----------------------------------------------------------- #
     def best_for(self, kind: str) -> Optional[Strategy]:
+        """The strategy that has actually done best *on this kind of problem*.
+
+        It used to rank on :attr:`Strategy.rate`, and :meth:`register`'s own docstring says why
+        that cannot work: ``rate`` is one ``wins``/``trials`` pair spanning every kind a strategy
+        serves, so ``derive`` — registered for factual, causal and empirical — reports the mean of
+        three different competences. Ranking per-kind on a kind-averaged number let a strategy win
+        the kind it was worst at, on the strength of the kind it was best at. The per-kind record
+        already existed in the shared bandit and nothing read it; this reads it.
+
+        Returns ``None`` rather than a guess when no option has cleared ``min_trials``. That is
+        the honest state — *not measured yet* — and it is what keeps :meth:`stats` from naming a
+        winner chosen by one lucky turn.
+        """
+        if self.meta_learner is not None:
+            try:
+                picked = self.meta_learner.best(f"strategy:{kind}")
+                name = getattr(picked, "name", "") if picked is not None else ""
+                return self.strategies.get(name)
+            except Exception:  # noqa: BLE001 — the shared bandit is optional throughout
+                pass
         pool = self._candidates(kind)
         tried = [s for s in pool if s.trials]
         return max(tried, key=lambda s: s.rate) if tried else None
+
+    def curve(self, kind: str) -> Dict[str, Dict[str, Any]]:
+        """Per-strategy record for one kind of problem: how often, how well, and how it was reached.
+
+        ``first_choice_rate`` and ``bind_failure_rate`` come from :attr:`Solution.attempts`, whose
+        own comment advertises exactly this signal — *"more than one name here means the first
+        choice could not bind to this problem… that is the bandit's prior being wrong about which
+        organ owns this kind of question"* — and which was written every turn and read by nobody.
+
+        A strategy that is chosen first and then cannot bind is a different failure from one that
+        binds and answers badly, and only the second is the strategy being wrong. Reporting one
+        number for both is how a bandit learns to prefer whichever strategy guesses most.
+        """
+        bucket: Dict[str, Any] = {}
+        if self.meta_learner is not None:
+            try:
+                bucket = dict(self.meta_learner.strategies.get(f"strategy:{kind}") or {})
+            except Exception:  # noqa: BLE001
+                bucket = {}
+
+        firsts: Dict[str, int] = {}
+        unbound: Dict[str, int] = {}
+        for solution in self.history:
+            if solution.kind != kind or not solution.attempts:
+                continue
+            first = solution.attempts[0]
+            firsts[first] = firsts.get(first, 0) + 1
+            if len(solution.attempts) > 1:
+                unbound[first] = unbound.get(first, 0) + 1
+        total_first = sum(firsts.values())
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for name in sorted(set(bucket) | set(firsts)):
+            arm = bucket.get(name)
+            trials = int(getattr(arm, "trials", 0) or 0)
+            chosen = firsts.get(name, 0)
+            out[name] = {
+                "trials": trials,
+                # A mean over no trials is not 0.0, it is absent — the distinction this package
+                # keeps everywhere else.
+                "mean": round(float(getattr(arm, "mean", 0.0)), 4) if trials else None,
+                "first_choice_rate": (round(chosen / total_first, 4) if total_first else None),
+                "bind_failure_rate": (round(unbound.get(name, 0) / chosen, 4) if chosen else None),
+            }
+        return out
+
+    def advice(self, kind: str) -> Optional[str]:
+        """*"How should I think about this kind of problem?"* — from the record, or not at all.
+
+        ``None`` when nothing has been measured enough to say, and the caller is expected to omit
+        the kind rather than print an empty verdict. A report that lists every kind with a blank
+        beside most of them reads as coverage; this reads as what it is.
+        """
+        floor = int(getattr(self.meta_learner, "min_trials", 1) or 1)
+        rows = {name: row for name, row in self.curve(kind).items()
+                if int(row["trials"] or 0) >= floor}
+        if not rows:
+            return None
+        ranked = sorted(rows.items(), key=lambda kv: -(kv[1]["mean"] or 0.0))
+        parts: List[str] = []
+        for name, row in ranked[:3]:
+            note = f"{name} {row['mean']:.2f} over {row['trials']}"
+            fail = row["bind_failure_rate"]
+            if fail is not None and fail >= 0.5:
+                note += f", but fails to bind {fail:.0%} of the time it is tried first"
+            parts.append(note)
+        return "; ".join(parts)
 
     def stats(self) -> Dict[str, Any]:
         return {
@@ -615,8 +815,15 @@ class MetaReasoner:
                                       / len(self.history), 4) if self.history else None),
             "assertable_rate": (round(sum(1 for s in self.history if s.assertable)
                                       / len(self.history), 4) if self.history else None),
-            "by_kind": {k: (self.best_for(k).name if self.best_for(k) else None)
-                        for k in ProblemKind.ALL},
+            # A kind nothing has been measured on is ABSENT here, not mapped to None. The old
+            # shape listed all six every time and reported a winner for each, computed from a
+            # kind-blind rate — six confident answers where the evidence supported none.
+            "by_kind": {kind: advice for kind, advice
+                        in ((k, self.advice(k)) for k in ProblemKind.ALL)
+                        if advice is not None},
+            "best_for": {kind: best.name for kind, best
+                         in ((k, self.best_for(k)) for k in ProblemKind.ALL)
+                         if best is not None},
             "table": [s.to_dict() for s in
                       sorted(self.strategies.values(), key=lambda s: -s.rate)[:8]],
         }
@@ -634,6 +841,12 @@ class MetaReasoner:
             for name, row in (d.get("strategies") or {}).items():
                 strategy = self.strategies.get(name)
                 if strategy is None:
+                    # A strategy that is not registered *yet*. Dropping the row — which is what
+                    # this did — silently loses the record of every arm registered at runtime
+                    # rather than at construction, so a synthesised strategy would relearn itself
+                    # from zero on every restart and never accumulate the evidence that justifies
+                    # keeping it. Held instead, and applied by `register` when it arrives.
+                    self._orphaned[str(name)] = dict(row)
                     continue
                 strategy.wins = float(row.get("wins", 0.0))
                 strategy.trials = int(row.get("trials", 0))

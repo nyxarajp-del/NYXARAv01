@@ -118,9 +118,18 @@ class DisagreementKind:
     #: about *what is true* — the fabric never claimed anything about that — but about whether
     #: there is any ground under the answer at all.
     RECOGNITION = "unrecognised_situation"
+    #: Same slot, different filler. Distinct from RECOGNITION, which is about whether there is
+    #: ground under the answer at all rather than about what the answer is.
+    #:
+    #: This kind was unreachable in practice and the reason is worth stating: the fabric seat
+    #: returns a bare concept *name* and the njp seat returns a sentence, so `_norm` was comparing
+    #: a word to a clause. AGREE was effectively impossible between them and every pairing landed
+    #: in UNCLASSIFIED — a channel that always disagrees carries no information, which is the
+    #: other edge of "disagreement is not failure".
+    SUBSTRATE = "substrate_disagrees"
     UNCLASSIFIED = "unclassified"          # it differs and the record cannot say why
 
-    ALL = (EVIDENCE, CAUSAL_MODEL, ASSUMPTIONS, RECOGNITION, UNCLASSIFIED)
+    ALL = (EVIDENCE, CAUSAL_MODEL, ASSUMPTIONS, RECOGNITION, SUBSTRATE, UNCLASSIFIED)
 
 
 #: Problem kind → the NJP faculty whose posterior speaks for the NJP seat. ``reasoning`` is the
@@ -555,13 +564,25 @@ class Router:
         return {k for k in keys if k}
 
     @classmethod
-    def _classify_disagreement(cls, cortex: Any, njp: Any) -> str:
+    def _classify_disagreement(cls, cortex: Any, njp: Any, fabric: Any = None) -> str:
         """*Why* they differ, read off the two accounts rather than guessed.
 
         Ordered so the cheapest decisive check runs first. ``UNCLASSIFIED`` is returned honestly
         whenever nothing separates them — an experiment designed against a made-up reason would be
         worse than one designed against an admitted unknown.
         """
+        # The three-way case first, because it is the one the two-way ladder cannot see. A
+        # speaking seat with support and a substrate claim with none are not disagreeing about
+        # *evidence* — the substrate has none by construction, it associates rather than derives —
+        # so every one of the checks below would read that as EVIDENCE and design an experiment
+        # against a difference that is not there.
+        substrate = _norm(getattr(fabric, "claim", "") or getattr(fabric, "filler", "")
+                          or (fabric if isinstance(fabric, str) else ""))
+        if substrate:
+            spoken = _norm(getattr(njp, "text", "") or getattr(njp, "claim", ""))
+            if spoken and substrate not in spoken:
+                return DisagreementKind.SUBSTRATE
+
         cortex_support, njp_support = cls._support_keys(cortex), cls._support_keys(njp)
         if cortex_support and njp_support and not (cortex_support & njp_support):
             return DisagreementKind.EVIDENCE
@@ -583,6 +604,8 @@ class Router:
             DisagreementKind.ASSUMPTIONS: "they assume different conditions; which one obtains?",
             DisagreementKind.CAUSAL_MODEL: ("they read the same facts with different causes; "
                                             "what would occur under one and not the other?"),
+            DisagreementKind.SUBSTRATE: ("association and derivation name different fillers for "
+                                         "one slot; which one does the record show?"),
             DisagreementKind.UNCLASSIFIED: "what observation would separate them?",
         }.get(kind, "what observation would separate them?")
         return f"{head}'{cortex_text}' or '{njp_text}': {tail}"

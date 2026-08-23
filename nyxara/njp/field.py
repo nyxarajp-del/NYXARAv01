@@ -76,6 +76,11 @@ class ErrorClass:
     UNKNOWN = "unknown"           # not enough information to say
 
 
+#: Cycles a model that lost its retirement trial waits before being proposed again. Without a
+#: cooldown the criterion re-proposes it on the very next cycle and the trial repeats forever.
+_RETIRE_COOLDOWN = 8
+
+
 def _fold(key: str, *, share: float) -> bool:
     """Is this subject in the held-out fold? Stable across restarts and machines.
 
@@ -283,6 +288,13 @@ class RecursiveCognitiveField:
         # restructure decision, which is the only thing that makes a benchmark win mean anything.
         self._samples: List[Tuple[str, List[str]]] = []
         self._holdout: List[Tuple[str, List[str]]] = []
+        #: Models whose retirement trial lost, and how many cycles before they may be proposed
+        #: again. Keyed by version rather than by turn, so two different failing models do not
+        #: share one timer — without it a model that loses is re-proposed on the very next cycle,
+        #: forever.
+        self._retire_cooldown: Dict[str, int] = {}
+        self.retirements_tried = 0
+        self.retirements_kept = 0
 
     # ================= LOOP 1 — the cognitive cycle ========================== #
     def cycle(self, thought: Any) -> CycleReport:
@@ -408,12 +420,20 @@ class RecursiveCognitiveField:
         # ("water boils at 100") is a variable with a value, and without this the simulator would
         # own a causal skeleton it could never fit a single coefficient to.
         state: Dict[str, float] = {}
+        # The order the numbers were *stated* in, carried alongside their values. `obs.numbers` is
+        # filled in extraction order, so "the plant got 2 litres of water and grew 4 cm" arrives
+        # as water-then-growth — and dropping that, which is what happened before, throws away the
+        # only thing in a joint observation that can say which way an arrow runs. The numbers on
+        # their own are Markov-equivalent however many of them there are.
+        order: List[str] = []
         for subject, obs in list(getattr(self.concepts, "_by_subject", {}).items())[-32:] \
                 if self.concepts is not None else []:
             for key, value in obs.numbers.items():
-                state[f"{subject}.{key}"] = value
+                name = f"{subject}.{key}"
+                state[name] = value
+                order.append(name)
         if state:
-            self.universe.observe(state)
+            self.universe.observe(state, order=order)
         return added
 
     # ---- causal hypotheses --------------------------------------------------- #
@@ -641,6 +661,96 @@ class RecursiveCognitiveField:
     # ================= LOOP 2 — the self-modification cycle ==================== #
     def due_for_meta(self) -> bool:
         return self.cycles > 0 and self.cycles % self.meta_every == 0
+
+    def retire_cycle(self) -> Optional[Trial]:
+        """Give up a causal model that keeps being surprised — as a reversible, judged trial.
+
+        The riskiest thing in this module, and fenced accordingly. A wrong death criterion
+        destroys working structure, and :meth:`~nyxara.njp.concepts.ConceptGenesis.restructure`
+        already records a measured instance of exactly that failure — a search that "drove the
+        similarity threshold to its floor, where everything resembles everything and the concepts
+        formed are worthless". So four brakes, three of which already existed here:
+
+        1. **PROTECTED, checked before anything is measured.** A benchmark result must never be
+           able to motivate touching the character core, and the only way to guarantee that is to
+           refuse before the measurement rather than after it.
+        2. **Held-out adjudication.** :meth:`benchmark` scores coverage on ``_holdout``, the fold
+           no restructure decision may read. A tie reverts: a change that cannot demonstrate a win
+           has not earned the structure it costs.
+        3. **Archive, not delete.** :meth:`~nyxara.njp.universe.InternalUniverse.retire` keeps the
+           program and :meth:`~nyxara.njp.universe.InternalUniverse.restore` puts it back, which is
+           what makes this a trial rather than a decision.
+        4. **A per-model cooldown.** Without it a model that fails its trial is proposed again on
+           the very next cycle, forever. Keyed by version, not by turn, so two different failing
+           models do not share one timer.
+
+        The birth half is reuse, not new machinery: what a retirement *does* is un-orient the
+        directions she inferred for herself, so the next observations re-derive them — and where
+        concepts are attached, :meth:`~nyxara.njp.concepts.ConceptGenesis.restructure` re-derives
+        the invariant set on the same held-out judgement. That is the Master's own point about
+        changing which variables are load-bearing rather than only their values.
+        """
+        trial = Trial()
+        t0 = time.perf_counter()
+        try:
+            if self.universe is None:
+                trial.why = "no universe attached"
+                return trial
+
+            version = self.universe.should_retire()
+            if not version:
+                trial.why = "no model has failed enough, or in the right way, to give up"
+                return trial
+
+            # Brake 4, before any work: a model that lost its trial is not re-proposed next cycle.
+            cooling = self._retire_cooldown.get(version, 0)
+            if cooling > 0:
+                self._retire_cooldown[version] = cooling - 1
+                trial.why = f"cooling down for {cooling} more cycles"
+                return trial
+
+            # Brake 1, before any measurement.
+            proposal = Modification(organ="universe", knob="orientation",
+                                    rationale=f"retire model {version[:8]}")
+            if self._protected(proposal):
+                trial.why = "refused: names a protected knob"
+                return trial
+            trial.modification = proposal
+
+            # Brake 2: the fold nothing about this proposal was allowed to read.
+            trial.baseline = self.benchmark()
+            undone = self.universe.retire(version, why="repeated surprise")
+            if undone <= 0:
+                trial.why = "nothing to give up: no direction was inferred rather than told"
+                return trial
+
+            if self.concepts is not None:
+                # The birth half. Re-deriving the invariant set is what changes which features are
+                # load-bearing; it is judged by the same held-out benchmark as the death.
+                try:
+                    self.concepts.restructure(None)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            trial.candidate = self.benchmark()
+            trial.adversarial_passed = True
+            if trial.candidate > trial.baseline + 1e-9:
+                trial.accepted = True
+                trial.why = f"held-out coverage {trial.baseline:.3f} → {trial.candidate:.3f}"
+                self.retirements_kept += 1
+            else:
+                # Brake 3. A tie reverts: giving up structure has to be paid for by a measured win.
+                self.universe.restore(version)
+                self._retire_cooldown[version] = _RETIRE_COOLDOWN
+                trial.why = (f"reverted: {trial.baseline:.3f} → {trial.candidate:.3f} "
+                             f"is not a win")
+            self.retirements_tried += 1
+            return trial
+        except Exception:  # noqa: BLE001 — a failed trial leaves the model exactly as it was
+            trial.why = "retirement trial failed"
+            return trial
+        finally:
+            trial.ms = (time.perf_counter() - t0) * 1000.0
 
     def meta_cycle(self) -> Optional[Trial]:
         """Evaluate herself, find the bottleneck, propose a fix, and let reality decide.
@@ -1062,6 +1172,11 @@ class RecursiveCognitiveField:
             "cycles": self.cycles,
             "restructures": self.restructures,
             "restructures_kept": self.restructures_kept,
+            # A trial that was run and reverted is not the same as one never proposed, and the
+            # gap between these two is how often giving up structure failed to pay for itself.
+            "retirements_tried": self.retirements_tried,
+            "retirements_kept": self.retirements_kept,
+            "retirements_cooling": len([v for v, n in self._retire_cooldown.items() if n > 0]),
             "experiments_designed": self.experiments_designed,
             "surprises": self.surprises,
             "errors": dict(self.errors_diagnosed),

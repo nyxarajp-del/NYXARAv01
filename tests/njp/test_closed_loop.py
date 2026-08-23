@@ -16,6 +16,7 @@ import pytest
 
 from nyxara.njp import NJPBrain
 from nyxara.njp.grounding import _measurements
+from nyxara.njp.universe import Orientation
 
 # The session every test here teaches from: one entity, two variables, an exact 2× relation and
 # no noise. Exactness is deliberate — a fitted slope of 2.0 is a claim that can be checked to
@@ -86,8 +87,22 @@ def test_the_do_operator_answers_from_what_a_conversation_taught():
     brain = _taught_brain()
     out = brain.universe.what_if("plant.water", 1.0)
     assert abs(out.predicted["plant.growth"] - 2.0) < 1e-6, out.predicted
-    assert out.confidence > 0.5, out.confidence
+    assert out.confidence > 0.0, out.confidence
     assert not out.reason, out.reason
+
+    # And the direction it answered along came from the conversation's word order, not from the
+    # numbers: five readings of water beside growth are Markov-equivalent however good the fit.
+    arrow = brain.universe.relations[("plant.water", "plant.growth")]
+    assert arrow.orientation == Orientation.INFERRED
+    assert brain.universe.relations[("plant.growth", "plant.water")].orientation == \
+        Orientation.UNKNOWN
+
+    # An inferred direction is worth less than a stated one, and the confidence says so. This is
+    # the assertion a hard-coded confidence would fail.
+    brain.universe.declare("plant.water", "plant.growth", sign=1,
+                           orientation=Orientation.ASSERTED)
+    stated = brain.universe.what_if("plant.water", 1.0)
+    assert stated.confidence > out.confidence, (stated.confidence, out.confidence)
 
 
 def test_a_counterfactual_far_outside_the_observed_range_loses_confidence():
@@ -119,10 +134,13 @@ def test_an_intervention_resolves_to_the_variable_the_universe_actually_named():
     # them against observed variables rather than by guessing an entity is what stops her
     # simulating confidently over a subject the Master never mentioned.
     brain = _taught_brain()
-    assert brain._counterfactual_context("what if I halve the water") == {
-        "variable": "plant.water", "value": 5.0,          # half of the 10 last observed
-    }
-    assert brain._counterfactual_context("what if I halve the sunlight") == {}
+    # Asserted key by key rather than by dict equality: the context is compiled now (see
+    # `nyxara.njp.compile`) and carries the whole operation beside the two keys the strategy
+    # reads. What this test guards is the resolution, and that is unchanged.
+    compiled = brain._counterfactual_context("what if I halve the water")
+    assert compiled["variable"] == "plant.water"
+    assert compiled["value"] == 5.0                       # half of the 10 last observed
+    assert not brain._counterfactual_context("what if I halve the sunlight").get("variable")
 
 
 def test_an_intervention_whose_size_is_not_stated_is_declined():
@@ -130,7 +148,9 @@ def test_an_intervention_whose_size_is_not_stated_is_declined():
     # do-operator carrying the same confidence as one the Master gave, and nothing downstream
     # could tell them apart afterwards.
     brain = _taught_brain()
-    assert brain._counterfactual_context("what if I reduce the water") == {}
+    compiled = brain._counterfactual_context("what if I reduce the water")
+    assert "variable" not in compiled, "a magnitude she invented is indistinguishable afterwards"
+    assert not compiled["op"].executable
 
 
 def test_what_if_halving_the_water_gets_a_real_number():
@@ -181,10 +201,21 @@ def test_a_strategy_that_produces_nothing_yields_to_one_that_can():
     brain = _taught_brain()
     context = dict(brain._counterfactual_context("what if I halve the water"),
                    grounded=False, subject="", about_self=False)
-    solution = brain.metareason.solve("what if I halve the water", context=context)
+
+    # The retry, on its own. `prefer` is dropped so the bandit leads with its own choice, which is
+    # the situation this mechanism exists for — a turn that compiled into nothing executable still
+    # has to be able to fall through to the strategy that can answer it.
+    unguided = dict(context)
+    unguided.pop("prefer", None)
+    solution = brain.metareason.solve("what if I halve the water", context=unguided)
     assert solution.answered, solution.to_dict()
     assert solution.strategy == "simulate", solution.to_dict()
     assert "causal" in solution.attempts, solution.attempts
+
+    # And with the compiled operation present, the turn no longer spends an attempt finding out
+    # that explanation is not intervention: it names the strategy that executes operations.
+    guided = brain.metareason.solve("what if I halve the water", context=context)
+    assert guided.attempts == ["simulate"], guided.attempts
 
 
 def test_an_ordinary_empirical_question_is_not_dragged_into_the_causal_path():
