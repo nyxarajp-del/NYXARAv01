@@ -149,6 +149,10 @@ class Belief:
     #: What `earned` had reached when the attack came back undecided. Testimony may not carry it
     #: past this until something other than testimony arrives.
     earned_at_test: Optional[float] = None
+    #: How much record existed when the verdict landed. A retry is worth running once that number
+    #: has grown and not before: the record is what settles an attack, so re-attacking against an
+    #: unchanged record is the same four coin-flips at the same cost.
+    observations_at_test: int = 0
 
     @property
     def key(self) -> str:
@@ -353,7 +357,8 @@ class BeliefLedger:
                     why=f"{reason}: {a.claim[:40]}")
         return a, b
 
-    def record_attack(self, claim: str, report: Any) -> Optional[Belief]:
+    def record_attack(self, claim: str, report: Any, *,
+                      observations: int = 0) -> Optional[Belief]:
         """Store what the adversary made of a claim, so the verdict survives the turn.
 
         `AttackReport` was returned and dropped. The consequence is not that she forgot an opinion
@@ -368,12 +373,27 @@ class BeliefLedger:
             belief = self.beliefs.get(_key(claim))
             if belief is None or report is None:
                 return None
+            # Derived from what the attacks actually found, not read off a field. `AttackReport`
+            # sets `stance` only when the attacks were skipped; on a real run the verdict lives in
+            # the attacks themselves, and reading the empty field recorded every outcome as "no
+            # stance" — which meant the undecided record never populated and the whole mechanism
+            # below it was inert.
             stance = str(getattr(report, "stance", "") or "")
+            if not stance:
+                from nyxara.njp.adversary import Stance as _S
+                if getattr(report, "refuted_by", None):
+                    stance = _S.REFUTED
+                elif getattr(report, "survived", 0) and not getattr(report, "undecided", 0):
+                    stance = _S.SURVIVED
+                else:
+                    stance = _S.UNDECIDED
             belief.tested += 1
             belief.last_stance = stance
             from nyxara.njp.adversary import Stance
             if stance == Stance.UNDECIDED:
                 belief.undecided += 1
+                belief.observations_at_test = max(int(observations),
+                                                  belief.observations_at_test)
                 if belief.earned_at_test is None:
                     belief.earned_at_test = float(belief.earned)
             belief.history.append(Revision(

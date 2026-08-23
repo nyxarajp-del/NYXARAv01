@@ -49,6 +49,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from nyxara.njp.beliefs import _key as _belief_key
+
 __all__ = ["Stance", "AttackKind", "Attack", "AttackReport", "SelfAttacker"]
 
 
@@ -104,6 +106,12 @@ class AttackReport:
     confidence_before: float = 0.0
     confidence_after: float = 0.0
     retracted: bool = False
+    #: Whether the attacks were declined because this claim was already undecided and no new
+    #: evidence had arrived. Distinct from "ran and settled nothing" — same verdict, different
+    #: reason, and the caller still has to go and ask.
+    skipped: bool = False
+    #: Set directly when the attacks were skipped; otherwise derived from what they found.
+    stance: str = ""
     ms: float = 0.0
 
     @property
@@ -120,6 +128,8 @@ class AttackReport:
 
     @property
     def verdict(self) -> str:
+        if self.skipped:
+            return "already undecided, and nothing new has arrived to settle it"
         if self.refuted_by:
             return "refuted"
         if self.survived and not self.undecided:
@@ -135,7 +145,8 @@ class AttackReport:
                 "refuted": bool(self.refuted_by), "retracted": self.retracted,
                 "confidence": [round(self.confidence_before, 4),
                                round(self.confidence_after, 4)],
-                "verdict": self.verdict, "ms": round(self.ms, 3)}
+                "verdict": self.verdict, "skipped": self.skipped,
+                "ms": round(self.ms, 3)}
 
 
 class SelfAttacker:
@@ -165,6 +176,10 @@ class SelfAttacker:
         self.refuted = 0
         self.retracted = 0
         self.by_kind: Dict[str, int] = {}
+        #: Attacks not run because the claim was already undecided and nothing new had arrived.
+        #: Counted rather than silent: a skip that cannot be seen is indistinguishable from a
+        #: claim nobody ever looked at.
+        self.skipped_undecided = 0
 
     # ---- the one call ------------------------------------------------------ #
     def attack(self, cause: str, effect: str, *,
@@ -182,6 +197,20 @@ class SelfAttacker:
         try:
             if not report.cause or not report.effect:
                 return report
+
+            # An undecided claim with no new evidence since is not re-attacked. The record is what
+            # settles an attack, so running the same four attacks against the same record is four
+            # more coin-flips against the same thin evidence — and each one costs the same as the
+            # first. What it is NOT is forgetting: `skipped_undecided` is counted, and the caller
+            # is still handed the report so `epistemic.from_attack` can go and ask. Not re-asking
+            # a question the record cannot answer is the opposite of dropping it.
+            held = self._undecided_at(report.cause, report.effect, claim=claim)
+            if held is not None and held >= self._observations_now():
+                self.skipped_undecided += 1
+                report.stance = Stance.UNDECIDED
+                report.skipped = True
+                return report
+
             self.attacked += 1
             report.confidence_before = self._prior(report.cause, report.effect, confidence)
 
@@ -207,13 +236,38 @@ class SelfAttacker:
         finally:
             report.ms = (time.perf_counter() - t0) * 1000.0
 
+    def _observations_now(self) -> int:
+        """How much record there is to attack against. The thing that has to grow before a retry."""
+        try:
+            return int(getattr(self.world, "_observations", 0) or 0)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def _undecided_at(self, cause: str, effect: str, *, claim: str = "") -> Optional[int]:
+        """The observation count when this claim last came back undecided, or ``None``.
+
+        ``None`` covers every case that should be attacked normally: never tested, tested and
+        settled either way, or no ledger to remember with.
+        """
+        try:
+            if self.beliefs is None:
+                return None
+            wanted = str(claim or "").strip() or f"{cause} causes {effect}"
+            belief = self.beliefs.beliefs.get(_belief_key(wanted))
+            if belief is None or belief.last_stance != Stance.UNDECIDED:
+                return None
+            return int(belief.observations_at_test or 0)
+        except Exception:  # noqa: BLE001
+            return None
+
     def _remember_verdict(self, report: "AttackReport", *, claim: str = "") -> None:
         """Hand the verdict to the belief ledger, where it can still constrain things later."""
         try:
             if self.beliefs is None:
                 return
             wanted = str(claim or "").strip() or f"{report.cause} causes {report.effect}"
-            self.beliefs.record_attack(wanted, report)
+            self.beliefs.record_attack(wanted, report,
+                                      observations=self._observations_now())
         except Exception:  # noqa: BLE001 — an unrecordable verdict is not a failed attack
             return
 
