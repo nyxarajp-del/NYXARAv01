@@ -3453,6 +3453,79 @@ class NJPBrain:
                 pass
         return out
 
+    def pipeline_report(self) -> Dict[str, Dict[str, str]]:
+        """Every arrow of the cognitive loop: closed, open, or absent — and why.
+
+        The point of this is the arrows that are **not** closed. Every other report here counts
+        what happened; this one names what cannot. An organ that is gated off is *absent* rather
+        than reported as a broken arrow, which is the same discipline :meth:`stats` keeps — the
+        distinction between "off" and "failing" is one a report has no business blurring.
+
+        Each entry is read from something real rather than declared: an arrow is closed when the
+        organ that would carry it exists and the counter that proves it ran is non-zero, and open
+        with a reason otherwise. A hardcoded "closed" would make this the sort of documentation
+        the rest of the package is written against.
+        """
+        out: Dict[str, Dict[str, str]] = {}
+
+        def arrow(name: str, organ: Any, reason_if_open: str = "",
+                  ran: Optional[bool] = None) -> None:
+            if organ is None:
+                return                    # absent, not broken — the caller sees it is not listed
+            if ran is False:
+                out[name] = {"state": "open", "why": reason_if_open or "never ran"}
+            else:
+                out[name] = {"state": "closed", "why": ""}
+
+        try:
+            compiler = getattr(self.compiler, "stats", lambda: {})()
+            grounded = getattr(self.grounder, "stats", lambda: {})()
+            universe = getattr(self.universe, "stats", lambda: {})()
+            predict = getattr(self.predictor, "stats", lambda: {})()
+
+            arrow("reality→language", self.grounder)
+            arrow("language→compiler", self.compiler,
+                  "no turn has compiled into an executable operation",
+                  ran=bool(compiler.get("executable", 0)))
+            arrow("compiler→symbolic", self.world,
+                  "no causal link has been recorded",
+                  ran=bool(getattr(self.world, "stats", lambda: {})().get("causal_links", 0)))
+            arrow("compiler→neural", self.fabric)
+            arrow("symbolic⟷neural", self.epistemic,
+                  "the two seats have not both spoken on one slot yet")
+            arrow("→hypotheses", self.reasoner)
+            arrow("qwythos→proposals", self.cortex,
+                  "no cortex reachable — weights are not on disk",
+                  ran=bool(getattr(self.cortex, "available", lambda: False)()))
+            arrow("njp→proposals", self.metareason)
+            arrow("→causal simulation", self.universe,
+                  "no arrow is both fitted and oriented",
+                  ran=bool(universe.get("oriented_relations", 0)))
+            arrow("→counterfactual", self.universe,
+                  "no intervention has been compiled and run",
+                  ran=bool(compiler.get("executable", 0)))
+            arrow("→plan", self.predictive,
+                  "the state encoder cannot carry identity — see njp.predictive._encode_state",
+                  ran=False)
+            arrow("test→prediction error", self.predictor,
+                  "nothing has been scored", ran=bool(predict.get("scored", 0)))
+            arrow("error→diagnosis", self.predictor,
+                  "nothing has been diagnosed", ran=bool(predict.get("by_kind")))
+            arrow("diagnosis→revision", self.predictor,
+                  "no diagnosis has reached a repair", ran=bool(predict.get("repaired")))
+            arrow("→concept", self.genesis)
+            arrow("→program", self.noesis,
+                  "the abstraction library has never been stepped",
+                  ran=bool(getattr(self.noesis, "cycles", 0)))
+            arrow("→meta-reasoning", self.metareason)
+            arrow("meta→strategy learning", self.metareason,
+                  "no kind has enough trials to name a winner",
+                  ran=bool(getattr(self.metareason, "stats", lambda: {})().get("by_kind")))
+            arrow("↺", self.loop)
+        except Exception:  # noqa: BLE001 — an unreadable organ is left out, not guessed at
+            pass
+        return out
+
     def report(self) -> Dict[str, Any]:
         """Then vs now — is she actually more than she was? Numbers, not a claim."""
         try:

@@ -71,6 +71,13 @@ _MIN_R2 = 0.25        # below this the fit explains too little to propagate thro
 # Consistent statements of "X then Y" before word order is treated as evidence about the world.
 # One sentence's ordering is incidental; the same ordering three times running is not.
 _MIN_PRECEDENCE = 3
+# Surprising scored rollouts before a model is a candidate for retirement. Same order as the
+# genome's `min_seen`: enough to be a pattern rather than a bad afternoon.
+_MIN_DEATHS = 6
+# Above this mean r² the arrows are fitting well, so a run of surprises is a coefficient problem
+# and `observe` is already refitting them. Retiring here would discard structure to solve
+# something that was being solved.
+_REFIT_R2 = 0.8
 # What a direction-only answer is worth. Capped well under what any fit earns: she was *told* the
 # arrow exists, which is real knowledge and is not a measurement, and a number that reads like one
 # would let testimony borrow the credibility of data.
@@ -450,6 +457,11 @@ class InternalUniverse:
         #: version -> {"rollouts", "scored", "surprises", "error"}. What a retirement decision
         #: counts: failures per *model*, which nothing could express before rollouts had a name.
         self._by_version: Dict[str, Dict[str, float]] = {}
+        #: Models given up, kept rather than deleted. A death that cannot be undone cannot be
+        #: tried, and every retirement here is meant to be a reversible trial.
+        self.retired: Dict[str, "CausalProgram"] = {}
+        self._retired_why: Dict[str, str] = {}
+        self.retirements = 0
         #: How many times a propagation stopped because an arrow's direction was unestablished.
         #: Counted so "fewer answers" and "wrong answers" are distinguishable in the report.
         self.abstained_for_direction = 0
@@ -1029,6 +1041,85 @@ class InternalUniverse:
         """
         return {version: dict(record) for version, record in self._by_version.items()}
 
+    def should_retire(self, *, min_deaths: int = _MIN_DEATHS) -> Optional[str]:
+        """Has the current model failed enough, and in the right way, to be given up?
+
+        Three conditions, all required, mirroring the discipline
+        :meth:`~nyxara.njp.genome.ReasoningGenome.candidates` already applies — each rules out a
+        different way of being wrong about this:
+
+        1. **Enough failures.** ``min_deaths`` scored rollouts that were *surprising*, using
+           :meth:`reconcile`'s own surprise test rather than a second threshold invented here. Two
+           parts of one module disagreeing about what "wrong" means is how a criterion drifts.
+        2. **Failures it cannot fix by refitting.** A run of surprises with arrows still fitting
+           well is a coefficient problem, and `observe` already refits every arrow on every
+           observation — retiring for that would throw away structure to solve a problem that was
+           already being solved.
+        3. **Somewhere to go.** At least one pair she is currently refusing to orient. Retiring a
+           model with nothing to replace it is how a system talks itself into amnesia.
+
+        Returns the version to retire, or ``None``. Deciding is separate from doing on purpose:
+        the caller runs it through a held-out trial.
+        """
+        try:
+            version = self.compile().version
+            record = self._by_version.get(version)
+            if not record or record.get("surprises", 0) < min_deaths:
+                return None
+            fitted = [r for r in self.relations.values() if r.usable and r.oriented]
+            if fitted and sum(r.r2 for r in fitted) / len(fitted) >= _REFIT_R2:
+                return None            # the arrows are fine; this is a coefficient problem
+            if not self.ambiguous():
+                return None            # nothing to become instead
+            return version
+        except Exception:  # noqa: BLE001
+            return None
+
+    def retire(self, version: str, *, why: str = "") -> int:
+        """Give up the directions this model inferred for itself. Archived, never deleted.
+
+        What dies is what she **inferred**: an ``INFERRED`` orientation came from word order she
+        read off her own observations, and if the model built on it keeps being surprised then
+        that reading is the thing under suspicion. ``ASSERTED`` and ``VERIFIED`` survive, because
+        testimony and intervention are not this model's guesses — they came from outside it, and
+        retiring them would be discarding evidence to fix a hypothesis.
+
+        A death that cannot be undone cannot be tried, so the program is archived and
+        :meth:`restore` puts it back. Returns how many arrows were un-oriented.
+        """
+        try:
+            program = self.compile()
+            self.retired[version or program.version] = program
+            self._retired_why[version or program.version] = str(why or "repeated surprise")
+            undone = 0
+            for relation in self.relations.values():
+                if relation.orientation == Orientation.INFERRED:
+                    relation.orientation = Orientation.UNKNOWN
+                    relation.precedence = 0
+                    undone += 1
+            self.retirements += 1
+            return undone
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def restore(self, version: str) -> bool:
+        """Put a retired model's directions back — the revert half of a reversible trial."""
+        try:
+            program = self.retired.get(str(version))
+            if program is None:
+                return False
+            for cause, effect, orientation in program.arrows:
+                relation = self.relations.get((cause, effect))
+                if relation is not None:
+                    relation.orientation = Orientation.stronger(
+                        relation.orientation, orientation)
+            self.retired.pop(str(version), None)
+            self._retired_why.pop(str(version), None)
+            self.retirements = max(0, self.retirements - 1)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def seed_ambiguities(self, designer: Any) -> int:
         """Hand every unsettled direction to the experiment designer as two rival hypotheses.
 
@@ -1086,6 +1177,8 @@ class InternalUniverse:
             # made the two look alike would punish exactly the behaviour that is wanted.
             "abstained_for_direction": self.abstained_for_direction,
             "model_version": self.compile().version,
+            "retired": {v: self._retired_why.get(v, "") for v in self.retired},
+            "retirements": self.retirements,
             "by_model": {v: {k: int(n) if k != "error" else round(n, 5)
                              for k, n in rec.items()}
                          for v, rec in self._by_version.items()},
