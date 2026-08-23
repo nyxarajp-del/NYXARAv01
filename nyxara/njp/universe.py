@@ -47,6 +47,7 @@ that model's universe, not hers.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import time
 from dataclasses import dataclass, field
@@ -59,6 +60,8 @@ __all__ = [
     "Rollout",
     "Hypothesis",
     "Experiment",
+    "CausalProgram",
+    "Orientation",
     "InternalUniverse",
     "ExperimentDesigner",
 ]
@@ -350,6 +353,12 @@ class Rollout:
     at: float = field(default_factory=time.time)
     scored: bool = False
     error: Optional[float] = None
+    #: Which version of the causal model produced this rollout.
+    #:
+    #: Nothing recorded it, so "the model was wrong" could never become "model v7 was wrong six
+    #: times". That is not a reporting nicety: a retirement decision has to count failures *per
+    #: model*, and without an identity on the prediction there is nothing to count them against.
+    model_version: str = ""
 
     @property
     def final(self) -> Dict[str, float]:
@@ -359,7 +368,62 @@ class Rollout:
         return {"action": self.action, "steps": len(self.states),
                 "final": {k: round(v, 4) for k, v in self.final.items()},
                 "confidence": round(self.confidence, 4), "scored": self.scored,
+                "model_version": self.model_version,
                 "error": None if self.error is None else round(self.error, 5)}
+
+
+@dataclass(frozen=True)
+class CausalProgram:
+    """The causal model as one addressable, comparable object.
+
+    **What this deliberately is not.** It is not a second simulator.
+    :meth:`InternalUniverse.intervene` already severs, propagates, prices confidence along the
+    path and records the route; :meth:`~InternalUniverse.imagine` already registers a rollout so
+    :meth:`~InternalUniverse.reconcile` can grade it later. Compiling the graph "to something
+    executable" would add nothing to execution and would mean writing a second engine beside a
+    working one, which is the duplication this package refuses. There is no ``run`` method here
+    and there should never be one.
+
+    What was genuinely missing is *identity*. Three consequences followed from a model that could
+    not be named:
+
+    * a prediction could not say which model made it, so failures could not be attributed;
+    * a change to the graph could not be detected, so nothing could ask whether it was an
+      improvement;
+    * the arrows the model *declined* to use were nowhere in its description, so a reader could
+      not tell a model that had no opinion from one that had refused to guess.
+
+    ``version`` is a hash over the arrows themselves — cause, effect, slope, intercept, sign,
+    orientation — so two universes that fit the same graph get the same name on any machine, and
+    changing a single declared direction changes it.
+    """
+
+    version: str = ""
+    arrows: Tuple[Tuple[str, str, str], ...] = ()      # (cause, effect, orientation)
+    #: Pairs that fit both ways and were not used because nothing established which way they run.
+    #: Part of the model's description: refusing is a property of the model, not an absence in it.
+    abstained: Tuple[Tuple[str, str], ...] = ()
+    variables: Tuple[str, ...] = ()
+    at: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"version": self.version,
+                "arrows": [list(a) for a in self.arrows],
+                "abstained": [list(p) for p in self.abstained],
+                "variables": list(self.variables), "at": round(self.at, 3)}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "CausalProgram":
+        try:
+            return cls(version=str(d.get("version", "")),
+                       arrows=tuple(tuple(str(x) for x in a)  # type: ignore[misc]
+                                    for a in (d.get("arrows") or [])),
+                       abstained=tuple(tuple(str(x) for x in p)  # type: ignore[misc]
+                                       for p in (d.get("abstained") or [])),
+                       variables=tuple(str(v) for v in (d.get("variables") or [])),
+                       at=float(d.get("at", 0.0)))
+        except Exception:  # noqa: BLE001
+            return cls()
 
 
 # --------------------------------------------------------------------------- #
@@ -383,6 +447,9 @@ class InternalUniverse:
         self.total_error = 0.0
         #: Variables declared to have no parents. See :meth:`exogenous`.
         self._exogenous: Set[str] = set()
+        #: version -> {"rollouts", "scored", "surprises", "error"}. What a retirement decision
+        #: counts: failures per *model*, which nothing could express before rollouts had a name.
+        self._by_version: Dict[str, Dict[str, float]] = {}
         #: How many times a propagation stopped because an arrow's direction was unestablished.
         #: Counted so "fewer answers" and "wrong answers" are distinguishable in the report.
         self.abstained_for_direction = 0
@@ -808,7 +875,9 @@ class InternalUniverse:
         a prediction, and this module's whole claim to be a world model rather than a daydream
         rests on :meth:`reconcile` being able to find this rollout later and grade it.
         """
-        roll = Rollout(action=_norm(action) or "act")
+        # Named before it runs. A rollout that cannot say which model produced it can be graded
+        # and cannot be attributed, and attribution is the whole point of grading it.
+        roll = Rollout(action=_norm(action) or "act", model_version=self.compile().version)
         try:
             state = dict(self.state)
             confidence = 1.0
@@ -825,6 +894,9 @@ class InternalUniverse:
                 if out.confidence <= 0.0:
                     break
             roll.confidence = confidence ** (1.0 / max(1, len(roll.states))) if roll.states else 0.0
+            self._by_version.setdefault(
+                roll.model_version or "unnamed",
+                {"rollouts": 0.0, "scored": 0.0, "surprises": 0.0, "error": 0.0})["rollouts"] += 1
             self.rollouts.append(roll)
             if len(self.rollouts) > self.capacity:
                 self.rollouts = self.rollouts[-self.capacity:]
@@ -868,12 +940,21 @@ class InternalUniverse:
             target.error = error
             self.reconciled += 1
             self.total_error += error
+            # Charged to the model that made the claim. Without this, "the model was wrong" can
+            # never become "this model has been wrong six times", which is the only form in which
+            # a retirement decision can be made at all.
+            record = self._by_version.setdefault(
+                target.model_version or "unnamed",
+                {"rollouts": 0.0, "scored": 0.0, "surprises": 0.0, "error": 0.0})
+            record["scored"] += 1
+            record["error"] += error
 
             # Surprise: the model was confident and still wrong. Scale-free, so it means the same
             # thing for a temperature and for a probability.
             scale = max(1e-6, sum(abs(observed[k]) for k in shared) / len(shared))
             if error / scale > (1.0 - target.confidence) + 0.25:
                 self.surprises += 1
+                record["surprises"] += 1
             return error
         except Exception:  # noqa: BLE001
             return 0.0
@@ -912,6 +993,41 @@ class InternalUniverse:
                 continue
             out.append((cause, effect))
         return out
+
+    def compile(self) -> CausalProgram:
+        """Name the current causal model, so a prediction can say which one made it.
+
+        Cheap — a hash over the arrows — and deliberately so: this runs on every rollout, and a
+        model identity that costs anything real would be paid for on turns that never need it.
+        """
+        try:
+            rows: List[Tuple[str, str, str]] = []
+            for (cause, effect), relation in sorted(self.relations.items()):
+                if not relation.oriented:
+                    continue
+                rows.append((cause, effect, relation.orientation))
+            digest = hashlib.blake2b(
+                "|".join(f"{c}>{e}:{o}:{self.relations[(c, e)].slope:.6f}:"
+                         f"{self.relations[(c, e)].intercept:.6f}:"
+                         f"{self.relations[(c, e)].sign}"
+                         for c, e, o in rows).encode("utf-8"),
+                digest_size=8).hexdigest()
+            return CausalProgram(
+                version=digest, arrows=tuple(rows),
+                abstained=tuple(sorted(self.ambiguous())),
+                variables=tuple(sorted({v for row in rows for v in row[:2]})),
+                at=time.time())
+        except Exception:  # noqa: BLE001 — an uncompilable model is an unnamed one, not a crash
+            return CausalProgram()
+
+    def error_by_model(self) -> Dict[str, Dict[str, Any]]:
+        """Per-model-version failure record — what a retirement decision has to count.
+
+        ``surprises`` rather than raw error, because :meth:`reconcile` already decides what counts
+        as a surprise (an error past the confidence the rollout itself claimed), and inventing a
+        second threshold here would let two parts of the module disagree about what "wrong" means.
+        """
+        return {version: dict(record) for version, record in self._by_version.items()}
 
     def seed_ambiguities(self, designer: Any) -> int:
         """Hand every unsettled direction to the experiment designer as two rival hypotheses.
@@ -969,6 +1085,10 @@ class InternalUniverse:
             # is not the model being wrong; it is the model declining to guess, and a report that
             # made the two look alike would punish exactly the behaviour that is wanted.
             "abstained_for_direction": self.abstained_for_direction,
+            "model_version": self.compile().version,
+            "by_model": {v: {k: int(n) if k != "error" else round(n, 5)
+                             for k, n in rec.items()}
+                         for v, rec in self._by_version.items()},
             "observations": self.observations,
             "rollouts": len(self.rollouts),
             "scored": sum(1 for r in self.rollouts if r.scored),
