@@ -159,6 +159,9 @@ class LoopReport:
     assumptions_tested: int = 0
     assumptions_refuted: int = 0
     assumptions_open: int = 0
+    #: Weaknesses she named and then committed to working on. Phase 6's milestone is that a
+    #: diagnosis becomes a curriculum; this is the count of times it did.
+    weaknesses_trained: int = 0
     # goals
     goals_added: int = 0
     goals_blocked: int = 0
@@ -312,6 +315,7 @@ class LearningLoop:
             "bits_gained": 0.0,
             "assumptions_mined": 0, "assumptions_tested": 0,
             "assumptions_refuted": 0, "assumptions_open": 0,
+            "weaknesses_trained": 0, "weaknesses_closed": 0,
             # Phase 5's milestone is `skills_created > 0`, and it was unanswerable from `stats()`
             # while being true: `_compress_programs` fires on the dream cadence and really did
             # adopt abstractions — measured, 12 solved and 1 adopted on turn 31 — and neither
@@ -344,6 +348,10 @@ class LearningLoop:
         # Which goal node stands for which of her own questions, so one question is one task and
         # answering it completes that task rather than leaving a duplicate behind.
         self._question_nodes: Dict[str, str] = {}
+        #: weakness key → goal node id, so one weakness is one piece of work rather than a new
+        #: task on every assessment.
+        self._trained: Dict[str, str] = {}
+        self._closed_weaknesses = 0
         self._mission_nid: str = ""
 
         self._install_repairs()
@@ -978,6 +986,13 @@ class LearningLoop:
             metareason = getattr(self.brain, "metareason", None)
             if metareason is not None and pending.solution is not None:
                 metareason.outcome(pending.solution, correct=correct)
+                # The same join, told to the recorder. `_Deferred` keeps the answering turn's
+                # Solution exactly so an outcome can be routed back to it, and the black box
+                # needs that join for the same reason `metareason` does: a grade read off the
+                # turn it *arrives* on belongs to a statement that chose no strategy.
+                blackbox = getattr(self.brain, "blackbox", None)
+                if blackbox is not None:
+                    blackbox.grade(pending.solution, correct=bool(correct))
                 rep.strategies_graded += 1
         except Exception:  # noqa: BLE001
             pass
@@ -1407,6 +1422,7 @@ class LearningLoop:
                     got = curriculum.assess(self.brain)
                     rep.stage = str(getattr(got, "current", "") or "")
                     rep.stages_mastered = len(getattr(got, "mastered", None) or ())
+                    rep.weaknesses_trained = self._train_on_weakness(got)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1613,6 +1629,98 @@ class LearningLoop:
         except Exception:  # noqa: BLE001
             return
 
+    def _train_on_weakness(self, report: Any) -> int:
+        """Turn a named weakness into work she has committed to. Returns how many are new.
+
+        **This is the second half of Phase 6's milestone and the half that did not exist.** The
+        first half already worked: :meth:`nyxara.njp.selfmodel.SelfModel.weakest` names the
+        capability she is worst at, :attr:`nyxara.njp.curriculum.Report.blocked_by` names what is
+        holding the current stage, and — since :mod:`nyxara.njp.blackbox` — she can also name the
+        *condition* under which a strategy of hers fails. Measured, all three answered:
+        ``('prediction', 0.243, weak=True)``, ``"only 10 of 12 required concepts.observations"``,
+        ``"derive fails 100% of the time when ungrounded, against 50% overall"``.
+
+        And nothing happened next. A weakness she can name and does not act on is a diagnosis, not
+        a curriculum, and the plan asks for the second.
+
+        Each becomes a task under her own standing mission, which is the same place a question she
+        decided to investigate goes — because it is the same kind of thing: work she has taken on
+        and can be measured against. Completion is not "she tried"; it is the weakness no longer
+        being named by the organ that named it, which :meth:`_close_trained_weaknesses` checks.
+
+        Three sources, deliberately, because they fail differently. A capability score is an
+        average over everything; a blocked stage is a threshold on one metric; a failure mode is a
+        join. A brain that only watched the average would keep practising what it is already
+        mediocre at and never notice the one condition it is reliably broken under.
+        """
+        tree = getattr(self.brain, "goals", None)
+        if tree is None:
+            return 0
+        added = 0
+        try:
+            mission = self._own_mission(tree)
+            if mission is None:
+                return 0
+            for key, name in self._weaknesses(report):
+                if key in self._trained:
+                    continue
+                task = tree.add(name[:80], parent=mission.nid, kind="task",
+                                expected_value=0.8, cost=0.3)
+                if task is None:
+                    continue
+                self._trained[key] = task.nid
+                added += 1
+            self._close_trained_weaknesses(tree, report)
+        except Exception:  # noqa: BLE001 — a weakness she cannot file is one she still has
+            return added
+        return added
+
+    def _weaknesses(self, report: Any) -> List[Tuple[str, str]]:
+        """``(key, what to practise)`` from every organ that can name a weakness."""
+        out: List[Tuple[str, str]] = []
+        try:
+            model = getattr(self.brain, "self_model", None)
+            weakest = model.weakest() if model is not None else None
+            if weakest is not None and getattr(weakest, "weak", False):
+                out.append((f"capability:{weakest.name}",
+                            f"practise {weakest.name} — measured at {weakest.level:.2f}"))
+            blocked = str(getattr(report, "blocked_by", "") or "")
+            # `Report.current` is a *StageResult*; the letter and name are on its `.stage`.
+            # Read off the result directly, every stage keyed as "stage:?" — one key for all of
+            # them, so moving from one rung to the next would look like the same weakness
+            # persisting and the task would never close.
+            result = getattr(report, "current", None)
+            stage = getattr(result, "stage", None) if result is not None else None
+            if blocked and stage is not None:
+                out.append((f"stage:{getattr(stage, 'letter', '?')}",
+                            f"unblock {getattr(stage, 'name', 'the current stage')}: {blocked}"))
+            blackbox = getattr(self.brain, "blackbox", None)
+            mode = blackbox.weakest_condition() if blackbox is not None else None
+            if mode is not None:
+                out.append((f"mode:{mode.condition}:{mode.strategy}",
+                            f"stop using {mode.strategy} when {mode.condition} — {mode.why()}"))
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def _close_trained_weaknesses(self, tree: Any, report: Any) -> None:
+        """Complete a training task when the organ that named the weakness stops naming it.
+
+        Not when she has practised, and not on a timer. "I worked on it" is what a system says
+        when it cannot tell whether it improved, and the whole point of naming the weakness with a
+        measurement was so that the same measurement could close it.
+        """
+        try:
+            still = {key for key, _name in self._weaknesses(report)}
+            for key, nid in list(self._trained.items()):
+                if key in still:
+                    continue
+                if tree.complete(nid) is not None:
+                    self._closed_weaknesses += 1
+                self._trained.pop(key, None)
+        except Exception:  # noqa: BLE001
+            return
+
     def _mine_assumptions(self, rep: LoopReport) -> None:
         """Surface what her arrows assume, test what can be tested, and record what was found.
 
@@ -1753,6 +1861,8 @@ class LearningLoop:
             self.totals["programs_solved"] += rep.programs_solved
             self.totals["programs_adopted"] += rep.programs_adopted
             self.totals["programs_transferred"] += rep.programs_transferred
+            self.totals["weaknesses_trained"] += rep.weaknesses_trained
+            self.totals["weaknesses_closed"] = self._closed_weaknesses
             self.totals["assumptions_mined"] += rep.assumptions_mined
             self.totals["assumptions_tested"] += rep.assumptions_tested
             self.totals["assumptions_refuted"] += rep.assumptions_refuted

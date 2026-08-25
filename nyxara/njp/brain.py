@@ -352,6 +352,7 @@ class NJPBrain:
         self.goals = self._build_goals(c)
         self.curiosity = self._build_curiosity(c)
         self.assumptions = self._build_assumptions(c)
+        self.blackbox = self._build_blackbox(c)
         self.attention = self._build_attention(c)
         self.environment = self._build_environment(c)
         self.readout = self._build_readout(c)
@@ -657,6 +658,21 @@ class NJPBrain:
             from nyxara.njp.assume import AssumptionMiner
             return AssumptionMiner()
         except Exception:  # noqa: BLE001 — she reasons on unexamined arrows, as she always did
+            return None
+
+    def _build_blackbox(self, c: Any) -> Any:
+        """The flight recorder — one row per act of thinking, kept so a *join* can be read.
+
+        Every organ keeps its own counters and none of them can answer "under which conditions
+        does my strategy historically fail?", because that is a question about strategy ×
+        situation and the average is the only thing anything held. See :mod:`nyxara.njp.blackbox`.
+        """
+        if not self._gate("blackbox", True):
+            return None
+        try:
+            from nyxara.njp.blackbox import BlackBox
+            return BlackBox()
+        except Exception:  # noqa: BLE001 — she thinks the same, she just cannot review it
             return None
 
     def _build_attention(self, c: Any) -> Any:
@@ -2355,6 +2371,12 @@ class NJPBrain:
             if self.loop is not None:
                 out.loop = self.loop.close(out)
 
+            # 10b. RECORD — one row for this act of thinking, after the loop so the report is
+            # on the thought and before the field so the row describes the turn as it was
+            # answered rather than as the field left it.
+            if self.blackbox is not None:
+                self.blackbox.record(out)
+
             # 11. THE FIELD — form concepts from what was grounded, keep the simulated universe
             # in step with the causal skeleton, and put this turn's error through the self-critic
             # that decides between adjusting a coefficient and **restructuring what she can
@@ -3608,6 +3630,7 @@ class NJPBrain:
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),
                             ("compiler", self.compiler),
+                            ("blackbox", self.blackbox),
                             ("epistemic", self.epistemic)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
@@ -3693,6 +3716,18 @@ class NJPBrain:
             arrow("meta→strategy learning", self.metareason,
                   "no kind has enough trials to name a winner",
                   ran=bool(getattr(self.metareason, "stats", lambda: {})().get("by_kind")))
+            # Phase 6's two arrows. The first is the join nothing held: a grade that never
+            # reaches the turn that chose is an outcome with no strategy attached, and no amount
+            # of it makes a failure *mode*. The second is the half of the milestone that did not
+            # exist — a weakness she can name and does not act on is a diagnosis, not a
+            # curriculum.
+            arrow("outcome→failure mode", self.blackbox,
+                  "no graded answer has met a condition twice, so no join exists yet",
+                  ran=bool(getattr(self.blackbox, "stats", lambda: {})().get("pairs", 0)))
+            arrow("weakness→training", self.loop,
+                  "nothing she can name as a weakness has become work she committed to",
+                  ran=bool((getattr(self.loop, "totals", None) or {}).get(
+                      "weaknesses_trained", 0)))
             arrow("↺", self.loop)
         except Exception:  # noqa: BLE001 — an unreadable organ is left out, not guessed at
             pass

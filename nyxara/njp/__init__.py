@@ -226,6 +226,7 @@ from nyxara.njp.relevance import (
     is_verified,
     revise_confidence,
 )
+from nyxara.njp.blackbox import BlackBox, Episode, FailureMode
 from nyxara.njp.assume import (
     Assumption,
     AssumptionKind,
@@ -339,4 +340,6 @@ __all__ = [
     "CognitiveEconomy", "Budget", "Tier", "budget_for",
     # NJP V.11 — the third knowledge state: what her model assumes and nothing has examined
     "AssumptionMiner", "Assumption", "AssumptionKind", "AssumptionStatus",
+    # NJP V.12 — one row per act of thinking, so a failure *mode* can be read off a join
+    "BlackBox", "Episode", "FailureMode",
 ]

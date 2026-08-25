@@ -36,7 +36,7 @@ def _run_intelligence(args: argparse.Namespace) -> int:
     harness reporting five more numbers is worse than reporting none.
     """
     from nyxara.eval.intelligence import run_intelligence_benchmark
-    report = run_intelligence_benchmark(seed=args.seed, width=args.width,
+    report = run_intelligence_benchmark(seed=int(args.seed or 0), width=args.width,
                                         only=tuple(args.stage or ()))
     print(report.render())
     if args.save:
@@ -184,11 +184,11 @@ def _run_frontier(args: argparse.Namespace) -> int:
     from nyxara.growth.curriculum import AutoCurriculum
     tier = int(args.tier) if args.tier is not None else None
     cur = AutoCurriculum(memory=None)
-    rep = cur.probe(core_solver(), seed=int(args.seed), tier=tier,
+    rep = cur.probe(core_solver(), seed=int(args.seed or 0), tier=tier,
                     per_tier=int(args.per_tier))
     payload = {"frontier_score": round(float(rep.frontier_score), 6),
                "by_tier": {int(k): round(float(v), 6) for k, v in rep.by_tier.items()},
-               "frontier_tier": int(rep.frontier_tier), "seed": int(args.seed),
+               "frontier_tier": int(rep.frontier_tier), "seed": int(args.seed or 0),
                "per_tier": int(args.per_tier), "n_problems": int(rep.n_problems),
                "n_correct": int(rep.n_correct)}
     print(f"frontier probe: score={payload['frontier_score']:.4f} "
@@ -198,6 +198,32 @@ def _run_frontier(args: argparse.Namespace) -> int:
             json.dump(payload, fh)
         print(f"\nfrontier probe saved -> {args.save}")
     return 0
+
+
+def _run_adversarial(args: argparse.Namespace) -> int:
+    """Run the adversarial natural-language battery and print the four rates per family.
+
+    Its own module has documented ``python -m nyxara.eval --adversarial`` since it was written,
+    and the flag did not exist — the battery was reachable only by importing it, which is the
+    repository's recurring failure and not a cosmetic one: a benchmark nobody can invoke the
+    documented way is a benchmark that stops being run. It is the instrument that grades the
+    language surface every other measurement reaches *through*, so it is wired here.
+
+    Exits non-zero only on a run that produced no items at all. The rates are evidence, not a
+    gate: there is no threshold here that a CI job could fail on without inviting the thresholds
+    to be tuned until they pass.
+    """
+    from nyxara.eval.adversarial import run_adversarial_benchmark
+
+    seed = 20260823 if args.seed is None else int(args.seed)
+    report = run_adversarial_benchmark(seed=seed, families=args.family or None)
+    print(report.render())
+    if args.save:
+        import json
+        with open(args.save, "w", encoding="utf-8") as fh:
+            json.dump(report.to_dict(), fh, indent=2)
+        print(f"\nadversarial run saved -> {args.save}")
+    return 0 if report.families else 1
 
 
 def _run_ablate(args: argparse.Namespace) -> int:
@@ -211,7 +237,7 @@ def _run_ablate(args: argparse.Namespace) -> int:
     import json
 
     from nyxara.eval.ablation import run_ablation
-    report = run_ablation(holdout_frac=float(args.holdout_frac), seed=int(args.seed),
+    report = run_ablation(holdout_frac=float(args.holdout_frac), seed=int(args.seed or 0),
                           limit=int(args.limit))
     print(report.render())
     if report.unmeasured:
@@ -296,6 +322,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--frontier", action="store_true",
                         help="probe the open-ended auto-curriculum frontier (the non-saturating "
                              "ruler the provably-better gate certifies against)")
+    parser.add_argument("--adversarial", action="store_true",
+                        help="run the adversarial natural-language battery "
+                             "(eval/adversarial.py): paraphrase, negation, open verbs, polar "
+                             "questions and near-miss neighbours, on generated vocabulary with a "
+                             "fresh brain per family. Measures the LANGUAGE SURFACE, not "
+                             "intelligence")
+    parser.add_argument("--family", action="append", default=None,
+                        help="adversarial: run only this family (repeatable). Each family draws "
+                             "its own seeded vocabulary, so one family alone poses exactly the "
+                             "items it would have posed inside a full run")
     parser.add_argument("--ablate", action="store_true",
                         help="measure each turn-path faculty against its OWN ABSENCE on the "
                              "held-out fold (eval/ablation.py): does it beat not having it? "
@@ -305,9 +341,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=0,
                         help="ablate: score at most N held-out tasks (0 = all). Each faculty "
                              "costs two full passes, so this is the wall-clock dial")
-    parser.add_argument("--seed", type=int, default=0,
-                        help="frontier: seed for the deterministic probe batch (same seed ⇒ same "
-                             "problems, so before/after edits are compared on identical questions)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="seed for a deterministic batch (same seed ⇒ same problems, so "
+                             "before/after edits are compared on identical questions). Defaults "
+                             "to 0 for --frontier and to the battery's own seed for --adversarial")
     parser.add_argument("--tier", type=int, default=None,
                         help="frontier: probe at this fixed difficulty tier (default: the "
                              "curriculum's current frontier tier)")
@@ -353,6 +390,8 @@ def main(argv: list[str] | None = None) -> int:
         from nyxara.eval.general_novel import run_general
         report = run_general()
         return 0 if report.accuracy >= 0.0 else 1
+    if args.adversarial:
+        return _run_adversarial(args)
     if args.frontier:
         return _run_frontier(args)
     if args.ablate:

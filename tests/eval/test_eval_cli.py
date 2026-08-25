@@ -52,3 +52,36 @@ def test_missing_baseline_is_tolerated(tmp_path, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "no baseline" in out.lower()
+
+
+def test_the_adversarial_battery_is_reachable_the_documented_way(capsys):
+    """Its own module has documented ``python -m nyxara.eval --adversarial`` since it was written
+    and the flag did not exist, so the only way in was an import. A benchmark that cannot be
+    invoked the documented way stops being run, and this one grades the language surface every
+    other measurement reaches through."""
+    rc = main(["--adversarial", "--family", "polar"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "adversarial natural-language benchmark" in out
+    assert "polar" in out
+    assert "surface" not in out          # --family really selected
+
+
+def test_the_adversarial_battery_keeps_its_own_default_seed(capsys):
+    """`--seed` defaults to 0 for `--frontier`, and silently reseeding a different battery with
+    it would make two runs of "the same" command incomparable across a CLI change."""
+    rc = main(["--adversarial", "--family", "polar"])
+    assert rc == 0
+    assert "seed 20260823" in capsys.readouterr().out
+    assert main(["--adversarial", "--family", "polar", "--seed", "7"]) == 0
+    assert "seed 7" in capsys.readouterr().out
+
+
+def test_an_adversarial_run_saves_as_json(tmp_path, capsys):
+    saved = tmp_path / "adv.json"
+    assert main(["--adversarial", "--family", "polar", "--save", str(saved)]) == 0
+    capsys.readouterr()
+    import json
+    payload = json.loads(saved.read_text(encoding="utf-8"))
+    assert payload["seed"] == 20260823
+    assert [f["family"] for f in payload["families"]] == ["polar"]
