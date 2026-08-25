@@ -46,6 +46,14 @@ __all__ = ["Surface", "Reply", "Dialogue"]
 # that must be reported rather than spoken through.
 FLUENT_PROVIDERS = frozenset({"litertlm"})
 
+#: Acts that assert nothing about the world, and so have no claim for an epistemic caveat to
+#: attach to. Imported from :mod:`nyxara.njp.economy` rather than restated, so the two layers
+#: cannot drift into disagreeing about what a social turn is.
+try:  # pragma: no cover - the fallback is exercised only when economy is unavailable
+    from nyxara.njp.economy import _SOCIAL_ACTS
+except Exception:  # noqa: BLE001
+    _SOCIAL_ACTS = frozenset({"greeting", "thanks", "farewell", "social_checkin", "state_query"})
+
 
 @dataclass
 class Surface:
@@ -79,13 +87,17 @@ class Reply:
     # tone. Recorded, never generated — she does not learn to be funny by noticing a joke.
     language: str = ""
     register: Dict[str, Any] = field(default_factory=dict)
+    #: What this turn was judged to be worth, and why — see :mod:`nyxara.njp.economy`. Carried on
+    #: the Reply so a declined rendering is visible to whoever reads the turn, rather than being
+    #: a silent absence indistinguishable from a model that was never installed.
+    budget: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"text": self.text, "source": self.source, "rendered": self.rendered,
                 "verified": self.verified, "confidence": round(self.confidence, 4),
                 "decided": self.decided, "evidence": self.evidence, "why": self.why,
                 "language": self.language, "register": dict(self.register),
-                "asked": self.asked,
+                "asked": self.asked, "budget": dict(self.budget),
                 "surface": self.surface.to_dict() if self.surface is not None else None}
 
 
@@ -93,12 +105,24 @@ class Dialogue:
     """Turns a thought into speech — her content, the model's phrasing, and no pretending."""
 
     def __init__(self, *, llm: Any = None, require_fluent_surface: bool = True,
-                 soul: Any = None, max_tokens: int = 220) -> None:
+                 soul: Any = None, max_tokens: int = 220, economy: Any = None) -> None:
         self._llm = llm
         self._tried = llm is not None
         self.require_fluent_surface = bool(require_fluent_surface)
         self.soul = soul
         self.max_tokens = max(16, int(max_tokens))
+        # What a turn is worth. Held rather than looked up per call, because its counters are the
+        # only evidence that declining a rendering ever saved anything — see
+        # :mod:`nyxara.njp.economy`.
+        self.economy = economy if economy is not None else self._default_economy()
+
+    def _default_economy(self) -> Any:
+        """A private economy, or ``None`` if the module is unavailable — never fatal."""
+        try:
+            from nyxara.njp.economy import CognitiveEconomy
+            return CognitiveEconomy(max_tokens=self.max_tokens)
+        except Exception:  # noqa: BLE001 — no accountant means nothing is withheld
+            return None
 
     # ---- the voice ------------------------------------------------------- #
     def _get_llm(self) -> Any:
@@ -175,8 +199,19 @@ class Dialogue:
                 out.text = self._nothing_to_say(thought)
                 return out
 
-            if out.surface.fluent or not self.require_fluent_surface:
-                rendered = self._render(content, thought)
+            # What this turn is worth, before the expensive call rather than after it. This is
+            # the one place in the package where a language model could be reached by a turn that
+            # the reasoning side had already declined to spend anything on: `CognitivePolicy` and
+            # `Router` both refuse the cortex to a greeting, and rendering asked nobody. So
+            # "Hii Master 👋" — a finished sentence her own social path wrote — was being sent to
+            # a 9B model to be "rewritten as one natural, direct reply". An NJP turn is 2-12 ms
+            # on this machine; that call is seconds.
+            budget = self._budget(content, thought)
+            out.budget = budget.to_dict() if budget is not None else {}
+            if (out.surface.fluent or not self.require_fluent_surface) and \
+                    (budget is None or budget.render):
+                rendered = self._render(content, thought,
+                                        max_tokens=getattr(budget, "max_tokens", None))
                 if rendered:
                     out.text, out.rendered = self._hedge(rendered, thought), True
                     return out
@@ -188,7 +223,21 @@ class Dialogue:
             out.text = str(getattr(thought, "answer", "") or "")
             return out
 
-    def _render(self, content: str, thought: Any) -> str:
+    def _budget(self, content: str, thought: Any) -> Any:
+        """What this turn has earned, or ``None`` when no economy is attached.
+
+        ``None`` is permissive by construction: an absent accountant withholds nothing, which is
+        the only safe default for a layer that sits between her and saying anything at all.
+        """
+        if self.economy is None:
+            return None
+        try:
+            return self.economy.assess(content=content,
+                                       act=getattr(thought, "act", None), thought=thought)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _render(self, content: str, thought: Any, *, max_tokens: Optional[int] = None) -> str:
         """Let the model phrase *her* content. It may reword; it may not add claims."""
         llm = self._get_llm()
         if llm is None:
@@ -200,7 +249,8 @@ class Dialogue:
                 "Use only what is given — do not add facts, examples, or caveats of your own.\n"
                 f"\nQuestion: {getattr(thought, 'stimulus', '')}\n"
                 f"Conclusion: {content}\n\nReply:")
-            text = str(llm.generate(prompt, system=system, max_tokens=self.max_tokens) or "").strip()
+            cap = int(max_tokens) if max_tokens else self.max_tokens
+            text = str(llm.generate(prompt, system=system, max_tokens=cap) or "").strip()
             if not text or not self._faithful(text, content):
                 return ""                 # a rendering that drifted is worse than no rendering
             return text
@@ -305,6 +355,14 @@ class Dialogue:
             state = str(getattr(thought, "epistemic", "") or "")
             if not text or state != "believed":
                 return text
+            # A hedge is a caveat on a *claim*, and a social turn makes none. "Hii Master 👋" is
+            # not a proposition she could be wrong about, so
+            # "(I believe this, but I am not certain.)" attached to it is not caution — it is a
+            # confidence report about a greeting. Measured with a model attached, that is
+            # verbatim what she said. The same distinction `CognitivePolicy` already draws for
+            # which pathways an act permits, applied to which framing it permits.
+            if str(getattr(getattr(thought, "act", None), "kind", "") or "") in _SOCIAL_ACTS:
+                return text
             confidence = float(getattr(thought, "epistemic_confidence", 0.0) or 0.0)
             if confidence <= 0.0:
                 return f"{text}\n(I believe this, but I am not certain.)"
@@ -346,7 +404,13 @@ class Dialogue:
     # ---- introspection ---------------------------------------------------- #
     def stats(self) -> Dict[str, Any]:
         try:
-            return {"surface": self.surface().to_dict(),
-                    "require_fluent_surface": self.require_fluent_surface}
+            out = {"surface": self.surface().to_dict(),
+                   "require_fluent_surface": self.require_fluent_surface}
+            if self.economy is not None:
+                # How often the language surface was not asked to do work that could not have
+                # changed the reply. Reported rather than asserted: zero here is a real answer,
+                # and means the economy is not earning its place on this workload.
+                out["economy"] = self.economy.stats()
+            return out
         except Exception:  # noqa: BLE001
             return {}

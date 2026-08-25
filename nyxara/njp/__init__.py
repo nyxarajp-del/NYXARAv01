@@ -226,6 +226,7 @@ from nyxara.njp.relevance import (
     is_verified,
     revise_confidence,
 )
+from nyxara.njp.economy import Budget, CognitiveEconomy, Tier, budget_for
 from nyxara.njp.semantics import (
     Meaning,
     SemanticCompiler,
@@ -328,4 +329,6 @@ __all__ = [
     # NJP V.09 — language compiled into a typed representation, so the open half of a sentence
     # stops being a list somebody has to keep adding to
     "SemanticCompiler", "Meaning", "Tag", "Token", "compile_meaning", "tag_tokens",
+    # NJP V.10 — required computation, not maximum computation
+    "CognitiveEconomy", "Budget", "Tier", "budget_for",
 ]
