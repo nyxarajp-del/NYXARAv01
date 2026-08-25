@@ -389,7 +389,16 @@ class MetaLearner:
             self.selections += 1
             untried = [s for s in bucket.values() if s.trials < self.min_trials]
             if untried:
-                chosen = untried[0]          # never prefer a strategy over an untested one
+                # The **least**-tried, not the first. `untried[0]` is insertion order, so the
+                # option registered first monopolises the arm until it alone clears `min_trials`
+                # — and where rewards are sparse (a reward needs a solved problem, not merely a
+                # turn) the later options are never reached at all. Measured over 254 selections:
+                # `strategy:factual` showed derive at 3 trials with recall and a promoted shape
+                # at 0, and `switches` was 0 because the choice never changed.
+                #
+                # Least-tried is the standard "try each arm before preferring any" rule and it
+                # round-robins properly; ties fall back to insertion order, so nothing else moves.
+                chosen = min(untried, key=lambda s: s.trials)
             elif self._random() < self.explore:
                 options = list(bucket.values())
                 chosen = options[int(self._random() * len(options)) % len(options)]

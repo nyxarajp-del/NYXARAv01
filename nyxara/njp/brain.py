@@ -870,10 +870,37 @@ class NJPBrain:
                     # Its own measured success rate, not a number anyone picked. A shape promoted
                     # on a strong record starts believed to that degree and no further.
                     prior=float(candidate.success if candidate.success is not None else 0.5))
+                self._remember_skill(
+                    name, f"reason by {' → '.join(shape)}",
+                    detail=(f"used {candidate.seen}× with {candidate.success:.0%} success, "
+                            f"saving {candidate.saving:.2f}"))
                 added += 1
         except Exception:  # noqa: BLE001 — a failed promotion leaves the registry as it was
             return added
         return added
+
+    def _remember_skill(self, key: str, text: str, *, detail: str = "") -> None:
+        """File a skill in **procedural** memory — the level that holds *how to do something*.
+
+        Phase 5 names procedural memory as a thing to build, and measured over a full session the
+        level was empty: ``{'working': 0, 'episodic': 42, 'semantic': 8, 'procedural': 0}``. Not
+        because nothing qualified — she was inventing reusable programs and promoting reasoning
+        shapes on their own cadences — but because neither had anywhere to be *kept*. A skill that
+        lives only in the organ that produced it is one the rest of her cannot find.
+
+        Procedural is the right level rather than a convenient one: its policy is stability by
+        **use** over ninety days, where episodic decays and semantic is promoted by recurrence.
+        A way of doing something is not a fact that keeps being restated; it is a capability that
+        should survive not being needed for a while.
+        """
+        if self.levels is None or not key:
+            return
+        try:
+            from nyxara.njp.levels import Level
+            self.levels.remember(key, f"{text} — {detail}" if detail else text,
+                                 level=Level.PROCEDURAL, source="skill", claim=key)
+        except Exception:  # noqa: BLE001 — an unfiled skill still works where it was made
+            return
 
     # ---- the repairs, one per error kind ---------------------------------- #
     def _repair_planning(self, outcome: Any) -> bool:
@@ -1431,13 +1458,22 @@ class NJPBrain:
         Nothing here drives it. It is constructed and held, so the index can read its curve and a
         caller can step it; the WAKE/SLEEP/DREAM loop stays something run deliberately rather than
         something every turn pays for.
+
+        **The transfer verifier is attached, and Phase 5's milestone is why.** That milestone is
+        two claims — ``skills_created > 0`` *and the skills transfer to unseen tasks* — and the
+        engine has always had the hook for the second (``self.transfer.transfer_all(...)``, called
+        on every SLEEP) with nothing in the repository implementing it. The attribute defaulted to
+        ``None``, the guard above the call was always false, and ``transferred`` was structurally
+        zero on every cycle ever run. See :mod:`nyxara.growth.zeroshot`.
         """
         if not self._gate("noesis", True):
             return None
         try:
             from nyxara.growth.noesis import NoesisEngine
+            from nyxara.growth.zeroshot import ZeroShotTransfer
             return NoesisEngine(seed=self._cfg("seed", 42),
-                                tasks_per_cycle=self._cfg("noesis_tasks_per_cycle", 12))
+                                tasks_per_cycle=self._cfg("noesis_tasks_per_cycle", 12),
+                                transfer=ZeroShotTransfer())
         except Exception:  # noqa: BLE001 — a brain without a program library still thinks
             return None
 

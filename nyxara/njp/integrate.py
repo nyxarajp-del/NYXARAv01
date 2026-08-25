@@ -144,6 +144,10 @@ class LoopReport:
     #: different findings, and index term R could not tell them apart.
     programs_solved: int = 0
     programs_adopted: int = 0
+    #: Adopted abstractions confirmed on tasks that arrived *after* they were adopted, and that
+    #: then survived the adversarial battery against those tasks' oracles. The second half of
+    #: Phase 5's milestone; see :mod:`nyxara.growth.zeroshot`.
+    programs_transferred: int = 0
     beliefs_settled: int = 0
     beliefs_retracted: int = 0
     questions_closed: int = 0
@@ -208,7 +212,8 @@ class LoopReport:
                 "diagnoses": dict(self.diagnoses), "repaired": self.repaired,
                 "shapes_promoted": self.shapes_promoted,
                 "programs": {"solved": self.programs_solved,
-                             "adopted": self.programs_adopted},
+                             "adopted": self.programs_adopted,
+                             "transferred": self.programs_transferred},
                 "graded": {"strategies": self.strategies_graded,
                            "beliefs_settled": self.beliefs_settled,
                            "beliefs_retracted": self.beliefs_retracted,
@@ -307,6 +312,12 @@ class LearningLoop:
             "bits_gained": 0.0,
             "assumptions_mined": 0, "assumptions_tested": 0,
             "assumptions_refuted": 0, "assumptions_open": 0,
+            # Phase 5's milestone is `skills_created > 0`, and it was unanswerable from `stats()`
+            # while being true: `_compress_programs` fires on the dream cadence and really did
+            # adopt abstractions — measured, 12 solved and 1 adopted on turn 31 — and neither
+            # number was ever rolled up, so the session totals had no key for them at all. Same
+            # shape as `bits_gained`: carried on the report, absent from the sum.
+            "programs_solved": 0, "programs_adopted": 0, "programs_transferred": 0,
             "repaired": 0, "capabilities": 0, "train_steps": 0,
             "consolidations": 0, "discoveries": 0, "wonders": 0,
             "goals_added": 0, "goals_completed": 0,
@@ -1576,7 +1587,30 @@ class LearningLoop:
             report = engine.step()
             rep.programs_solved = int(getattr(report, "solved", 0) or 0)
             rep.programs_adopted = int(getattr(report, "abstractions_adopted", 0) or 0)
+            rep.programs_transferred = int(getattr(report, "transferred", 0) or 0)
+            self._file_programs(engine)
         except Exception:  # noqa: BLE001 — a failed compression leaves the library as it was
+            return
+
+    def _file_programs(self, engine: Any) -> None:
+        """Put adopted abstractions where a skill belongs — procedural memory.
+
+        An abstraction is *how to compute something*, which is the definition of the procedural
+        level, and it lived only inside the engine that induced it. Filing it is what makes
+        "she has learned a skill" a statement about her memory rather than about one organ's
+        internal dict.
+        """
+        remember = getattr(self.brain, "_remember_skill", None)
+        if remember is None:
+            return
+        try:
+            library = getattr(engine, "library", None)
+            for name, abstraction in (getattr(library, "abstractions", None) or {}).items():
+                body = getattr(abstraction, "body", None)
+                remember(f"program:{name}",
+                         f"{name} := {body.pretty() if body is not None else '?'}",
+                         detail=f"arity {getattr(abstraction, 'arity', 0)}")
+        except Exception:  # noqa: BLE001
             return
 
     def _mine_assumptions(self, rep: LoopReport) -> None:
@@ -1716,6 +1750,9 @@ class LearningLoop:
             self.totals["beliefs_retracted"] += rep.beliefs_retracted
             self.totals["questions_closed"] += rep.questions_closed
             self.totals["experiments_run"] += rep.experiments_run
+            self.totals["programs_solved"] += rep.programs_solved
+            self.totals["programs_adopted"] += rep.programs_adopted
+            self.totals["programs_transferred"] += rep.programs_transferred
             self.totals["assumptions_mined"] += rep.assumptions_mined
             self.totals["assumptions_tested"] += rep.assumptions_tested
             self.totals["assumptions_refuted"] += rep.assumptions_refuted
