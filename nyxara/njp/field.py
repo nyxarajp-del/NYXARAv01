@@ -235,6 +235,11 @@ class Trial:
 #: with the conversation and nothing else here is unbounded.
 _OBSERVED_MEMORY = 4096
 
+#: Held-out score below which the measure she is judged by is itself the thing limiting her.
+#: Set well under a healthy configuration — a loop that always finds something wrong is a loop
+#: whose findings carry no information.
+_BENCHMARK_FLOOR = 0.7
+
 
 def _head_noun(subject: str) -> str:
     """``plant a`` → ``plant``. The kind, with the instance label removed.
@@ -915,8 +920,34 @@ class RecursiveCognitiveField:
                 # Remembered so it is not proposed again from the same state. Without this the
                 # loop spends every cycle re-running its first failed experiment.
                 self._rejected.add(self._signature(modification))
-                trial.why = ("adversarial battery failed" if not trial.adversarial_passed
-                             else f"no gain ({trial.baseline:.4f} → {trial.candidate:.4f})")
+                if not trial.adversarial_passed:
+                    trial.why = "adversarial battery failed"
+                elif trial.candidate == trial.baseline:
+                    # **Exactly** equal — not merely close. A knob that moves the configuration
+                    # and leaves the held-out score identical to full float precision has not
+                    # produced a worse configuration; it has produced no measurement at all,
+                    # because the benchmark cannot see the thing it changed.
+                    #
+                    # Recorded as unmeasurable rather than as a failed trial, for the reason the
+                    # organ-level guard above already states: "Refusing is better than guessing.
+                    # It converts an invisible non-result into a stated gap." That guard asks
+                    # whether the *organ* is covered and passes `concepts` — which is covered —
+                    # while two of its three knobs are invisible anyway. Measured: `similarity`
+                    # and `invariant_share` swept across their whole legal ranges leave the
+                    # benchmark at 0.779167 to six decimal places and the concept count at 4,
+                    # because `concepts._thresholds` already searches a band around `similarity`
+                    # and keeps the best — so the base value cannot matter. `min_members` does
+                    # move it, and is correctly rejected for moving it the wrong way.
+                    #
+                    # Counting those as "no gain" reports a failed experiment where there was no
+                    # experiment, and hides the finding worth having: two knobs this loop offers
+                    # first cannot be adjudicated by the measure it adjudicates with.
+                    self.unmeasurable += 1
+                    trial.why = (f"{modification.organ}.{modification.knob} left the benchmark "
+                                 f"unchanged at {trial.baseline:.6f} — the measure cannot see "
+                                 f"this knob, so the trial decided nothing")
+                else:
+                    trial.why = f"no gain ({trial.baseline:.4f} → {trial.candidate:.4f})"
             return trial
         except Exception:  # noqa: BLE001 — a failed meta-cycle changes nothing
             trial.why = "meta-cycle failed"
@@ -935,6 +966,33 @@ class RecursiveCognitiveField:
         exactly the failure that put six of these counters at zero for 113 turns.
         """
         found: List[Bottleneck] = []
+        # **The measure she is adjudicated by, as a bottleneck in its own right.**
+        #
+        # Every source below names an organ-specific symptom — compression, answerable share,
+        # unresolved experiments — and none of them is the held-out benchmark. So a configuration
+        # the benchmark itself scores as badly degraded is invisible here, and the whole
+        # self-improvement pipeline never starts. Measured: `min_members` forced to 4 takes the
+        # benchmark from 0.779167 to 0.458333 — a 41% fall the loop is adjudicated by — and
+        # `find_bottleneck` answers "no bottleneck worth acting on" on every cycle, forever.
+        #
+        # The failure is that the detector and the adjudicator measure different things. Worse,
+        # they can point opposite ways: refusing to form concepts at all *raises* compression
+        # (fewer, larger kinds) while collapsing coverage, so the organ-specific metric reports
+        # health exactly when the benchmark reports collapse.
+        #
+        # Blamed on whichever component actually scores worst, because that is the half dragging
+        # the total and the half a modification has to reach. Gated well below a healthy score so
+        # a brain that is doing fine is not perpetually "improving" — a loop that always finds
+        # something wrong is a loop whose findings mean nothing.
+        weakest = self._weakest_component()
+        if weakest is not None:
+            organ, score = weakest
+            if score < _BENCHMARK_FLOOR:
+                found.append(Bottleneck(
+                    organ=organ, metric="benchmark", value=score,
+                    severity=min(1.0, max(0.0, (_BENCHMARK_FLOOR - score) / _BENCHMARK_FLOOR)),
+                    why=(f"{organ} scores {score:.3f} on held-out data, which is what every "
+                         f"trial here is judged by")))
         if self.concepts is not None:
             ratio = self.concepts.compression()
             if ratio < 1.6:
@@ -1142,6 +1200,30 @@ class RecursiveCognitiveField:
             return False
 
     # ---- the benchmark ------------------------------------------------------- #
+    def _weakest_component(self) -> Optional[Tuple[str, float]]:
+        """Which half of the benchmark is dragging it, and by how much.
+
+        The benchmark is a weighted mean of two organ scores, so the mean alone cannot say what
+        to change. Returning the weaker component is what makes a benchmark bottleneck
+        *actionable* rather than merely alarming.
+        """
+        try:
+            parts: List[Tuple[str, List[Tuple[float, float]]]] = [
+                ("concepts", self._score_concepts()),
+                ("universe", self._score_universe()),
+            ]
+            scored: List[Tuple[str, float]] = []
+            for organ, rows in parts:
+                weight = sum(w for _s, w in rows)
+                if weight <= 0.0:
+                    continue
+                scored.append((organ, sum(s * w for s, w in rows) / weight))
+            if not scored:
+                return None
+            return min(scored, key=lambda row: row[1])
+        except Exception:  # noqa: BLE001
+            return None
+
     def benchmark(self) -> float:
         """Score her current cognitive configuration on data she did not tune on.
 
