@@ -474,7 +474,21 @@ class MetaReasoner:
             try:
                 picked = self.meta_learner.choose(f"strategy:{kind}")
                 name = getattr(picked, "name", "") or getattr(picked, "value", "")
-                if name in self.strategies and name not in set(exclude):
+                # **Against the pool, not against the registry.** The two filters above — which
+                # strategies this *kind* admits, and which the turn's *speech act* permits — were
+                # computed and then thrown away on this path: the check used to be `name in
+                # self.strategies`, which every registered strategy passes. So the shared bandit
+                # could hand back a strategy the kind does not admit, or one `_permitted` had just
+                # excluded, and `_permitted`'s own docstring says exactly what that costs: "a turn
+                # whose speech act permits no reasoning is a turn that gets none". Measured on a
+                # brain where `simulate` held an arm the act forbade: `_candidates` returned
+                # `['introspect']`, `_permitted` returned `['introspect']`, and `choose` returned
+                # `simulate`.
+                #
+                # Falling through to UCB1 over the pool is the right answer, not returning None:
+                # the bandit having no *admissible* opinion is not the same as there being no
+                # admissible strategy, and the pool is non-empty or we returned above.
+                if name in {s.name for s in pool}:
                     return self.strategies[name]
             except Exception:  # noqa: BLE001 — the shared bandit is optional
                 pass

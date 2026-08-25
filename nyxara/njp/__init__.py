@@ -227,6 +227,13 @@ from nyxara.njp.relevance import (
     revise_confidence,
 )
 from nyxara.njp.blackbox import BlackBox, Episode, FailureMode
+from nyxara.njp.evolution import (
+    CognitiveEvolution,
+    EvolutionTrial,
+    Measurement,
+    Mutation,
+    Situation,
+)
 from nyxara.njp.assume import (
     Assumption,
     AssumptionKind,
@@ -342,4 +349,6 @@ __all__ = [
     "AssumptionMiner", "Assumption", "AssumptionKind", "AssumptionStatus",
     # NJP V.12 — one row per act of thinking, so a failure *mode* can be read off a join
     "BlackBox", "Episode", "FailureMode",
+    # NJP V.13 — structural change to her own cognition, adopted only on measured evidence
+    "CognitiveEvolution", "Mutation", "EvolutionTrial", "Measurement", "Situation",
 ]

@@ -353,6 +353,7 @@ class NJPBrain:
         self.curiosity = self._build_curiosity(c)
         self.assumptions = self._build_assumptions(c)
         self.blackbox = self._build_blackbox(c)
+        self.evolution = self._build_evolution(c)
         self.attention = self._build_attention(c)
         self.environment = self._build_environment(c)
         self.readout = self._build_readout(c)
@@ -673,6 +674,22 @@ class NJPBrain:
             from nyxara.njp.blackbox import BlackBox
             return BlackBox()
         except Exception:  # noqa: BLE001 — she thinks the same, she just cannot review it
+            return None
+
+    def _build_evolution(self, c: Any) -> Any:
+        """Phase 7 — structural change to her own cognition, adopted only on evidence.
+
+        A knob is :meth:`nyxara.njp.field.RecursiveCognitiveField.meta_cycle`'s business. This one
+        owns what a knob cannot reach: a new operator, a new representation, a new strategy, a new
+        edge of the selection graph — each through sandbox, benchmark, adversarial, regression and
+        an old-versus-new comparison before anything is promoted. See :mod:`nyxara.njp.evolution`.
+        """
+        if not self._gate("evolution", True):
+            return None
+        try:
+            from nyxara.njp.evolution import CognitiveEvolution
+            return CognitiveEvolution(gates=bool(self._cfg("evolution_gates", True)))
+        except Exception:  # noqa: BLE001 — she keeps the cognition she was written with
             return None
 
     def _build_attention(self, c: Any) -> Any:
@@ -2240,6 +2257,12 @@ class NJPBrain:
                     out.intent = self.intent.read(out.stimulus)
                 except Exception:  # noqa: BLE001
                     out.intent = None
+            # `field._predict_world` labels its transition with `brain._last_intent_kind`, and
+            # **nothing in the package ever assigned it** — one read, no writes, so every
+            # observation the field gave the dynamics model carried the empty action label while
+            # the loop's half carried a real one. Two halves of one model disagreeing about
+            # whether an action happened. Written here, where the intent is first known.
+            self._last_intent_kind = str(getattr(out.intent, "kind", "") or "")
 
             # 2-4. perceive and ground
             out.percept = self.perceive(out.stimulus, remember=remember, intent=out.intent)
@@ -3631,6 +3654,7 @@ class NJPBrain:
                             ("cortex", self.cortex), ("router", self.router),
                             ("compiler", self.compiler),
                             ("blackbox", self.blackbox),
+                            ("evolution", self.evolution),
                             ("epistemic", self.epistemic)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
@@ -3699,9 +3723,17 @@ class NJPBrain:
             arrow("→counterfactual", self.universe,
                   "no intervention has been compiled and run",
                   ran=bool(compiler.get("executable", 0)))
+            # Named where it actually lives. The encoder is `integrate.LearningLoop._encode_state`
+            # — never `njp.predictive._encode_state`, which does not exist — and since Phase 7 it
+            # is one of several the loop may feed, chosen by measurement rather than by the line
+            # that was written first. The arrow is open while the promoted representation is still
+            # the sixteen-bucket histogram, whose own docstring shows three unrelated words
+            # sharing one state.
             arrow("→plan", self.predictive,
-                  "the state encoder cannot carry identity — see njp.predictive._encode_state",
-                  ran=False)
+                  "the promoted state representation cannot carry identity — see "
+                  "njp.evolution.ENCODERS and integrate.LearningLoop._encode_state",
+                  ran=bool(getattr(getattr(self, "loop", None), "predictive_encoding", "")
+                           not in ("", "buckets16", "buckets64")))
             arrow("test→prediction error", self.predictor,
                   "nothing has been scored", ran=bool(predict.get("scored", 0)))
             arrow("error→diagnosis", self.predictor,
@@ -3728,6 +3760,11 @@ class NJPBrain:
                   "nothing she can name as a weakness has become work she committed to",
                   ran=bool((getattr(self.loop, "totals", None) or {}).get(
                       "weaknesses_trained", 0)))
+            # Phase 7. A knob is the field's business; this is the arrow that says whether
+            # anything *structural* has ever survived a benchmark, and it is open until one has.
+            arrow("weakness→rewire", self.evolution,
+                  "no structural change has measured better than what she was written with",
+                  ran=bool(getattr(self.evolution, "cognitive_rewires", 0)))
             arrow("↺", self.loop)
         except Exception:  # noqa: BLE001 — an unreadable organ is left out, not guessed at
             pass

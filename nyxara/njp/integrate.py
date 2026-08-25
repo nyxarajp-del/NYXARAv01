@@ -83,6 +83,11 @@ _WONDER_EVERY = 16
 # for programs and then tries to compress them, which is the most expensive thing here, and a
 # library does not become worth compressing between one turn and the next.
 _DREAM_EVERY = 32
+
+#: Turns between structural-evolution cycles. Slower than everything else here on purpose: a
+#: cycle that finds a winner pays for two real batteries, and a rewire is not the kind of thing
+#: that should be attempted between one turn and the next.
+_EVOLVE_EVERY = 48
 # How often she goes after her own strongest causal claim. Slowest of the four, because an attack
 # reads the whole event record and because a belief does not need challenging every turn — but
 # on a *turn* count like the others, since a wall-clock cadence is exactly what left the slow
@@ -162,6 +167,11 @@ class LoopReport:
     #: Weaknesses she named and then committed to working on. Phase 6's milestone is that a
     #: diagnosis becomes a curriculum; this is the count of times it did.
     weaknesses_trained: int = 0
+    #: Phase 7's milestone. A *structural* change to her own cognition — a representation, an
+    #: operator, a strategy, an edge of the selection graph — adopted after measuring strictly
+    #: better on held-out data and breaking neither battery. Never incremented by trying.
+    cognitive_rewires: int = 0
+    evolution_trials: int = 0
     # goals
     goals_added: int = 0
     goals_blocked: int = 0
@@ -289,7 +299,7 @@ class LearningLoop:
                  discover_every: int = _DISCOVER_EVERY, wonder_every: int = _WONDER_EVERY,
                  attack_every: int = _ATTACK_EVERY,
                  assess_every: int = _ASSESS_EVERY, ledger_every: int = _LEDGER_EVERY,
-                 dream_every: int = _DREAM_EVERY,
+                 dream_every: int = _DREAM_EVERY, evolve_every: int = _EVOLVE_EVERY,
                  train: bool = True, defer_capacity: int = 256) -> None:
         self.brain = brain
         self.consolidate_every = max(1, int(consolidate_every))
@@ -299,6 +309,7 @@ class LearningLoop:
         self.assess_every = max(1, int(assess_every))
         self.ledger_every = max(1, int(ledger_every))
         self.dream_every = max(1, int(dream_every))
+        self.evolve_every = max(1, int(evolve_every))
         self.train_enabled = bool(train)
         self.defer_capacity = max(8, int(defer_capacity))
 
@@ -316,6 +327,7 @@ class LearningLoop:
             "assumptions_mined": 0, "assumptions_tested": 0,
             "assumptions_refuted": 0, "assumptions_open": 0,
             "weaknesses_trained": 0, "weaknesses_closed": 0,
+            "cognitive_rewires": 0, "evolution_trials": 0,
             # Phase 5's milestone is `skills_created > 0`, and it was unanswerable from `stats()`
             # while being true: `_compress_programs` fires on the dream cadence and really did
             # adopt abstractions — measured, 12 solved and 1 adopted on turn 31 — and neither
@@ -340,6 +352,12 @@ class LearningLoop:
         # exactly one turn of history and no more.
         self._prev_fired: Tuple[int, ...] = ()
         self._prev_state: List[float] = []
+        #: How the *loop's* half of the dynamics model represents a state. A promotion from
+        #: :mod:`nyxara.njp.evolution` is the only thing that changes it; the default is exactly
+        #: what this loop has always fed.
+        self.predictive_encoding: str = "buckets16"
+        self._prev_situation: Any = None
+        self._situation_now: Any = None
         # The manifold snapshots either side of the current turn. Kept here rather than read off
         # the fabric because the fabric overwrites its own "previous" during the settle.
         self._prev_snapshot: Any = None
@@ -504,6 +522,18 @@ class LearningLoop:
             # Taken before any repair can run, so `_repair_world` sees a genuine before/after pair.
             self._snapshot = getattr(settled, "snapshot", None)
 
+            # One row of raw material for Phase 7's sandbox, taken before anything else can
+            # fail. Kept here rather than inside `_observe_transition` because that method
+            # returns early whenever `world` is off or the previous state is missing, and a
+            # *trace* of what the turns looked like has no reason to depend on either.
+            situation = self._situation(
+                thought, fired,
+                str(getattr(getattr(thought, "intent", None), "kind", "") or "turn"))
+            self._situation_now = situation
+            evolution = getattr(self.brain, "evolution", None)
+            if evolution is not None:
+                evolution.observe(situation)
+
             self._count_events(thought, rep)
             self._observe_transition(thought, fired, rep)
             self._score_next_state(thought, fired, rep)
@@ -525,6 +555,7 @@ class LearningLoop:
 
             self._prev_fired = fired
             self._prev_state = self._encode_state(fired)
+            self._prev_situation = self._situation_now
             self._prev_snapshot = self._snapshot
             self._roll_up(rep)
             self.last = rep
@@ -586,11 +617,36 @@ class LearningLoop:
             # what has been observed, never a list someone wrote down. Planning for an action she
             # has never seen the consequences of would still be fiction; this only stops her from
             # being unable to plan for the ones she has.
+            # What the loop hands the dynamics model, in whichever representation is currently
+            # promoted. **This is where the two feeds meet**, and it is the thing Phase 7 puts
+            # through a benchmark rather than through an argument: `field._expect` observes the
+            # turn's grounded facts into this same model, so until something measured it, one
+            # n-gram model was being fed two kinds of state in strict alternation — every order-1
+            # context for a fact was a histogram. See :mod:`nyxara.njp.evolution`.
             predictive = getattr(self.brain, "predictive", None)
-            if predictive is not None and action:
-                predictive.observe(self._prev_state, action, next_state=state)
+            situation = self._situation_now
+            if predictive is not None and action and situation is not None:
+                encoded = self._encode_for_predictive(situation)
+                previous = (self._encode_for_predictive(self._prev_situation)
+                            if self._prev_situation is not None else None)
+                if encoded is not None and previous is not None:
+                    predictive.observe(previous, action, next_state=encoded)
         except Exception:  # noqa: BLE001
             pass
+
+    @staticmethod
+    def _situation(thought: Any, fired: Sequence[int], action: str) -> Any:
+        from nyxara.njp.evolution import CognitiveEvolution
+        return CognitiveEvolution.situation_of(thought, fired, action)
+
+    def _encode_for_predictive(self, situation: Any) -> Any:
+        """The promoted representation, applied to one turn. Falls back to today's on anything odd."""
+        try:
+            from nyxara.njp.evolution import ENCODERS
+            encoder = ENCODERS.get(self.predictive_encoding) or ENCODERS["buckets16"]
+            return encoder(situation)
+        except Exception:  # noqa: BLE001
+            return None
 
     @staticmethod
     def _encode_state(cells: Sequence[int]) -> List[float]:
@@ -1401,6 +1457,9 @@ class LearningLoop:
         if turn % self.dream_every == 0:
             self._compress_programs(rep)
 
+        if turn % self.evolve_every == 0:
+            self._evolve(rep)
+
         # Before wondering, deliberately. `curiosity._from_assumptions` reads the miner's untested
         # set, so mining has to have run for this turn's questions to include the ones she cannot
         # feel — and testing has to have run for the ones already examined to stop being offered.
@@ -1627,6 +1686,30 @@ class LearningLoop:
                          f"{name} := {body.pretty() if body is not None else '?'}",
                          detail=f"arity {getattr(abstraction, 'arity', 0)}")
         except Exception:  # noqa: BLE001
+            return
+
+    def _evolve(self, rep: LoopReport) -> None:
+        """One structural-evolution cycle. Phase 7's milestone runs through here.
+
+        Deliberately on the loop rather than inside :mod:`nyxara.njp.evolution`: the organ knows
+        how to propose, sandbox and gate a rewire, and nothing but the loop knows *when* she has
+        lived enough turns to have anything to propose from. An organ that schedules itself is
+        the shape this repository keeps finding at zero — fully built, fully tested, never called.
+        """
+        try:
+            evolution = getattr(self.brain, "evolution", None)
+            if evolution is None:
+                return
+            trial = evolution.cycle(self.brain)
+            rep.evolution_trials = 1
+            rep.cognitive_rewires = int(bool(getattr(trial, "promoted", False)))
+            # Nothing to reset. A promotion re-fits the model from the whole trace in the new
+            # representation (`CognitiveEvolution.refit`), and `close` sets `_prev_situation` to
+            # *this* turn's situation immediately after `_slow` returns — so the next turn's
+            # `previous` is already this turn, re-encoded. Clearing it here would only drop one
+            # real transition; it was tried and it is dead code, since the assignment below
+            # overwrites it in the same call.
+        except Exception:  # noqa: BLE001 — a failed cycle rewires nothing
             return
 
     def _train_on_weakness(self, report: Any) -> int:
@@ -1862,6 +1945,8 @@ class LearningLoop:
             self.totals["programs_adopted"] += rep.programs_adopted
             self.totals["programs_transferred"] += rep.programs_transferred
             self.totals["weaknesses_trained"] += rep.weaknesses_trained
+            self.totals["cognitive_rewires"] += rep.cognitive_rewires
+            self.totals["evolution_trials"] += rep.evolution_trials
             self.totals["weaknesses_closed"] = self._closed_weaknesses
             self.totals["assumptions_mined"] += rep.assumptions_mined
             self.totals["assumptions_tested"] += rep.assumptions_tested
@@ -1896,7 +1981,8 @@ class LearningLoop:
             "deferred_open": len(self._deferred),
             "cadence": {"consolidate": self.consolidate_every,
                         "discover": self.discover_every,
-                        "wonder": self.wonder_every, "dream": self.dream_every},
+                        "wonder": self.wonder_every, "dream": self.dream_every,
+                        "evolve": self.evolve_every},
             "training": self.train_enabled,
             "last": self.last.to_dict() if self.last is not None else None,
         }
