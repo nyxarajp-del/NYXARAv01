@@ -1467,6 +1467,62 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return []
 
+    #: What a polar answer looks like when some other path has already reduced it to one.
+    #: Registers rather than synonyms: she answers in both, and a verdict in either is still a
+    #: verdict, not an object to be checked against what was asked.
+    _POLAR_VERDICTS_LOCAL = ("yes", "no", "haan", "nahi", "haan.", "nahi.")
+
+    @staticmethod
+    def _settle_polar(thought: NJPThought) -> None:
+        """Turn a derived *object* into the yes/no a polar question actually asked for.
+
+        Deliberation and recall answer a ``(subject, relation)`` pair with whatever object they
+        can reach, and they have no idea the question already named one. Two failures follow from
+        that, and they need opposite remedies — which is why this compares rather than blocks:
+
+        * Taught only ``X needs A`` and asked ``"do Xs need B?"``, she replied ``A``. True,
+          confident, and an answer to a question nobody asked. The derived object does not match,
+          so there is nothing to affirm and the reply is silence.
+        * Told ``aag causes garmi`` and ``garmi causes pasina`` and asked
+          ``"does aag cause pasina?"``, the answer is **yes** — and it is only reachable through
+          the two-hop composition :mod:`nyxara.njp.core` performs. An earlier version of this
+          guard stopped deliberation outright on a polar gap and lost exactly that: the grounder's
+          own single ``is_a`` hop cannot compose a causal chain, and refusing to let anything else
+          try made the polar path strictly weaker than the wh-path over the same knowledge.
+
+        So the ladder runs in full and its result is *checked* here. Matching is on the canonical
+        form at both ends, because "pasina" derived and "pasina" asked are one answer however each
+        was spelled.
+        """
+        try:
+            grounding = getattr(getattr(thought, "percept", None), "grounding", None)
+            answer = getattr(grounding, "answer", None)
+            if not getattr(answer, "polar", False):
+                return
+            asked = str(getattr(answer, "polar_object", "") or "").strip().lower()
+            derived = str(thought.answer or "").strip().lower()
+            if not asked or not derived:
+                return
+            # Already a verdict. The ladder has its own polar handling on some paths — a two-hop
+            # causal chain comes back as "yes" rather than as the object it walked to — and this
+            # method is here to convert *objects*, not to re-judge judgements. Without the guard
+            # it compared "yes" against the asked object, found no match, and discarded a
+            # correctly composed answer: the measured cost was
+            # ``test_a_composed_answer_is_reachable_from_a_spoken_question``.
+            if derived in NJPBrain._POLAR_VERDICTS_LOCAL:
+                return
+            # Substring in either direction: a derivation legitimately arrives with its route
+            # attached ("pasina, via garmi"), and the asked object is legitimately a shorter
+            # phrase than the stored one.
+            if asked in derived or derived in asked:
+                thought.answer = "yes"
+                return
+            # Derived something else entirely. The pair was never established, and naming the
+            # other object would be answering a different question.
+            thought.answer = ""
+        except Exception:  # noqa: BLE001
+            return
+
     def _recall(self, thought: NJPThought) -> None:
         """Answer from a relation the question did not ask for, about the entity it did name.
 
@@ -2172,6 +2228,10 @@ class NJPBrain:
                 # would keep `unknown` at confidence 0.0 however well it was derived. Re-run
                 # rather than move: the first pass also feeds the echo check, which has to
                 # happen before deliberation, not after it.
+                # A polar question's derived object becomes the yes/no it asked for, before the
+                # epistemic pass reads the answer — otherwise the state is computed for a reply
+                # that is about to change.
+                self._settle_polar(out)
                 if out.answer:
                     self._set_epistemic(out)
                     # A deliberated answer came by a *form* of reasoning, and the genome has been

@@ -413,9 +413,29 @@ class CognitiveLearningCore:
 
     # ---- the relation graph, read from wherever the facts actually live ---- #
     def _facts(self) -> Dict[Tuple[str, str], List[Any]]:
-        """The live fact store. Read, never written — this module owns no knowledge."""
+        """The live **positive** fact store. Read, never written — this module owns no knowledge.
+
+        The polarity filter is here, at the one place this module reads the store, rather than in
+        each of the six methods that walk it. That placement is the point: ``Grounder._lookup``
+        already excluded denials and the leak persisted, because everything in this file goes to
+        ``grounder.facts`` directly and never through the accessor that was fixed. Measured, a
+        brain told ``"X does not need Y"`` and asked what X needs answered ``Y`` — derived,
+        sourced, and stating the exact opposite of what it was told, with
+        ``Derivation.why == "stated"`` attached to it.
+
+        A denied relation is knowledge and stays in the store. What it may not do is enter a
+        derivation as a premise, because every rule in this module — inheritance, composition,
+        schema transfer — is written for relations that *hold*, and a premise that does not hold
+        makes each of them produce a confident falsehood rather than nothing.
+        """
         try:
-            return dict(getattr(self.grounder, "facts", None) or {})
+            store = getattr(self.grounder, "facts", None) or {}
+            out: Dict[Tuple[str, str], List[Any]] = {}
+            for key, triples in store.items():
+                live = [t for t in triples if not getattr(t, "negated", False)]
+                if live:
+                    out[key] = live
+            return out
         except Exception:  # noqa: BLE001
             return {}
 

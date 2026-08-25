@@ -226,6 +226,14 @@ from nyxara.njp.relevance import (
     is_verified,
     revise_confidence,
 )
+from nyxara.njp.semantics import (
+    Meaning,
+    SemanticCompiler,
+    Tag,
+    Token,
+    compile_meaning,
+    tag_tokens,
+)
 from nyxara.njp.universe import Hypothesis as UniverseHypothesis
 from nyxara.njp.evolve import EvolutionStep, ModuleCost, Profiler, SelfEvolver
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
@@ -317,4 +325,7 @@ __all__ = [
     "SpeechAct", "Act", "SpeechActReader", "Pathway", "CognitivePolicy",
     "RelevanceGate", "RelevanceScore",
     "revise_confidence", "is_verified", "is_meta_commentary",
+    # NJP V.09 — language compiled into a typed representation, so the open half of a sentence
+    # stops being a list somebody has to keep adding to
+    "SemanticCompiler", "Meaning", "Tag", "Token", "compile_meaning", "tag_tokens",
 ]
