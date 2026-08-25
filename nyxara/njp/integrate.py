@@ -646,10 +646,32 @@ class LearningLoop:
             if getattr(grounding, "is_question", False):
                 self._open_deferred(thought, grounder, predictor, grounding, rep)
             else:
-                self._resolve_deferred(grounding, predictor, rep)
+                self._resolve_deferred(grounding, predictor, rep, grounder)
             rep.deferred_open = len(self._deferred)
         except Exception:  # noqa: BLE001
             pass
+
+    @staticmethod
+    def _deferred_key(grounder: Any, subject: str, predicate: str) -> str:
+        """The key both halves of the deferred channel must agree on.
+
+        **The defect this exists for.** Opening read ``(subject, predicate)`` from
+        ``Grounder._read_question``, which resolves the entity — ``"what does a plant need?"`` gave
+        ``plant``. Closing built its key from the raw ``triple.subject``, which is whatever the
+        sentence happened to say — ``"plants need water"`` gave ``plants``. Two keys for one
+        entity, so the fact that answers the question never found the question, and
+        ``deferred_resolved`` was 0 for every session ever run: she asked, was told, and could not
+        connect the two.
+
+        ``Grounder._key`` is the store's own spelling rule and folds both to ``plant``. Using
+        anything else here means this map disagrees with the store it is keyed against — which is
+        the ``birds``/``bird`` failure :mod:`nyxara.njp.canon` was written for, in a second place.
+        """
+        try:
+            folded = grounder._key(subject)
+        except Exception:  # noqa: BLE001
+            folded = str(subject or "").strip().lower()
+        return f"deferred:{folded}:{predicate}"
 
     def _open_deferred(self, thought: Any, grounder: Any, predictor: Any,
                        grounding: Any, rep: LoopReport) -> None:
@@ -676,7 +698,7 @@ class LearningLoop:
             said = str(getattr(answer, "text", "") or "")
             if not said:
                 said = str(getattr(thought, "answer", "") or "")
-            key = f"deferred:{subject.lower()}:{predicate}"
+            key = self._deferred_key(grounder, subject, predicate)
             if key in self._deferred:
                 return
             predictor.predict(key, said or "<unknown>",
@@ -773,11 +795,12 @@ class LearningLoop:
         except Exception:  # noqa: BLE001 — an unrecorded belief loses the grade, never the turn
             pass
 
-    def _resolve_deferred(self, grounding: Any, predictor: Any, rep: LoopReport) -> None:
+    def _resolve_deferred(self, grounding: Any, predictor: Any, rep: LoopReport,
+                          grounder: Any = None) -> None:
         """A fact arrived. Grade any open question it answers, and any answer it corrects."""
         try:
             for triple in (getattr(grounding, "triples", None) or []):
-                key = f"deferred:{triple.subject.lower()}:{triple.predicate}"
+                key = self._deferred_key(grounder, triple.subject, triple.predicate)
                 pending = self._deferred.pop(key, None)
                 if pending is None:
                     continue
