@@ -916,13 +916,24 @@ class InternalUniverse:
         except Exception:  # noqa: BLE001
             return roll
 
-    def reconcile(self, actual: Dict[str, Any], *, rollout: Optional[Rollout] = None) -> float:
+    def reconcile(self, actual: Dict[str, Any], *,
+                  rollout: Optional[Rollout] = None,
+                  order: Optional[Sequence[str]] = None) -> float:
         """Score the newest unscored rollout against reality and learn from the residual.
 
         Returns the mean absolute error over the variables both the prediction and reality name.
         A surprise — error past the model's own confidence — is counted, because the count of
         times the world contradicted her is the single most useful number about a world model,
         and it is the one a model that never checks itself cannot produce.
+
+        ``order`` is forwarded to :meth:`observe`, which is the only orientation evidence a joint
+        observation carries. It exists because this method **had no caller anywhere in the
+        package**: the field rolled the model forward on every cycle and nothing ever compared a
+        rollout to what happened next, so ``reconciled`` and ``surprises`` were structurally zero
+        — a world model that predicts and never checks itself. The caller that was missing is
+        ``field._sync_world``, which already had the observation in hand and was handing it
+        straight to ``observe``; without this parameter, wiring it here would have cost the word
+        order that decides which way an arrow runs.
         """
         try:
             observed = {}
@@ -937,7 +948,7 @@ class InternalUniverse:
             if target is None:
                 target = next((r for r in reversed(self.rollouts) if not r.scored), None)
             # Reality is always worth learning from, whether or not a prediction was outstanding.
-            self.observe(observed)
+            self.observe(observed, order=order)
             if target is None:
                 return 0.0
 

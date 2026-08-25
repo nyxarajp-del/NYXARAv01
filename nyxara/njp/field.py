@@ -506,7 +506,12 @@ class RecursiveCognitiveField:
                 state[name] = value
                 order.append(name)
             if state:
-                self.universe.observe(state, order=order)
+                # `reconcile` observes *and* grades: it hands the state to `observe` and then
+                # scores the newest unscored rollout against it. Calling `observe` directly, as
+                # this did, meant the model's own predictions were never compared to what
+                # happened — `reconciled` and `surprises` were structurally zero on every session,
+                # and "the model was wrong six times" was a sentence the universe could not form.
+                self.universe.reconcile(state, order=order)
         return added
 
     def _kind_of(self, subject: str) -> str:
