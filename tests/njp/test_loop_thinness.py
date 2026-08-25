@@ -187,3 +187,104 @@ def test_the_manifold_reports_hits_as_well_as_misses():
             brain.think(turn)
     manifold = brain.fabric.stats()["manifold"]
     assert manifold["hits"] > 0
+
+
+# --------------------------------------------------------------------------- #
+# a guess reality confirmed is the only hard evidence she earns
+# --------------------------------------------------------------------------- #
+
+def test_a_confirmed_guess_is_recorded_as_hard_evidence():
+    """`EvidenceKind` calls three kinds hard and only a hard reason may establish a belief alone.
+
+    Measured across a whole session, ``with_hard_evidence`` was 0: the single ``beliefs.support``
+    call anywhere in the package passes ``TESTIMONY``, so the ledger's establishment path was
+    written, tested and unreachable. Every belief she held was held on being told, and nothing
+    she worked out could ever be worth more than hearsay.
+    """
+    from nyxara.njp.beliefs import EvidenceKind
+    brain = NJPBrain()
+    brain.think("birds need water")
+    brain.think("a sparrow is a bird")
+    brain.think("what does a sparrow need?")
+    brain.think("sparrows need water")
+    assert brain.beliefs.stats()["with_hard_evidence"] >= 1
+    case = brain.beliefs.why("water")
+    kinds = [e["kind"] for e in case.get("evidence", [])]
+    assert EvidenceKind.PREDICTION in kinds, case
+
+
+def test_a_wrong_guess_is_never_recorded_as_evidence_for_itself():
+    """A refuted guess is a refutation. Filing it as support would invert the whole ledger."""
+    from nyxara.njp.beliefs import EvidenceKind
+    brain = NJPBrain()
+    brain.think("birds need water")
+    brain.think("a sparrow is a bird")
+    brain.think("what does a sparrow need?")      # she answers "water"
+    brain.think("sparrows need seeds")            # reality says otherwise
+    case = brain.beliefs.why("water")
+    kinds = [e["kind"] for e in case.get("evidence", [])] if case.get("known") else []
+    assert EvidenceKind.PREDICTION not in kinds, case
+
+
+# --------------------------------------------------------------------------- #
+# compression — episodes in which nothing could recur
+# --------------------------------------------------------------------------- #
+
+def test_episodes_are_recorded_under_the_kind_so_instances_can_recur():
+    """Every antecedent was built from the *instance*, so nothing ever generalised.
+
+    ``sparrow requires water``, ``crow requires water`` and ``robin requires water`` shared no
+    subset at all, so every candidate rule had support 1 against a floor of 4. Measured over a
+    whole session: 70 episodes, 4 discovery passes, **0 abstractions**, compression 1.0 — which
+    :mod:`nyxara.njp.concepts` defines as "does not pay for itself". The compressor was not
+    failing; it was being fed data in which nothing could recur.
+    """
+    brain = NJPBrain()
+    birds = ("sparrow", "crow", "robin", "eagle", "finch", "wren", "lark", "swift")
+    for bird in birds:
+        brain.think(f"a {bird} is a bird")
+    for bird in birds:
+        brain.think(f"{bird}s need water")
+        brain.think(f"{bird}s eat seeds")
+    stats = brain.discoverer.stats()
+    assert stats["proposed_total"] > 0, stats
+    names = {a.name for a in brain.discoverer.abstractions.values()}
+    assert any("bird" in n for n in names), names
+
+
+def test_a_kind_rule_is_tested_on_held_out_episodes_and_can_be_refuted():
+    """Proposing is not confirming. The falsification half has to do work too."""
+    brain = NJPBrain()
+    birds = ("sparrow", "crow", "robin", "eagle", "finch", "wren", "lark", "swift",
+             "heron", "stork")
+    plants = ("rose", "tulip", "fern", "daisy", "oak", "pine", "ivy", "moss", "sage", "elm")
+    for bird in birds:
+        brain.think(f"a {bird} is a bird")
+    for plant in plants:
+        brain.think(f"a {plant} is a plant")
+    for bird in birds:
+        brain.think(f"{bird}s need water")
+        brain.think(f"{bird}s eat seeds")
+    for plant in plants:
+        brain.think(f"{plant}s need light")
+        brain.think(f"{plant}s need soil")
+    stats = brain.discoverer.stats()
+    assert stats["confirmed_total"] > 0, stats
+    # Some proposals must die, or "confirmed" means "proposed" under another name.
+    assert stats["refuted_total"] > 0, stats
+    # Above 1.0 is the concepts module's own definition of paying for itself.
+    assert stats["compression"] > 1.0, stats
+    best = stats["best"]
+    assert best and best["tested"] > 0 and best["precision"] > 0.7, best
+
+
+def test_a_kind_rule_never_restates_its_own_antecedent():
+    """Substituting a subject with its kind turns `sparrow is_a bird` into `{bird, is_a} → bird`.
+
+    A tautology, and one that scored five supports and crowded out the rules worth finding.
+    """
+    brain = NJPBrain()
+    for bird in ("sparrow", "crow", "robin", "eagle", "finch", "wren"):
+        brain.think(f"a {bird} is a bird")
+    for name in (a.name for a in brain.discoverer.abstractions.values()):
+        assert "→ bird" not in name or "bird," not in name, name

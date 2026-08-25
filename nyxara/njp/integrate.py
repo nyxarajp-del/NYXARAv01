@@ -919,12 +919,48 @@ class LearningLoop:
                                          why=f"the Master stated {triple.object}")
                 if settled is not None:
                     rep.beliefs_settled += 1
+                    if correct:
+                        self._record_prediction_evidence(beliefs, pending, triple)
                 elif not correct:
                     if beliefs.retract(pending.answered, why="contradicted by observation"):
                         rep.beliefs_retracted += 1
         except Exception:  # noqa: BLE001
             pass
 
+
+    @staticmethod
+    def _record_prediction_evidence(beliefs: Any, pending: "_Deferred", triple: Any) -> None:
+        """A guess that reality confirmed is **hard** evidence, and it is the only kind she earns.
+
+        :class:`~nyxara.njp.beliefs.EvidenceKind` calls three kinds hard — ``PROOF``,
+        ``OBSERVATION``, ``PREDICTION`` — and only a hard reason may establish a belief on its
+        own; everything else can corroborate and no amount of it lifts the soft ceiling. Measured
+        across a whole session, ``with_hard_evidence`` was **0**: the single call to
+        ``beliefs.support`` anywhere in this package passes ``TESTIMONY``, so the ledger's entire
+        establishment path was written, tested, and unreachable. Every belief she held was held on
+        being told, and nothing she worked out could ever be worth more than hearsay.
+
+        ``PREDICTION`` is defined as "she predicted it and the prediction held on **held-out**
+        data", and a resolved deferred answer is exactly that by construction rather than by
+        assertion: the guess was recorded before the fact arrived, and the thing that grades it is
+        the Master's own later sentence, which is independent of the guess in the strong sense —
+        it is not something she produced. That independence is the whole reason
+        :meth:`_deferred_answers` refuses to close a question with anything but a *statement*.
+
+        Only on a correct settlement. A wrong guess is a refutation, and the retraction path
+        beside this one already owns it; recording it here as evidence *for* something would be
+        the exact inversion this ledger exists to prevent.
+        """
+        try:
+            from nyxara.njp.beliefs import EvidenceKind
+            beliefs.support(
+                pending.answered, EvidenceKind.PREDICTION,
+                detail=(f"answered {pending.answered!r} for "
+                        f"{pending.subject} {pending.predicate}, and the Master then stated "
+                        f"{triple.object!r}"),
+                source="deferred-answer")
+        except Exception:  # noqa: BLE001 — evidence that cannot be filed never breaks a turn
+            return
 
     # ---- goals ------------------------------------------------------------- #
     def _track_goals(self, thought: Any, rep: LoopReport) -> None:

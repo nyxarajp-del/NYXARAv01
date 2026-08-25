@@ -2400,10 +2400,56 @@ class NJPBrain:
                 # only over the exact sentence that stated it.
                 if obj and predicate in ("causes", "produces", "requires"):
                     self.discoverer.observe([subject], consequent)
+                # And the same episode under the subject's **kind**, which is the one thing that
+                # makes any of this compress.
+                #
+                # Every antecedent set here is built from the *instance*, so `sparrow requires
+                # water`, `crow requires water` and `robin requires water` share no subset at all
+                # and every candidate rule has support 1. Measured over a whole session: 70
+                # episodes, 4 discovery passes, **0 abstractions**, compression 1.0 — which
+                # `concepts` defines as "does not pay for itself". The compressor was not failing;
+                # it was being fed data in which nothing could recur.
+                #
+                # Recorded under the kind the Master **stated**, never one she guessed, for the
+                # same reason `field._kind_of` prefers a stated kind: an inferred kind would make
+                # a rule out of her own conjecture and then test it as though it came from the
+                # world. The generalisation is not trusted for being proposed — the discoverer
+                # fits on one split and scores on held-out episodes, so a kind-level rule that
+                # does not hold dies exactly like any other.
+                if obj:
+                    for kind in self._kinds_of(subject):
+                        # Substituting a subject with its kind turns `sparrow is_a bird` into
+                        # `{bird, is_a} → bird` — a tautology, and one that scores five supports
+                        # and crowds out the rules worth finding. A rule whose antecedent already
+                        # contains its consequent says nothing about the world.
+                        if kind == consequent:
+                            continue
+                        self.discoverer.observe([kind, predicate], consequent)
             if not seen and concepts and thought.answer:
                 self.discoverer.observe(concepts, thought.answer[:60])
         except Exception:  # noqa: BLE001 — a missed episode costs one sample, never the turn
             pass
+
+    def _kinds_of(self, subject: str) -> List[str]:
+        """The kinds this subject was *stated* to belong to — one hop, stated only, at most two.
+
+        One hop rather than the full ``is_a`` chain: a walk to the root would file the same
+        episode under `sparrow`, `bird`, `animal` and `thing`, and a rule about `thing` is a rule
+        about everything, which compresses nothing and pollutes every held-out score with a
+        pattern that trivially holds.
+        """
+        try:
+            grounder = self.grounder
+            if grounder is None or not subject:
+                return []
+            out: List[str] = []
+            for triple in grounder._lookup(subject, "is_a")[:2]:
+                kind = str(getattr(triple, "object", "") or "").strip().lower()
+                if kind and kind != subject:
+                    out.append(kind)
+            return out
+        except Exception:  # noqa: BLE001
+            return []
 
     def _prepare_evidence(self, thought: NJPThought) -> None:
         """Lay out what the gauntlet may read about *this* claim, and nothing else.
