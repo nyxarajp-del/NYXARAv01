@@ -383,6 +383,10 @@ class NJPBrain:
         # the top of this method, and shadowing it would sever the brain from the orchestrator
         # that holds it.
         self.learner = self._build_learner(c)
+        # The cognitive black box, before `metareason` because that consults it when choosing.
+        # It reads no organ of its own — the brain hands it a finished turn in `resolve` — so it
+        # can be built at any point before its one consumer.
+        self.blackbox = self._build_blackbox(c)
         self.metareason = self._build_metareason(c)
         # ---- NJP V.06: the cortex, and the two organs that keep it honest ---- #
         # Built here, after `metareason`, `self_model`, `adversary` and `curiosity`, because every
@@ -1269,6 +1273,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_blackbox(self, c: Any) -> Any:
+        """The record of what she did, under what circumstances, and whether it worked.
+
+        Off leaves strategy selection exactly as it was: the black box may only ever demote a
+        strategy that has measurably failed under the conditions at hand, so its absence is the
+        same as a record with nothing in it yet.
+        """
+        if not self._gate("blackbox", True):
+            return None
+        try:
+            from nyxara.njp.blackbox import BlackBox
+            return BlackBox(capacity=int(self._cfg("blackbox_capacity", 2048)),
+                            min_samples=int(self._cfg("blackbox_min_samples", 5)))
+        except Exception:  # noqa: BLE001 — without it she keeps only the kind-level average
+            return None
+
     def _build_metareason(self, c: Any) -> Any:
         """Meta-reasoning: which way of thinking this problem calls for, learned from outcomes.
 
@@ -1280,7 +1300,8 @@ class NJPBrain:
             return None
         try:
             from nyxara.njp.metareason import MetaReasoner, ProblemKind
-            meta = MetaReasoner(meta_learner=self.meta, beliefs=self.beliefs, world=self.world)
+            meta = MetaReasoner(meta_learner=self.meta, beliefs=self.beliefs, world=self.world,
+                                blackbox=self.blackbox)
             if self.ladder is not None or self.reasoner is not None:
                 meta.register("ladder", (ProblemKind.SYMBOLIC, ProblemKind.CONTRADICTION),
                               self._strategy_ladder, prior=0.6)
@@ -2490,6 +2511,14 @@ class NJPBrain:
                         if self.genome is not None:
                             thought.trace = self.genome.record(
                                 derived, question=thought.stimulus)
+                # The circumstances this turn is being decided under, so a strategy that has
+                # measurably failed under exactly these can be demoted within the pool the
+                # kind-level bandit already produced. Read here because this is where the turn is
+                # finished enough to describe — grounding has run, the act is known, novelty is
+                # measured. Absent a black box the key is ignored and nothing changes.
+                if self.blackbox is not None:
+                    from nyxara.njp.blackbox import conditions_of
+                    context["conditions"] = conditions_of(thought)
                 solution = self.metareason.solve(thought.stimulus, context=context)
                 thought.solution = solution
                 if solution.assertable and solution.answer:
@@ -3306,8 +3335,43 @@ class NJPBrain:
                     # is not being learned about, it is being varied.
                     for arm in ("settle_steps", "recall_k", "reason_depth"):
                         self.meta.reward(arm, float(correct))
+                # The whole episode, kept against the conditions it happened under. This is the
+                # only place it can be written: everything before the verdict is a turn, and what
+                # makes it an episode is the outcome that arrives here. Recorded after the organs
+                # above have been told, so `update` describes what this turn actually changed.
+                self._record_episode(thought, correct=float(correct), actual=actual)
         except Exception:  # noqa: BLE001
             pass
+
+    def _record_episode(self, thought: Any, *, correct: float, actual: Any = None) -> bool:
+        """File one graded turn in the black box. Returns whether a row was kept.
+
+        A turn with no strategy is not filed. The question the record exists to answer is *"does
+        this strategy fail under these conditions"*, and an episode that names no strategy cannot
+        contribute to it — it would only dilute the rates it is averaged into.
+        """
+        if self.blackbox is None:
+            return False
+        try:
+            from nyxara.njp.blackbox import CognitiveEpisode, conditions_of
+            solution = getattr(thought, "solution", None)
+            strategy = str(getattr(solution, "strategy", "") or "")
+            if not strategy:
+                return False
+            derivation = getattr(thought, "derivation", None)
+            return self.blackbox.record(CognitiveEpisode(
+                stimulus=str(getattr(thought, "stimulus", "") or ""),
+                belief=str(getattr(thought, "epistemic", "") or ""),
+                strategy=strategy,
+                prediction=str(getattr(thought, "answer", "") or ""),
+                action=str(getattr(thought, "answer", "") or ""),
+                result="" if actual is None else str(actual),
+                error=max(0.0, min(1.0, 1.0 - float(correct))),
+                update=str(getattr(derivation, "kind", "") or ""),
+                correct=float(correct) >= 0.5,
+                conditions=conditions_of(thought, kind=str(getattr(solution, "kind", "") or ""))))
+        except Exception:  # noqa: BLE001 — a missing row never breaks a turn
+            return False
 
     def _score_prediction(self, thought: Any, *, correct: float, actual: Any) -> Any:
         """Close the loop on this turn's expectation, with the evidence the diagnosis needs.

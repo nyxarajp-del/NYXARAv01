@@ -161,6 +161,14 @@ structure, and gradients that read it. Growth is real but the machine is finite:
 :meth:`~nyxara.njp.fabric.Fabric.consolidate` compresses the least-used structure so learning
 continues, and a fabric that has stopped growing reports that rather than a number that flatters it.
 
+**Where the whole design is written down, with what is real marked as real.**
+``docs/ARCHITECTURE.md`` maps the 32-section Master Cognitive Architecture onto the module that
+owns each part, and gives each one a status — REAL+WIRED, REAL, PARTIAL, or NARRATIVE — rather
+than a checkmark. Three sections are PARTIAL and the document names which half of each is missing,
+because a status that does not say what is absent carries no information. It is kept honest by
+``tests/docs/test_architecture_doc.py`` the same way ``docs/CAPABILITIES.md`` is: every module it
+cites must import, and a row cannot quietly disappear.
+
 NJP only ever *proposes*. Every candidate flows through the kernel's unchanged, fail-closed
 sovereign gate, and the safety core — corrigibility, oversight, loyalty, honesty — is never
 governed, rewritten or bypassed by anything here. The mind proposes; the kernel disposes; the
@@ -183,6 +191,13 @@ from nyxara.njp.adversary import (
     AttackReport,
     SelfAttacker,
     Stance,
+)
+from nyxara.njp.blackbox import (
+    BlackBox,
+    CognitiveEpisode,
+    Conditions,
+    Verdict as EpisodeVerdict,
+    conditions_of,
 )
 from nyxara.njp.brain import NJPBrain, NJPPercept, NJPThought
 from nyxara.njp.canon import canonical_entity, canonical_relation, singular
@@ -311,6 +326,8 @@ __all__ = [
     "SelfAttacker", "Attack", "AttackReport", "Stance", "AttackKind",
     # the one number she is not allowed to compute about herself
     "IntelligenceIndex", "IntelligenceVector", "Term",
+    # which strategy fails under which conditions, and where the record is too thin to say
+    "BlackBox", "CognitiveEpisode", "Conditions", "EpisodeVerdict", "conditions_of",
     # one entity, one key — the store's spelling rule
     "canonical_entity", "canonical_relation", "singular",
     # truth is not relevance, and reasoning is not always what a turn calls for
