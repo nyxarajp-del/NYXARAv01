@@ -229,9 +229,31 @@ class Trial:
                 "accepted": self.accepted, "why": self.why[:200], "ms": round(self.ms, 3)}
 
 
+
+#: How many distinct (subject, reading) pairs are remembered so a reading offered again on
+#: a later turn is not counted as a second observation of it. Bounded because the set grows
+#: with the conversation and nothing else here is unbounded.
+_OBSERVED_MEMORY = 4096
+
+
+def _head_noun(subject: str) -> str:
+    """``plant a`` → ``plant``. The kind, with the instance label removed.
+
+    An instance label is a trailing single character or a bare number — the way a person names
+    the third plant in a row of plants. Anything longer is part of the kind ("deep learning" is
+    not an instance of "deep"), so only that shape is stripped, and a single-token subject is
+    returned whole: one rose is its own kind, and its attributes still relate to each other.
+    """
+    tokens = str(subject or "").strip().lower().split()
+    while len(tokens) > 1 and (len(tokens[-1]) == 1 or tokens[-1].isdigit()):
+        tokens.pop()
+    return " ".join(tokens)
+
+
 # --------------------------------------------------------------------------- #
 # The field
 # --------------------------------------------------------------------------- #
+
 class RecursiveCognitiveField:
     """Both loops: the cognitive cycle per turn, and the self-modification cycle behind it."""
 
@@ -271,6 +293,10 @@ class RecursiveCognitiveField:
         self.restructures_kept = 0
         self.experiments_designed = 0
         self.surprises = 0
+        #: (subject, reading) pairs already handed to the universe. A reading re-offered on a
+        #: later turn is the same measurement, not a second one, and `Relation` keeps sufficient
+        #: statistics so it cannot tell the difference on its own.
+        self._observed: set = set()
         self.errors_diagnosed: Dict[str, int] = {}
         self.trials: List[Trial] = []
         self.accepted_trials = 0
@@ -419,22 +445,95 @@ class RecursiveCognitiveField:
         # Numbers the grounder extracted are the universe's actual data. A threshold triple
         # ("water boils at 100") is a variable with a value, and without this the simulator would
         # own a causal skeleton it could never fit a single coefficient to.
-        state: Dict[str, float] = {}
-        # The order the numbers were *stated* in, carried alongside their values. `obs.numbers` is
-        # filled in extraction order, so "the plant got 2 litres of water and grew 4 cm" arrives
-        # as water-then-growth — and dropping that, which is what happened before, throws away the
-        # only thing in a joint observation that can say which way an arrow runs. The numbers on
-        # their own are Markov-equivalent however many of them there are.
-        order: List[str] = []
-        for subject, obs in list(getattr(self.concepts, "_by_subject", {}).items())[-32:] \
-                if self.concepts is not None else []:
-            for key, value in obs.numbers.items():
-                name = f"{subject}.{key}"
+        # **One observation per subject, named by the property.**
+        #
+        # This used to build a single joint state per turn with every subject's numbers under
+        # ``f"{subject}.{key}"``, and both halves of that were wrong in the same way — they made
+        # every instance its own universe:
+        #
+        # * Six plants watered differently became six *relations*
+        #   (``plant a.volume → plant a.growth``, ``plant b.volume → …``) rather than six
+        #   *samples* of one relation. Within a single plant the two numbers never vary, so every
+        #   fit came back ``r2=0.0`` and ``usable_relations`` was empty however much was measured.
+        #   Measured: 12 measurement sentences, 12 variables, 30 relations, **0 usable**, and
+        #   every counterfactual answering "no usable arrow leaves the intervened variables".
+        # * Emitting all subjects in one state re-observed every earlier subject on every later
+        #   turn, so ``n`` climbed (11 for the first plant, from six readings) on duplicate rows
+        #   that added no variance at all. A count that rises without information is worse than a
+        #   low count: it clears the sample floor while leaving the fit unfittable.
+        #
+        # Named by the subject's *kind* where one has been stated, and by the bare property
+        # otherwise. The trade is explicit: two unrelated kinds that both have a "growth" and were
+        # never declared would share a variable. That is a real risk and it is smaller than the
+        # certainty it replaces — before this, nothing ever fitted at all — and stating the kind
+        # ("plant a is a plant") removes it.
+        #
+        # The order the numbers were *stated* in is carried alongside their values. `obs.numbers`
+        # is filled in extraction order, so "the plant got 2 litres of water and grew 4 cm"
+        # arrives as water-then-growth — and dropping that throws away the only thing in a joint
+        # observation that can say which way an arrow runs. The numbers on their own are
+        # Markov-equivalent however many of them there are.
+        subjects = (list(getattr(self.concepts, "_by_subject", {}).items())[-32:]
+                    if self.concepts is not None else [])
+        for subject, obs in subjects:
+            numbers = dict(getattr(obs, "numbers", None) or {})
+            if not numbers:
+                continue
+            # The same reading re-offered on a later turn is not a second observation of
+            # anything. Skipped rather than deduplicated downstream, because `Relation` keeps
+            # sufficient statistics and cannot tell a repeat from a genuine repeat measurement.
+            signature = (subject, tuple(sorted(numbers.items())))
+            if signature in self._observed:
+                continue
+            self._observed.add(signature)
+            if len(self._observed) > _OBSERVED_MEMORY:
+                self._observed = set(list(self._observed)[-_OBSERVED_MEMORY:])
+            kind = self._kind_of(subject)
+            state: Dict[str, float] = {}
+            order: List[str] = []
+            for key, value in numbers.items():
+                name = f"{kind}.{key}" if kind else str(key)
                 state[name] = value
                 order.append(name)
-        if state:
-            self.universe.observe(state, order=order)
+            if state:
+                self.universe.observe(state, order=order)
         return added
+
+    def _kind_of(self, subject: str) -> str:
+        """What kind of thing this subject is — its stated kind, or the head of its own name.
+
+        **Never empty**, and that is load-bearing rather than tidy.
+        :meth:`nyxara.njp.universe.InternalUniverse._permitted` allows an arrow between two
+        variables of the *same entity* outright — "that is not a causal claim about the world, it
+        is the entity's own state being internally consistent" — and it reads the entity from the
+        part of the name before the dot. An undotted variable therefore has no entity, so the
+        permission falls through to the world model, which has never heard of ``paani`` or
+        ``badha`` and refuses the pair. Measured: bare names gave 12 observations, a correct joint
+        state of ``{paani: 6.0, badha: 55.0}``, and **not one fitted relation** — while the same
+        session in English, where an ``is_a`` happened to have been stated, fitted at ``R² = 1.0``.
+        A variable naming scheme that works only when the Master remembered to declare a kind is
+        the same defect this method was added to fix, one level up.
+
+        Two sources, strongest first:
+
+        * the kind he **stated** — one ``is_a`` hop through the grounder's own store, never a
+          guess, because an inferred kind might be revised and a variable that moves is worse
+          than one that is broadly named;
+        * failing that, the head of the subject's own name. ``plant a``, ``plant b``, ``paudhe c``
+          are an instance label attached to a kind, and the label is precisely the part that
+          varies between the rows a fit is made of. Dropping it is what turns six plants into six
+          *samples* rather than six universes.
+        """
+        try:
+            grounder = getattr(self.brain, "grounder", None)
+            if grounder is not None:
+                for triple in grounder._lookup(subject, "is_a"):
+                    name = str(getattr(triple, "object", "") or "").strip().lower()
+                    if name:
+                        return name
+        except Exception:  # noqa: BLE001
+            pass
+        return _head_noun(subject)
 
     # ---- causal hypotheses --------------------------------------------------- #
     def _raise_hypotheses(self, rep: CycleReport) -> int:

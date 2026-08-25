@@ -809,11 +809,38 @@ _LIST_SPLIT = re.compile(r"\s*,\s*(?:and\s+|or\s+)?|\s+and\s+", re.IGNORECASE)
 # confidence 0.0 with "no usable arrow leaves the intervened variables" — a simulator that owned
 # a causal skeleton it could never fit a single coefficient to, because nothing upstream had ever
 # handed it a number.
+#: Words that may follow a unit and are never the substance being measured. Without this the
+#: bare-adjacency reading below would name a variable after a time word: "grew 20 cm yesterday"
+#: is a measurement of growth taken yesterday, not a measurement of "yesterday".
+_NOT_A_SUBSTANCE = frozenset({
+    "yesterday", "today", "tomorrow", "now", "already", "still", "again", "ago",
+    "in", "on", "at", "to", "from", "with", "by", "for", "over", "under", "per",
+    "and", "or", "but", "than", "then", "so", "because", "while", "when",
+    "kal", "aaj", "abhi", "phir", "aur", "ya", "lekin", "se", "ko", "me", "mein", "par",
+    "tak", "hi", "bhi", "tha", "thi", "the", "hai", "hain", "mila", "mili", "liya",
+})
+
+# The noun the quantity is *of*. "of" is optional, and that is the whole point of this shape:
+# English writes both "2 litres of water" and "2 litre water", and Hindi writes neither — there is
+# no word in that position at all in "2 litre paani". Requiring the literal "of" meant the noun
+# group could match in exactly one of the three, so in the Master's own language a measurement
+# could never name its substance and every such reading fell through to the unit's dimension.
+#
+# That is the same failure the comment on `_MEASURE_SUBJECT` below records being fixed once for
+# the subject half, left reproducible verbatim in the substance half. Downstream it is what
+# decides whether the variable is called `water` — which is the word the Master uses when he asks
+# "agar paani aadha kar doon" — or `volume`, which is a dimension two different substances share
+# and which no question will ever name.
 _MEASURE = re.compile(
-    r"(?P<q>-?\d+(?:\.\d+)?)\s*"
+    # The quantity must START a token. Without the lookbehind a digit *inside* a word is read as
+    # a number — and once the noun group stopped requiring a literal "of", the word after it was
+    # read as the substance. Measured: "memvaku0 se femzoren0 hoti hai" became a measurement of
+    # `hoti` equal to 0, which destroyed the causal triple and took the seven-stage curve's
+    # control stage from 1.00 to 0.00. Latent before that change and immediately fatal after it.
+    r"(?<![^\W_])(?P<q>-?\d+(?:\.\d+)?)\s*"
     r"(?P<u>litres?|liters?|ml|cm|mm|km|kg|degrees?|celsius|hours?|hrs?|days?|"
     r"[lmg])?\b\s*"
-    r"(?:of\s+(?P<n>[a-z]+))?",
+    r"(?:of\s+)?(?P<n>[^\W\d_]+)?",
     re.IGNORECASE)
 
 # A sentence only reports a measurement if it says who was measured. Requiring the subject is
@@ -1228,6 +1255,10 @@ def _measurements(text: str) -> List[Tuple[str, float]]:
             continue
         unit = (match.group("u") or "").strip()
         name = (match.group("n") or "").strip()
+        # The token after the unit is only the substance if it *could* be one. Adjacency alone
+        # would name the variable after whatever came next, including a time word.
+        if name in _NOT_A_SUBSTANCE or name == unit:
+            name = ""
         if not name:
             name = _quantity_name(low, match.start())
         if not name:
