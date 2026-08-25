@@ -288,3 +288,48 @@ def test_a_kind_rule_never_restates_its_own_antecedent():
         brain.think(f"a {bird} is a bird")
     for name in (a.name for a in brain.discoverer.abstractions.values()):
         assert "→ bird" not in name or "bird," not in name, name
+
+
+# --------------------------------------------------------------------------- #
+# a clash the grounder found and nobody was told about
+# --------------------------------------------------------------------------- #
+
+def test_a_revision_is_recorded_as_a_contradiction_between_beliefs():
+    """`GroundingResult.contradictions` was produced correctly and read by nothing but to_dict.
+
+    So `BeliefLedger.contradict` had no caller on the path that actually produces contradictions,
+    and `contradictions_found` and `contested` stood at zero however often the Master revised
+    himself.
+    """
+    brain = NJPBrain()
+    brain.think("my name is Jay")
+    report = brain.think("my name is Raj")
+    assert report.field.beliefs_contradicted == 1, report.field.to_dict()
+    stats = brain.beliefs.stats()
+    assert stats["contradictions_found"] >= 1, stats
+    assert stats["contested"] >= 2, stats
+
+
+def test_the_superseded_belief_actually_loses_confidence():
+    """The number is not the point — this is.
+
+    `contradict` is where each side loses confidence in proportion to the *other's* earned
+    support, so a well-evidenced claim barely moves against a bare assertion and two bare
+    assertions both collapse. Without the call a superseded belief kept the confidence it was
+    first held at, which is a brain that has been corrected and does not know it.
+    """
+    brain = NJPBrain()
+    brain.think("my name is Jay")
+    held = brain.beliefs.why("Master has_name Jay")["confidence"]
+    brain.think("my name is Raj")
+    after = brain.beliefs.why("Master has_name Jay")["confidence"]
+    assert after < held, (held, after)
+
+
+def test_two_facts_that_do_not_clash_are_not_contested():
+    """Two things a subject needs are both true. Only a *revision* is a contradiction."""
+    brain = NJPBrain()
+    brain.think("plants need water")
+    report = brain.think("plants need light")
+    assert report.field.beliefs_contradicted == 0
+    assert brain.beliefs.stats()["contradictions_found"] == 0

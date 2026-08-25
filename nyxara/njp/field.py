@@ -134,6 +134,9 @@ class CycleReport:
     experiment: str = ""
     experiment_gain: float = 0.0
     beliefs_touched: int = 0
+    #: Clashes the grounder found and the ledger was told about. Zero here and zero because
+    #: nothing ever contradicted are different findings.
+    beliefs_contradicted: int = 0
     # The world-level prediction: what she expected the situation to lead to, and what the world
     # charged her in bits for being wrong about it. Separate from `error`, which grades her
     # against her own firing — this grades her against reality.
@@ -147,7 +150,7 @@ class CycleReport:
     def learned(self) -> bool:
         """Did anything durable change? A cycle that only observed has not learned."""
         return bool(self.restructured or self.crystallised or self.arrows
-                    or self.beliefs_touched or self.experiment)
+                    or self.beliefs_touched or self.beliefs_contradicted or self.experiment)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"turn": self.turn, "perceived": self.perceived,
@@ -161,6 +164,7 @@ class CycleReport:
                 "experiment": self.experiment,
                 "experiment_gain": round(self.experiment_gain, 5),
                 "beliefs_touched": self.beliefs_touched,
+                "beliefs_contradicted": self.beliefs_contradicted,
                 "world_predicted": self.world_predicted,
                 "world_bits": round(self.world_bits, 4),
                 "world_excess": round(self.world_excess, 4),
@@ -351,6 +355,7 @@ class RecursiveCognitiveField:
                 self._repair(rep)
 
             rep.beliefs_touched = self._record_beliefs(thought, triples)
+            rep.beliefs_contradicted = self._record_contradictions(thought)
             self._design_experiment(rep)
 
             if self.concepts is not None:
@@ -696,6 +701,51 @@ class RecursiveCognitiveField:
             pass
 
     # ---- beliefs ---------------------------------------------------------------- #
+    def _record_contradictions(self, thought: Any) -> int:
+        """Tell the ledger about a clash the grounder already found.
+
+        :class:`~nyxara.njp.grounding.GroundingResult` has carried ``contradictions`` since it was
+        written — ``"my name is Jay"`` followed by ``"my name is Raj"`` produces one, correctly —
+        and across the whole package nothing read the field except ``to_dict``. So
+        :meth:`~nyxara.njp.beliefs.BeliefLedger.contradict` had no caller on the path that
+        actually produces contradictions, and ``contradictions_found`` and ``contested`` stood at
+        zero however many times the Master revised himself.
+
+        That is not merely an unreported number. ``contradict`` is where each side loses
+        confidence *in proportion to the other's earned support* — so a well-evidenced claim
+        barely moves against a bare assertion, and two bare assertions both collapse, which is the
+        correct outcome when there is no reason to prefer either. Without the call, a superseded
+        belief kept the confidence it was first held at.
+
+        Recorded here rather than in the loop because the loop closes **before**
+        :meth:`cycle` runs, so the newer of the two beliefs would not yet be held.
+        """
+        if self.beliefs is None:
+            return 0
+        found = 0
+        try:
+            grounding = getattr(getattr(thought, "percept", None), "grounding", None)
+            for prior, current in (getattr(grounding, "contradictions", None) or [])[:4]:
+                first = self._claim_of(prior)
+                second = self._claim_of(current)
+                if not first or not second or first == second:
+                    continue
+                a, b = self.beliefs.contradict(
+                    first, second, why="the record was revised")
+                if a is not None and b is not None:
+                    found += 1
+        except Exception:  # noqa: BLE001 — an unrecorded clash costs a number, never the turn
+            return found
+        return found
+
+    @staticmethod
+    def _claim_of(triple: Any) -> str:
+        """The claim string ``_record_beliefs`` files a triple under. Must match exactly."""
+        subject = str(getattr(triple, "subject", "") or "")
+        predicate = str(getattr(triple, "predicate", "") or "")
+        obj = str(getattr(triple, "object", "") or "")
+        return f"{subject} {predicate} {obj}".strip() if subject and predicate else ""
+
     def _record_beliefs(self, thought: Any, triples: Sequence[Any]) -> int:
         """Everything grounded this turn becomes a belief with its case attached."""
         if self.beliefs is None:
