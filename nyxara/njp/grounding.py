@@ -50,7 +50,7 @@ import re
 import time
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 from nyxara.njp.canon import canonical_entity, singular
 
@@ -442,11 +442,17 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?P<s>.+?)\s+(?:occurs?|happens?|arises?)\s+when\s+(?P<o>.+)$", "occurs_when"),
     (r"^(?P<s>.+?)\s+is\s+(?:a|an)\s+(?P<o>.+)$", "is_a"),
     (r"^(?P<s>.+?)\s+works?\s+(?:at|for)\s+(?P<o>.+)$", "works_at"),
-    (r"^(?P<s>.+?)\s+(?:owns|has)\s+(?:a\s+|an\s+)?(?P<o>.+)$", "owns"),
+    (r"^(?P<s>.+?)\s+(?:owns|has|have)\s+(?:a\s+|an\s+)?(?P<o>.+)$", "owns"),
     (r"^(?P<s>.+?)\s+likes?\s+(?P<o>.+)$", "likes"),
     (r"^(?P<s>.+?)\s+knows?\s+(?P<o>.+)$", "knows"),
     (r"^(?P<s>.+?)\s+is\s+(?:part\s+of|inside)\s+(?P<o>.+)$", "part_of"),
-    (r"^(?P<s>.+?)\s+(?:causes?|leads?\s+to)\s+(?P<o>.+)$", "causes"),
+    # The modal is absorbed into the rule rather than left to be swallowed by the subject. Found
+    # while adding `capable_of` below: "fire can cause heat" extracted `("fire can", causes,
+    # "heat")`, because the lazy subject group is happy to end on the modal and nothing downstream
+    # can tell that "fire can" is not an entity. The claim is still hedged — `_MODALITY` above
+    # scales "may"/"might"/"could" to 0.6 whether or not this rule consumed the word.
+    (r"^(?P<s>.+?)\s+(?:can\s+|may\s+|might\s+|could\s+|will\s+)?(?:causes?|leads?\s+to)\s+"
+     r"(?P<o>.+)$", "causes"),
     # Monotone influence — the signed half of causation, and the shape most real knowledge about
     # quantities actually has. "water increases growth" is not the same claim as "water causes
     # growth": it says which *way* the arrow points, which is exactly what a counterfactual needs
@@ -456,6 +462,21 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
      r"बढ़ाता|बढ़ाती)\s+(?P<o>.+)$", "increases"),
     (r"^(?P<s>.+?)\s+(?:decreases?|reduces?|lowers?|slows?|ghatata|ghatati|kam\s+karta|"
      r"घटाता|घटाती)\s+(?P<o>.+)$", "decreases"),
+    # Ability. `capable_of` has had TWO question forms since the commonsense-corpus work — "what
+    # can an X do", "what is an X capable of" — and until now no rule anywhere could write it. The
+    # comment beside those question patterns reasons about "`sparrow capable_of fly` in the
+    # store"; nothing in the codebase could put it there from language. That is the same read/write
+    # asymmetry this table has been closed against twice, running the other way, which is exactly
+    # why it survived: a relation with no *question* form is found by asking, and a relation with
+    # no *statement* form is found only by noticing that the store is empty of it.
+    #
+    # Placed after the causal and influence rules, and with those verbs excluded outright, because
+    # "fire can cause heat" is a claim about what fire causes and not about what it is able to do.
+    # `be` is excluded for the same reason one rung down: "X can be a Y" is a hedged `is_a`, and
+    # the modality scaler above already knows how to weigh it.
+    (r"^(?P<s>.+?)\s+can\s+(?!cause|causes|lead|leads|produce|produces|increase|increases|"
+     r"decrease|decreases|reduce|reduces|be\b|sometimes\b)(?P<o>.+)$", "capable_of"),
+    (r"^(?P<s>.+?)\s+(?:is|are)\s+(?:capable\s+of|able\s+to)\s+(?P<o>.+)$", "capable_of"),
     # "zyada paani se zyada growth" / "more water more growth" — the comparative form of the
     # same claim, which is how it is usually said out loud.
     (r"^(?:more|zyada|ज़्यादा|अधिक)\s+(?P<s>.+?)\s+(?:se\s+|=\s*|,\s*|→\s*)?"
@@ -848,6 +869,55 @@ _MEASURE_SUBJECT_SOV = re.compile(
     r"मिला|मिली|मिले|लिया|पिया|बढ़ा|बढ़ी|पहुँचा|है|हैं|था|थी)\s*$",
     re.IGNORECASE)
 
+# The bare copula, read only where every seed rule declined — see `Grounder._extract_copula`.
+# A leading determiner is consumed so "the dogs are mammals" and "dogs are mammals" reach one
+# subject, and `is`/`are` are both here because the singular half of this gap ("a bird is small")
+# was as unextracted as the plural half.
+_COPULA = re.compile(
+    r"^(?:the|these|those|all|some|most|many)?\s*(?P<s>.+?)\s+(?:are|is)\s+"
+    r"(?:a\s+|an\s+)?(?P<o>.+?)\s*$", re.IGNORECASE)
+
+#: Suffixes that mark an English adjective. Terminal by construction, which is the property that
+#: makes them usable: a plural noun ends in `-s` and therefore cannot end in any of these, so
+#: "animals" and "natives" fall through to the plural test while "loyal" and "native" do not.
+#: Deliberately morphological rather than a word list, for the reason `canon.py` gives about its
+#: own irregulars — a long list of hand-entered words is a vocabulary, and a vocabulary drifts.
+_ADJECTIVE_SUFFIXES: Tuple[str, ...] = (
+    "ous", "ful", "ive", "ical", "ic", "al", "ish", "able", "ible", "less",
+    "ary", "ory", "ant", "ent", "ile", "oid", "like",
+)
+
+#: Determiners that cannot be the head of an object phrase. A separate name from `canon._ARTICLES`
+#: because that set is the store's key-normalising rule and this one is a parse guard; folding
+#: them would tie two decisions that have no reason to move together.
+_ARTICLES_HERE: FrozenSet[str] = frozenset({
+    "a", "an", "the", "this", "that", "these", "those", "of", "in", "on", "to", "for",
+})
+
+
+#: Possessive openers `_extract_copula` declines on. See the guard there for why.
+_POSSESSIVE = re.compile(
+    r"^(?:my|your|his|her|its|our|their|mera|meri|mere|tera|teri|uska|uski|"
+    r"मेरा|मेरी|मेरे|तेरा|उसका|उसकी)\b", re.IGNORECASE)
+
+
+def _singular_head(phrase: str) -> str:
+    """A phrase with only its head folded to the singular, spelling otherwise untouched.
+
+    ``dogs`` → ``dog``; ``large animals`` → ``large animal``; ``deep learning`` unchanged. The
+    same head-only discipline :func:`~nyxara.njp.canon.canonical_entity` applies to keys, applied
+    here to the surface so a plural statement writes the entity a singular one would have.
+    """
+    try:
+        words = str(phrase or "").split()
+        if not words:
+            return str(phrase or "")
+        words[-1] = singular(words[-1]) or words[-1]
+        return " ".join(words)
+    except Exception:  # noqa: BLE001
+        return str(phrase or "")
+
+
 _WORD = re.compile(r"[a-z]+")
 
 # The verb governing a bare quantity names the variable it measures: "grew 20 cm" is a statement
@@ -1021,7 +1091,7 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # `_read_question` with an empty predicate, took the `_ask_graph` branch, and came back
     # UNKNOWN. `_lookup` was never called; the fact was reachable only by iterating `facts`
     # directly. A relation she can be told and can never be asked is not a relation she has.
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:cause|causes|lead\s+to|leads\s+to|produce|produces)\b",
+    (r"\bwhat\s+do(?:es)?\s+(?P<s>.+?)\s+(?:cause|causes|lead\s+to|leads\s+to|produce|produces)\b",
      "causes"),
     (r"\bwhat\s+(?:happens|results?)\s+(?:from|because\s+of|due\s+to|with)\s+(?P<s>.+?)\??$",
      "causes"),
@@ -1041,9 +1111,9 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
      r"(?:categories|types|kinds|forms|classes)\s+of\s+(?P<s>.+?)\??$", "has_kind"),
     (r"\bwhat\s+(?:are|is)\s+(?:the\s+)?(?:components|parts|stages|steps|phases)\s+of\s+"
      r"(?P<s>.+?)\??$", "has_part"),
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:consist\s+of|comprise)\??$", "consists_of"),
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:mean|refer\s+to|stand\s+for)\??$", "means"),
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+involve\??$", "involves"),
+    (r"\bwhat\s+do(?:es)?\s+(?P<s>.+?)\s+(?:consist\s+of|comprise)\??$", "consists_of"),
+    (r"\bwhat\s+do(?:es)?\s+(?P<s>.+?)\s+(?:mean|refer\s+to|stand\s+for)\??$", "means"),
+    (r"\bwhat\s+do(?:es)?\s+(?P<s>.+?)\s+involve\??$", "involves"),
     (r"\bwhen\s+does\s+(?P<s>.+?)\s+(?:occur|happen)\??$", "occurs_when"),
     (r"\bwhat\s+is\s+(?P<s>.+?)\s+(?:used\s+for|for)\??$", "purpose"),
     (r"\bwhat\s+is\s+(?P<s>.+?)\s+known\s+for\??$", "known_for"),
@@ -1072,7 +1142,8 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # line each. "need" was the absence that showed: `animal needs water` stored fine, and
     # `what does an animal need` matched nothing, because the verb list here was four words long
     # and had been extended once, for the relations that happened to exist at the time.
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?P<p>do|own|like|know|need|needs|require|requires|"
+    (r"\bwhat\s+do(?:es)?\s+(?P<s>.+?)\s+(?P<p>do|own|owns|have|has|like|likes|know|knows|"
+     r"need|needs|require|requires|"
      r"produce|produces|increase|increases|decrease|decreases)\b", ""),
     # "sparrow ko kya chahiye" — the same question, verb-final.
     (r"^(?P<s>.+?)\s+(?:ko|को)\s+(?:kya|क्या)\s+"
@@ -1672,6 +1743,93 @@ class Grounder:
                 confidence=0.9 if not pattern.learned else 0.6 + 0.3 * pattern.precision,
                 source="pattern" if not pattern.learned else "learned-pattern", text=text))
             break
+
+        # The bare copula, and only where every rule above declined. See `_extract_copula`.
+        if not out:
+            out.extend(self._extract_copula(low, text))
+        return out
+
+    def _extract_copula(self, clause: str, text: str) -> List[GroundedTriple]:
+        """``Xs are Ys`` and ``Xs are <adjective>`` — a kind, or a property, told apart.
+
+        **Why this is a fallback and not a pattern.** Every rule in :data:`_SEED_PATTERNS` is a
+        surface with one fixed predicate, and this surface has two. "dogs are mammals" states a
+        kind she can inherit through; "dogs are loyal" states a property she cannot. A regex
+        cannot see the difference, and running the decision *before* the pattern loop would have
+        put a rule matching the bare word "is" ahead of every specific reading in the table — "my
+        name is Jay" and "Paris is the capital of France" both begin the same way. So it runs
+        last, over exactly the sentences nothing else claimed, and can take nothing away from any
+        rule that existed before it.
+
+        **The measured gap it closes.** The plural copula is how kinds are usually stated, and it
+        extracted nothing::
+
+            a dog is a mammal   ->  (dog, is_a, mammal)
+            dogs are mammals    ->  []
+
+        That is the whole `is_a` backbone — inheritance, transfer, the taxonomy the Core walks —
+        unreachable from the commonest way of saying it.
+
+        **How a kind is told from a property**, without becoming a vocabulary. Two rules, in
+        order, and the order is what makes them work:
+
+        1. An adjective-forming suffix is *terminal* — ``famous``, ``loyal``, ``useful``. A plural
+           noun ends in ``-s``, which displaces that suffix: ``animals`` does not end in ``-al``,
+           ``natives`` does not end in ``-ive``. So checking the suffix first separates the two
+           populations cleanly, and it is checked first precisely because ``famous`` ends in an
+           ``s`` that :func:`~nyxara.njp.canon.singular` would otherwise strip to ``famou``.
+        2. Otherwise the object head is a kind exactly when it is plural, which is
+           :func:`~nyxara.njp.canon.singular` — already the store's own morphology, irregulars
+           (``mice``, ``children``) and its declines (``physics``, ``gas``) included. Reusing it
+           means the reading here and the key the fact is stored under can never disagree.
+
+        A bare singular object with neither marker — "a bird is small" — is a property, which is
+        the same answer rule 2 gives and the reason it is the default rather than a third branch.
+
+        The subject and a kind object are folded to their singular *surface*, not merely to their
+        key. A statement in the plural is a statement about the kind, and the entity worth writing
+        down is ``dog``; canon guarantees the key is identical either way, so this changes what a
+        reader sees and never what a lookup finds.
+        """
+        out: List[GroundedTriple] = []
+        try:
+            match = _COPULA.match(clause)
+            if match is None:
+                return out
+            raw_subject = _clean(match.group("s") or "")
+            obj = _clean(match.group("o") or "")
+            if not raw_subject or not obj:
+                return out
+            # A possessive names a property of its owner, and the `my <property> is <value>` rule
+            # above owns that shape. Where that rule declined — it takes a single-word property,
+            # so "my lucky number is seven" falls past it — the honest outcome is silence, not an
+            # entity called "Master's lucky number". Reading a possessive as a thing in its own
+            # right invents a subject nothing else will ever mention again, and this fallback
+            # exists to catch the sentences the table missed, not to answer them badly.
+            if _POSSESSIVE.match(raw_subject) or "'s " in f"{raw_subject} ":
+                return out
+            head = obj.split()[-1].lower()
+            if head in _ARTICLES_HERE or len(obj.split()) > 4:
+                # "the capital of France" and anything long enough to be a clause are not what
+                # this rule is for; leaving them unextracted is what it did yesterday.
+                return out
+
+            if head.endswith(_ADJECTIVE_SUFFIXES):
+                predicate, kind = "has_property", False
+            elif singular(head) != head:
+                predicate, kind = "is_a", True
+            else:
+                predicate, kind = "has_property", False
+
+            subject = self.resolve(_singular_head(raw_subject))
+            if not subject:
+                return out
+            out.append(GroundedTriple(
+                subject=subject, predicate=predicate,
+                object=_singular_head(obj) if kind else obj,
+                confidence=0.8, source="copula", text=text))
+        except Exception:  # noqa: BLE001 — a failed fallback is the silence it replaced
+            return []
         return out
 
     def _extract_superlative(self, clause: str, text: str) -> List[GroundedTriple]:
@@ -2876,8 +3034,17 @@ _PREDICATE_ALIASES: Dict[str, str] = {
     "lives_in": "located_in", "live_in": "located_in", "location": "located_in",
     "city": "located_in", "rehta": "located_in", "rehti": "located_in",
     "job": "works_at", "work": "works_at", "works": "works_at", "employer": "works_at",
-    "owns": "owns", "own": "owns", "has": "owns",
+    "owns": "owns", "own": "owns", "has": "owns", "have": "owns",
     "kind": "is_a", "type": "is_a",
+    # `likes` and `knows` were written by a seed pattern in the third person and asked for in the
+    # bare infinitive, so "dogs like bones" stored `(dog, likes)` and "what do dogs like" formed
+    # `(dog, like)` — the same asymmetry the `needs`/`requires` fold below was added to close,
+    # left open for the two relations whose stored spelling happens to carry the `s`.
+    "like": "likes", "likes": "likes", "know": "knows", "knows": "knows",
+    # Adjectival predication and ability. Both had a question form long before anything could
+    # write them; see `_extract_copula` and the `capable_of` seed rules.
+    "property": "has_property", "properties": "has_property",
+    "can": "capable_of", "able": "capable_of", "capable": "capable_of",
     # The relations a seed pattern renames on the way in. "animal needs water" is *stored* as
     # `requires` by the pattern that reads it, and "what does an animal need" asks for `needs` —
     # so without this fold the fact is written under a key no question ever forms. Same class of
