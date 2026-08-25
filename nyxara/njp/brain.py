@@ -351,6 +351,7 @@ class NJPBrain:
         self.meta = self._build_meta(c)
         self.goals = self._build_goals(c)
         self.curiosity = self._build_curiosity(c)
+        self.assumptions = self._build_assumptions(c)
         self.attention = self._build_attention(c)
         self.environment = self._build_environment(c)
         self.readout = self._build_readout(c)
@@ -641,6 +642,21 @@ class NJPBrain:
             from nyxara.njp.curiosity import Curiosity
             return Curiosity(self, min_value=self._cfg("curiosity_min_value", 0.05))
         except Exception:  # noqa: BLE001 — she answers what she is asked and wonders nothing
+            return None
+
+    def _build_assumptions(self, c: Any) -> Any:
+        """What every arrow she believes is resting on, and which of it nothing has examined.
+
+        Phase 3's missing half. She could say what she knows and what she does not; neither
+        answers the question that actually kills a model — *which assumptions have I never
+        tested?* See :mod:`nyxara.njp.assume`.
+        """
+        if not self._gate("assumptions", True):
+            return None
+        try:
+            from nyxara.njp.assume import AssumptionMiner
+            return AssumptionMiner()
+        except Exception:  # noqa: BLE001 — she reasons on unexamined arrows, as she always did
             return None
 
     def _build_attention(self, c: Any) -> Any:

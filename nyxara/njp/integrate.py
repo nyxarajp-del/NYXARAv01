@@ -149,6 +149,12 @@ class LoopReport:
     questions_closed: int = 0
     experiments_run: int = 0
     bits_gained: float = 0.0
+    # Phase 3's third knowledge state — see :mod:`nyxara.njp.assume`. `assumptions_open` is the
+    # unknown-unknown surface: claims her causal model rests on that nothing has examined.
+    assumptions_mined: int = 0
+    assumptions_tested: int = 0
+    assumptions_refuted: int = 0
+    assumptions_open: int = 0
     # goals
     goals_added: int = 0
     goals_blocked: int = 0
@@ -188,7 +194,8 @@ class LoopReport:
         grounded nothing and predicted nothing has nothing to learn from, and reporting that
         honestly is the point of having the flag.
         """
-        return bool(self.events or self.transitions or self.scored or self.deferred_resolved
+        return bool(self.assumptions_tested or self.assumptions_mined
+                    or self.events or self.transitions or self.scored or self.deferred_resolved
                     or self.capabilities or self.trained or self.consolidated
                     or self.discovered or self.wondered or self.attacked
                     or self.generation)
@@ -208,6 +215,10 @@ class LoopReport:
                            "questions_closed": self.questions_closed,
                            "experiments_run": self.experiments_run,
                            "bits_gained": round(self.bits_gained, 4)},
+                "assumptions": {"mined": self.assumptions_mined,
+                                "tested": self.assumptions_tested,
+                                "refuted": self.assumptions_refuted,
+                                "open": self.assumptions_open},
                 "goals": {"added": self.goals_added, "blocked": self.goals_blocked,
                           "completed": self.goals_completed, "open": self.goals_open},
                 "capabilities": self.capabilities,
@@ -294,6 +305,8 @@ class LearningLoop:
             # still answer 0 to "how much did she learn by experimenting". A measurement that
             # only exists for one turn is not a measurement of a session.
             "bits_gained": 0.0,
+            "assumptions_mined": 0, "assumptions_tested": 0,
+            "assumptions_refuted": 0, "assumptions_open": 0,
             "repaired": 0, "capabilities": 0, "train_steps": 0,
             "consolidations": 0, "discoveries": 0, "wonders": 0,
             "goals_added": 0, "goals_completed": 0,
@@ -1362,6 +1375,12 @@ class LearningLoop:
         if turn % self.dream_every == 0:
             self._compress_programs(rep)
 
+        # Before wondering, deliberately. `curiosity._from_assumptions` reads the miner's untested
+        # set, so mining has to have run for this turn's questions to include the ones she cannot
+        # feel — and testing has to have run for the ones already examined to stop being offered.
+        if turn % self.wonder_every == 0:
+            self._mine_assumptions(rep)
+
         if turn % self.wonder_every == 0:
             try:
                 curiosity = getattr(self.brain, "curiosity", None)
@@ -1560,6 +1579,63 @@ class LearningLoop:
         except Exception:  # noqa: BLE001 — a failed compression leaves the library as it was
             return
 
+    def _mine_assumptions(self, rep: LoopReport) -> None:
+        """Surface what her arrows assume, test what can be tested, and record what was found.
+
+        This is the top of Phase 3's chain and the half that did not exist::
+
+            unknown  →  hypothesis  →  experiment  →  result  →  discovery
+
+        The *unknown* is an assumption nothing has examined; the *hypothesis* is its negation; the
+        *experiment* is a query over her own event record; the *result* is the verdict; and a
+        refutation is a **discovery**, because she can name what she found — the rival cause, the
+        reversal, the confounder.
+
+        A refuted assumption is also stated to the world model as a real link where the record
+        supports one. Finding that ``C`` also causes ``B`` and then not recording ``C → B`` would
+        make the discovery a remark rather than a change to what she believes.
+        """
+        miner = getattr(self.brain, "assumptions", None)
+        world = getattr(self.brain, "world", None)
+        if miner is None or world is None:
+            return
+        try:
+            rep.assumptions_mined = len(miner.mine(world))
+            decided = miner.test(world)
+            rep.assumptions_tested = len(decided)
+            for assumption in decided:
+                if not assumption.discovery:
+                    continue
+                rep.assumptions_refuted += 1
+                self._record_discovery(assumption)
+            rep.assumptions_open = len(miner.unknown_unknowns())
+        except Exception:  # noqa: BLE001 — an unexamined arrow is where she started
+            return
+
+    def _record_discovery(self, assumption: Any) -> None:
+        """Write a refuted assumption back into the model it was an assumption *of*.
+
+        Only the two kinds that name a **relation** the world can hold. A missing condition and a
+        confounder are real findings and neither is an arrow: "something unmodelled decides when"
+        names no variable, and a shared upstream cause is already two arrows the record has. Those
+        stay as discoveries and as questions; inventing an edge for them would be recording a
+        conclusion she has not reached.
+        """
+        from nyxara.njp.assume import AssumptionKind
+        world = getattr(self.brain, "world", None)
+        if world is None:
+            return
+        try:
+            if assumption.kind == AssumptionKind.SOLE_CAUSE and assumption.found:
+                world.state_law(assumption.found, assumption.effect, kind="causes")
+            elif assumption.kind == AssumptionKind.DIRECTED and assumption.found:
+                # The reverse runs about as strongly. Recording it is not asserting the arrow
+                # backwards — it is admitting both directions are live, which is what the record
+                # actually says and what an intervention would have to settle.
+                world.state_law(assumption.effect, assumption.cause, kind="causes")
+        except Exception:  # noqa: BLE001
+            return
+
     def _run_experiments(self, rep: LoopReport) -> None:
         """Settle a designed experiment against the record, and let the losing hypothesis die.
 
@@ -1640,6 +1716,15 @@ class LearningLoop:
             self.totals["beliefs_retracted"] += rep.beliefs_retracted
             self.totals["questions_closed"] += rep.questions_closed
             self.totals["experiments_run"] += rep.experiments_run
+            self.totals["assumptions_mined"] += rep.assumptions_mined
+            self.totals["assumptions_tested"] += rep.assumptions_tested
+            self.totals["assumptions_refuted"] += rep.assumptions_refuted
+            # A level, not a sum — and only written on a turn the pass actually ran. Assigning it
+            # unconditionally overwrote a real surface of 16 with the 0 that every non-cadence
+            # turn carries, so the one number Phase 3 exists to report read zero except on one
+            # turn in ten.
+            if rep.assumptions_mined or rep.assumptions_tested:
+                self.totals["assumptions_open"] = rep.assumptions_open
             self.totals["bits_gained"] = round(
                 float(self.totals.get("bits_gained", 0.0)) + float(rep.bits_gained or 0.0), 4)
             self.totals["capabilities"] += rep.capabilities

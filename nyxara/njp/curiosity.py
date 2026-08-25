@@ -51,6 +51,11 @@ class Gap:
     # strings or counted and dropped, so nothing could ever act on them.
     UNGROUNDED_WORD = "ungrounded_word"     # a word she has no entity for at all
     OVERCONFIDENT = "overconfident"     # believed harder than the evidence earns
+    # The third knowledge state. Not "I asked and could not answer" and not "peers have this and
+    # I do not" — an assumption her causal model is resting on that nothing has ever examined.
+    # She does not know she has it, which is what makes it worth its own kind. See
+    # :mod:`nyxara.njp.assume`.
+    UNTESTED_ASSUMPTION = "untested_assumption"
 
 
 @dataclass
@@ -134,7 +139,8 @@ class Curiosity:
             self.passes += 1
             for question in (self._from_unknowns() + self._from_missing_relations()
                              + self._from_failures() + self._from_thin_coverage()
-                             + self._from_ungrounded() + self._from_audit()):
+                             + self._from_ungrounded() + self._from_audit()
+                             + self._from_assumptions()):
                 if self._raise(question) is question:
                     raised.append(question)
             self._appraise()
@@ -142,6 +148,36 @@ class Curiosity:
             return raised
         except Exception:  # noqa: BLE001 — a failed pass wonders about nothing
             return raised
+
+    def _from_assumptions(self) -> List[Question]:
+        """Arrows she believes, and the claims inside them nothing has looked at.
+
+        Every other source here is a hole she can *feel* — a question she failed, a word that
+        reached nothing, a belief held past its evidence. This one is the opposite: the model is
+        working, and each working arrow is quietly asserting four things, three of which may never
+        have been examined. Surfacing them is how an unknown-unknown becomes a known one, which is
+        the only state anything can act on.
+
+        High uncertainty by construction: an unexamined assumption is one about which she has no
+        information at all, and pricing it otherwise would let it lose to questions she has
+        already half-answered.
+        """
+        out: List[Question] = []
+        try:
+            miner = getattr(self.brain, "assumptions", None)
+            if miner is None:
+                return out
+            for assumption in miner.unknown_unknowns()[:4]:
+                out.append(Question(
+                    text=assumption.question, gap=Gap.UNTESTED_ASSUMPTION,
+                    subject=f"{assumption.cause} → {assumption.effect}",
+                    predicate=assumption.kind,
+                    # Cheap, because testing it is a query over her own record rather than a
+                    # question put to the Master — see `assume.AssumptionMiner.test`.
+                    uncertainty=1.0, stakes=0.6, cost=_COST_GATHER))
+        except Exception:  # noqa: BLE001
+            return out
+        return out
 
     def _from_unknowns(self) -> List[Question]:
         """Questions the reasoner could not answer and recorded."""
