@@ -194,7 +194,7 @@ _HINGLISH_VERBS: Tuple[str, ...] = (
 #: lets an imperative be recognised as the question it embeds rather than as a claim about the
 #: imperative itself.
 _ASK_VERBS: Tuple[str, ...] = (
-    "tell", "say", "explain", "describe", "show", "list", "name",
+    "tell", "say", "explain", "describe", "show", "list", "name", "define",
     "batao", "bata", "bolo", "batana", "बताओ",
 )
 
@@ -303,7 +303,22 @@ class Meaning:
 
     @property
     def complete(self) -> bool:
-        """Does this Meaning carry enough to become a triple?"""
+        """Does this Meaning carry enough to become a triple?
+
+        An **intransitive** assertion is complete without an object, and refusing it here is what
+        starved the world model's timeline. "The fire spread", "it rained", "aag lagi" report that
+        something happened and there is nothing further to name: demanding an object of them is
+        demanding a part of speech the sentence does not have. Measured, the consequence reached
+        four organs deep — `world.events` stood at 1 over a session full of happenings, so
+        `world.counterfactual` answered "X has only happened 0 times, too few to say", so every
+        designed experiment was unresolvable, so `experiments_run` and `bits_gained` were
+        permanently zero and no hypothesis was ever eliminated.
+
+        Only for the intransitive *frame*, never as a general relaxation. A transitive reading
+        that lost its object is a parse failure and stays incomplete.
+        """
+        if self.frame == "np-verb":
+            return bool(self.subject and self.relation)
         return bool(self.subject and self.relation and self.object)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -588,6 +603,13 @@ class SemanticCompiler:
         gets nothing — what it gains is the condition and modality this sentence carried, which
         were being discarded along with it.
         """
+        # No subject in a clause that opens with a preposition — "about deep learning" names no
+        # one who did anything. The same guard `_q_bare` keeps, and it has to be repeated here
+        # because making an intransitive assertion `complete` reopened the precision hole this
+        # module's refusals exist to close: measured, "tell me about deep learning" and "define
+        # overfitting" both started grounding again.
+        if tokens and tokens[0].tag == Tag.PREP:
+            return
         content = [t for t in tokens if t.open_class]
         if len(content) != 2:
             return

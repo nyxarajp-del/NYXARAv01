@@ -282,6 +282,12 @@ class LearningLoop:
         self.totals: Dict[str, int] = {
             "events": 0, "transitions": 0, "scored": 0, "correct": 0,
             "deferred_opened": 0, "deferred_resolved": 0, "corrections": 0,
+            # Information actually gained by running experiments, in bits. Carried per turn since
+            # `_run_experiments` was written and never accumulated, so a session could gain real
+            # bits — 0.8652 on the turn the fire/heat arrows were settled — and `stats()` would
+            # still answer 0 to "how much did she learn by experimenting". A measurement that
+            # only exists for one turn is not a measurement of a session.
+            "bits_gained": 0.0,
             "repaired": 0, "capabilities": 0, "train_steps": 0,
             "consolidations": 0, "discoveries": 0, "wonders": 0,
             "goals_added": 0, "goals_completed": 0,
@@ -1393,6 +1399,24 @@ class LearningLoop:
             counts = getattr(world, "_counts", None) or {}
             if effect in counts:
                 return effect
+            # The **actor** of an intransitive occurrence, which is the third naming and the one
+            # a stated law actually uses. "aag lagi" files under the action — `Event.key` drops
+            # the actor when there is no object — so the record holds `lagi` while the law that
+            # raised the hypothesis says `aag`. No stem is shared between those two words in any
+            # language, so the stem rule below can never bridge it, and the pair is not a near
+            # miss but a different vocabulary. Measured: 13 events recorded, 9 candidate links,
+            # and every experiment still unresolvable.
+            #
+            # Matched on identity and only when exactly one recorded key carries that actor, for
+            # the same reason the stem match is: settling a hypothesis against the wrong event is
+            # worse than leaving it open.
+            wanted = str(effect or "").strip().lower()
+            by_actor = {str(getattr(e, "key", "") or "")
+                        for e in (getattr(world, "events", None) or [])
+                        if str(getattr(e, "actor", "") or "").strip().lower() == wanted}
+            by_actor = {k for k in by_actor if k in counts}
+            if len(by_actor) == 1:
+                return next(iter(by_actor))
             stem = str(effect or "")[:4].lower()
             if len(stem) < 4:
                 return effect
@@ -1457,7 +1481,12 @@ class LearningLoop:
                 experiment = f"remove:{cause}"
                 if not cause or not effect or experiment in self._experiments_run:
                     continue
-                verdict = world.counterfactual(cause, self._as_recorded(world, effect))
+                # BOTH ends are reconciled, not only the effect. The cause is named by the same
+                # law in the same vocabulary and is looked up in the same table, so mapping one
+                # and not the other leaves the pair half-translated — which is indistinguishable
+                # from an unanswerable question and was being reported as one.
+                verdict = world.counterfactual(self._as_recorded(world, cause),
+                                               self._as_recorded(world, effect))
                 if not verdict.answerable:
                     continue
                 # "still happens without it" refutes the arrow; "never happens without it"
@@ -1488,6 +1517,8 @@ class LearningLoop:
             self.totals["beliefs_retracted"] += rep.beliefs_retracted
             self.totals["questions_closed"] += rep.questions_closed
             self.totals["experiments_run"] += rep.experiments_run
+            self.totals["bits_gained"] = round(
+                float(self.totals.get("bits_gained", 0.0)) + float(rep.bits_gained or 0.0), 4)
             self.totals["capabilities"] += rep.capabilities
             self.totals["train_steps"] += int(rep.trained)
             self.totals["consolidations"] += int(rep.consolidated)

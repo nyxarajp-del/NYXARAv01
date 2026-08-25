@@ -325,7 +325,17 @@ class WorldView:
                 if triple.predicate in _LAW_PREDICATES:
                     self.state_law(triple.subject, triple.object, kind=triple.predicate)
                     continue
-                if triple.predicate not in _EVENT_PREDICATES:
+                # A triple with **no object** is intransitive, and an intransitive relation is a
+                # happening by grammar rather than by vocabulary: "the fire spread", "it rained",
+                # "aag lagi" name a thing and something it did, and there is no further argument
+                # for them to have. The list below stays for the ambiguous case — a transitive
+                # relation may state a fact or an event and only the predicate can say which —
+                # but it must not be what decides the unambiguous one, or the timeline only ever
+                # records the happenings somebody remembered to enumerate. Measured: `events`
+                # stood at 1 over a session full of them.
+                if triple.object and triple.predicate not in _EVENT_PREDICATES:
+                    continue
+                if not triple.object and not triple.predicate:
                     continue
                 out.append(self.observe(Event(
                     actor=triple.subject, action=triple.predicate, object=triple.object,

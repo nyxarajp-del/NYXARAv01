@@ -1768,6 +1768,11 @@ class Grounder:
         subject = self.resolve(meaning.subject)
         if not subject:
             return found
+        # An intransitive happening is recorded even where the patterns already read the clause,
+        # because what they produce for it is a *fact* and what it states is an *event*. The two
+        # belong in different stores and `world.from_grounding` is what separates them.
+        if not meaning.object and found:
+            return found
         triple = GroundedTriple(
             subject=subject,
             predicate=self._predicate(meaning.relation),
