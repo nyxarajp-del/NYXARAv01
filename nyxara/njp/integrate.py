@@ -108,6 +108,12 @@ _STATE_WIDTH = 16
 _PARTIAL_CREDIT = 0.5
 
 
+#: How many of her own questions may be outstanding as tracked work at once. A cap on how much
+#: she has undertaken is a real constraint; the per-turn slice it replaced was a cap on which
+#: questions she could *notice*, which is an accident of sorting.
+_TRACKED_QUESTIONS = 32
+
+
 @dataclass
 class LoopReport:
     """What one closing of the loop actually did. Every field is a real count."""
@@ -472,8 +478,15 @@ class LearningLoop:
             self._deferred_answers(thought, rep)
             # A live tie is a rival hypothesis set that needs no cortex to exist.
             self._experiment_from_conflict(thought, rep)
-            self._close_curiosity(thought, rep)
+            # Goals before closure, and the order is the point: work has to be *committed to*
+            # before it can be finished. Closing first meant a question raised and answered inside
+            # one turn — which is every evidence question the moment its claim earns hard support
+            # — was already resolved when the tracker looked, so it never entered the tree, and
+            # the completion branch then found no node for it. Measured: `goals_added` climbing
+            # while `goals_completed` stayed 0 forever. Tracked first, it is committed to on the
+            # turn it is raised, closed immediately after, and completed on the next pass.
             self._track_goals(thought, rep)
+            self._close_curiosity(thought, rep)
             self._observe_capabilities(thought, rep)
             self._train_readout(fired, rep)
             self._slow(rep)
@@ -770,8 +783,53 @@ class LearningLoop:
                         continue
                     if curiosity.resolve(question, str(getattr(triple, "object", "") or "")):
                         rep.questions_closed += 1
+            self._close_evidence_questions(curiosity, rep)
         except Exception:  # noqa: BLE001
             pass
+
+    def _close_evidence_questions(self, curiosity: Any, rep: LoopReport) -> None:
+        """Close a question that asked for *evidence*, when the evidence arrived.
+
+        These are the questions :mod:`nyxara.njp.epistemic` raises — "what would settle whether
+        birds requires water is true? (no hard evidence)" — and they are shaped unlike every other
+        question in the store: their ``subject`` is a whole **claim** and their ``predicate`` is
+        the literal string ``evidence``. The resolution path above matches a question's subject
+        and predicate against an incoming *triple's*, so it compares ``birds requires water``
+        against ``birds`` and ``evidence`` against ``requires``, and can never match either.
+
+        They were therefore unresolvable by the only mechanism that resolves anything. Measured,
+        that reached two counters deep: they accumulate forever, they are what
+        ``_goals_from_curiosity`` files as tasks — three of the four nodes in a typical session —
+        and so ``goals_completed`` was 0 permanently while ``goals_added`` climbed.
+
+        What settles such a question is what its own text asks for: the claim acquiring hard
+        evidence, or reality deciding it outright. Both are now things that happen —
+        ``_record_prediction_evidence`` files a confirmed guess as ``PREDICTION``, which is hard,
+        and ``beliefs.settle`` records an outcome — so this is a real condition being met, not a
+        question being retired for being old. A question that is merely *stale* is a different
+        state and :meth:`nyxara.njp.curiosity.Curiosity.stale_questions` already owns it.
+        """
+        beliefs = getattr(self.brain, "beliefs", None)
+        if beliefs is None:
+            return
+        try:
+            for question in list(curiosity.open_questions()):
+                if str(getattr(question, "predicate", "") or "") != "evidence":
+                    continue
+                claim = str(getattr(question, "subject", "") or "")
+                if not claim:
+                    continue
+                case = beliefs.why(claim)
+                if not case.get("known"):
+                    continue
+                settled = case.get("outcome") is not None
+                if not (case.get("hard_support") or settled):
+                    continue
+                answer = "settled by reality" if settled else "hard evidence arrived"
+                if curiosity.resolve(question, answer):
+                    rep.questions_closed += 1
+        except Exception:  # noqa: BLE001
+            return
 
     def _stake_a_belief(self, thought: Any, said: str, subject: str, predicate: str) -> None:
         """Record what she just asserted as a belief that can later be found wrong.
@@ -959,12 +1017,39 @@ class LearningLoop:
         """
         try:
             from nyxara.njp.beliefs import EvidenceKind
-            beliefs.support(
-                pending.answered, EvidenceKind.PREDICTION,
-                detail=(f"answered {pending.answered!r} for "
-                        f"{pending.subject} {pending.predicate}, and the Master then stated "
-                        f"{triple.object!r}"),
-                source="deferred-answer")
+            detail = (f"answered {pending.answered!r} for "
+                      f"{pending.subject} {pending.predicate}, and the Master then stated "
+                      f"{triple.object!r}")
+            # **Both namings of the same proposition.** `_stake_a_belief` files what she *said* —
+            # the bare answer, "water" — while `field._record_beliefs` files the claim shape,
+            # "sparrows requires water". They are one proposition under two keys and both are
+            # held, so evidence filed against only the first leaves the second still resting on
+            # testimony alone.
+            #
+            # That is not a cosmetic gap. `epistemic` raises "what would settle whether sparrows
+            # requires water is true?" keyed on the *claim* shape, so the question asking for
+            # exactly this evidence could never see it arrive — and the task that question becomes
+            # could never complete, which is why `goals_completed` was 0 with `goals_added`
+            # climbing.
+            for claim in (pending.answered,
+                          f"{triple.subject} {triple.predicate} {triple.object}".strip()):
+                if not claim:
+                    continue
+                if beliefs.support(claim, EvidenceKind.PREDICTION,
+                                   detail=detail, source="deferred-answer") is not None:
+                    continue
+                # Not held yet. The loop closes at step 10 and `field._record_beliefs` stakes the
+                # Master's statement at step 11, so on the very turn a deferred answer resolves,
+                # the claim shape does not exist for `support` to attach to and the evidence was
+                # silently dropped. Holding it here is not inventing anything — it is the triple
+                # the Master just stated, held exactly as the field is about to hold it a moment
+                # later, and `hold` is keyed so the field's call is then a no-op rather than a
+                # duplicate.
+                beliefs.hold(claim, confidence=EvidenceKind.WEIGHTS[EvidenceKind.TESTIMONY],
+                             produced_by="grounding",
+                             why="grounded from the Master's statement")
+                beliefs.support(claim, EvidenceKind.PREDICTION,
+                                detail=detail, source="deferred-answer")
         except Exception:  # noqa: BLE001 — evidence that cannot be filed never breaks a turn
             return
 
@@ -1013,6 +1098,17 @@ class LearningLoop:
             goal_name = str(getattr(intent, "goal", "") or "").strip() or \
                 str(getattr(thought, "stimulus", ""))[:80]
             if not goal_name:
+                return
+            # A command whose every action was negated is an instruction *not* to do something,
+            # and it must not become a thing to do. The polarity filter above already drops the
+            # negated actions, and the goal was created regardless — so "mat karo" ("don't do it")
+            # produced a goal node named "mat karo", which is the worst possible reading of an
+            # instruction and exactly what this method's docstring says it refuses.
+            stated = list(getattr(intent, "actions", None) or [])
+            polarity = getattr(intent, "polarity", None) or {}
+            if stated and not actions:
+                return
+            if not stated and any(not polarity.get(a, True) for a in polarity):
                 return
 
             goal = tree.add(goal_name, kind="goal",
@@ -1086,7 +1182,20 @@ class LearningLoop:
             mission = self._own_mission(tree)
             if mission is None:
                 return
-            for question in curiosity.open_questions()[:4]:
+            # Every open question whose VOI decision was to go and look, not the top four by
+            # value. **The decision is the commitment; the rank is not.** With a per-turn slice
+            # only the four highest-valued questions were ever filed as work, and questions
+            # resolve independently of their rank — so the one that got its answer was routinely
+            # one that had never been committed to. Measured: `goals_added` climbing to 4 and
+            # sticking there, `goals_completed` 0, and the question that did resolve
+            # ("what would settle whether crows requires water is true?") absent from the tree.
+            #
+            # Bounded by the total tracked instead, so the tree cannot grow without limit — a cap
+            # on how much work she may have outstanding is a real constraint, where a cap on which
+            # work she may notice is an accident of sorting.
+            for question in curiosity.open_questions():
+                if len(self._question_nodes) >= _TRACKED_QUESTIONS:
+                    break
                 if str(getattr(question, "action", "")) not in ("gather", "investigate"):
                     continue
                 name = str(getattr(question, "text", ""))[:80]
