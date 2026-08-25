@@ -347,7 +347,8 @@ class MetaReasoner:
     """Picks the reasoning strategy, runs it, criticises it, and says how much to trust it."""
 
     def __init__(self, *, meta_learner: Any = None, beliefs: Any = None,
-                 world: Any = None, classifier: Optional[ProblemClassifier] = None,
+                 world: Any = None, universe: Any = None,
+                 classifier: Optional[ProblemClassifier] = None,
                  max_attempts: int = 3) -> None:
         self.classifier = classifier or ProblemClassifier()
         # How many eligible strategies may be tried before the turn is left unanswered. Bounded
@@ -357,6 +358,10 @@ class MetaReasoner:
         self.meta_learner = meta_learner        # optional njp.selfmodel.MetaLearner
         self.beliefs = beliefs                  # optional njp.beliefs.BeliefLedger
         self.world = world                      # optional njp.world.WorldView
+        # Optional njp.universe.InternalUniverse. A causal answer can be about an *event kind*
+        # the timeline recorded ("lagi") or a *variable* the universe fitted ("plant.water"), and
+        # the critic below has to be able to recognise either — see `_critique`.
+        self.universe = universe
         self.strategies: Dict[str, Strategy] = {}
         # Records loaded from a snapshot for strategies that are not registered yet. See
         # `load_dict`: a runtime-registered arm's history is held here until `register` claims it.
@@ -605,12 +610,31 @@ class MetaReasoner:
             if not any(c.isdigit() for c in answer) and any(c.isdigit() for c in solution.problem):
                 critique.defects.append("symbolic problem answered without a value")
 
-        if solution.kind == ProblemKind.CAUSAL and self.world is not None:
+        if solution.kind == ProblemKind.CAUSAL and (self.world is not None
+                                                    or self.universe is not None):
             critique.checked.append("cause-known-to-world-model")
             try:
-                known = {e.key for e in getattr(self.world, "events", [])[-200:]}
-                known |= set(getattr(self.world, "_stated", {}))
-                if known and not any(k and k.split(":")[0] in answer.lower() for k in known):
+                # **Both stores, because a causal claim can be about either.** The world model
+                # holds *event kinds* she has seen happen ("lagi"); the universe holds *variables*
+                # she has fitted ("plant.water"). A counterfactual over a variable contains no
+                # event key by construction, so checking only the timeline rejected every correct
+                # do-operator answer the moment the timeline had any content at all.
+                #
+                # Measured: `plant.water 5 → 2.5 predicts plant.growth 47 → 24.4762` — derived,
+                # answerable, confidence 0.54 — was discarded as "cause is not in the world model"
+                # in a session that had also been told about fire and heat, and kept in an
+                # otherwise identical session that had not. The check was reading the wrong store,
+                # and it could only ever be seen once `world.events` stopped being zero.
+                known = {e.key for e in getattr(self.world, "events", [])[-200:]} \
+                    if self.world is not None else set()
+                if self.world is not None:
+                    known |= set(getattr(self.world, "_stated", {}))
+                if self.universe is not None:
+                    known |= {str(v) for v in (getattr(self.universe, "state", None) or {})}
+                    known |= {str(r.cause) for r in
+                              (getattr(self.universe, "relations", None) or {}).values()}
+                low = answer.lower()
+                if known and not any(k and k.split(":")[0].lower() in low for k in known):
                     critique.defects.append("cause is not in the world model")
             except Exception:  # noqa: BLE001
                 pass

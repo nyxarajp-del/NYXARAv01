@@ -1296,7 +1296,8 @@ class NJPBrain:
             return None
         try:
             from nyxara.njp.metareason import MetaReasoner, ProblemKind
-            meta = MetaReasoner(meta_learner=self.meta, beliefs=self.beliefs, world=self.world)
+            meta = MetaReasoner(meta_learner=self.meta, beliefs=self.beliefs,
+                                world=self.world, universe=self.universe)
             if self.ladder is not None or self.reasoner is not None:
                 meta.register("ladder", (ProblemKind.SYMBOLIC, ProblemKind.CONTRADICTION),
                               self._strategy_ladder, prior=0.6)

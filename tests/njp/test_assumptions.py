@@ -199,3 +199,48 @@ def test_the_miner_never_raises():
         assert miner.mine(junk) == []
         assert miner.test(junk) == []
     assert isinstance(miner.stats(), dict)
+
+
+# --------------------------------------------------------------------------- #
+# a counterfactual the critic rejected for being in the wrong store
+# --------------------------------------------------------------------------- #
+
+def _measured(brain: NJPBrain) -> NJPBrain:
+    for name, water, growth in (("a", 2, 20), ("b", 4, 38), ("c", 1, 11),
+                                ("d", 6, 55), ("e", 3, 29), ("f", 5, 47)):
+        brain.think(f"plant {name} got {water} litre water")
+        brain.think(f"plant {name} grew {growth} cm")
+    return brain
+
+
+def test_a_counterfactual_survives_a_brain_that_also_has_a_timeline():
+    """The critic checked one store and a causal claim can be about either.
+
+    The world model holds *event kinds* she has seen happen ("lagi"); the universe holds
+    *variables* she has fitted ("plant.water"). A counterfactual over a variable contains no event
+    key by construction, so checking only the timeline discarded every correct do-operator answer
+    the moment the timeline had any content — which it never did until events started being
+    recorded, so this could not be seen before.
+    """
+    plain = _measured(NJPBrain())
+    mixed = NJPBrain()
+    mixed.think("aag se garmi hoti hai")
+    for line in ["aag lagi", "garmi hui", "pasina aaya"] * 4:
+        mixed.think(line)
+    _measured(mixed)
+
+    asked = "what happens if I halve the water?"
+    assert "plant.growth" in (plain.think(asked).answer or ""), "the control case broke"
+    answer = mixed.think(asked).answer or ""
+    assert "plant.growth" in answer, answer
+
+
+def test_a_causal_answer_naming_nothing_she_knows_is_still_refused():
+    """The check is widened to a second store, not removed."""
+    from nyxara.njp.metareason import MetaReasoner, ProblemKind, Solution
+    brain = _measured(NJPBrain())
+    meta = MetaReasoner(world=brain.world, universe=brain.universe)
+    solution = Solution(problem="what happens if I halve the water?",
+                        answer="quafferblat causes zimbleflex", kind=ProblemKind.CAUSAL)
+    critique = meta._criticise(solution, {})
+    assert "cause is not in the world model" in critique.defects, critique.defects
