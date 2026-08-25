@@ -1603,6 +1603,20 @@ class LearningLoop:
                 before = designer.prior_entropy()
                 designer.observe_result(
                     experiment, "present" if verdict.still_happens else "absent")
+                # The effect happened **without** the cause, over her own event record. That
+                # refutes the stated arrow, and `world.refute_law` is what records it — a method
+                # with no caller anywhere in the package, so `refuted_laws` was structurally zero
+                # and a law she had been told could never be contradicted by anything she saw.
+                #
+                # Wired here because this is the one place the verdict is computed, and it is
+                # computed from occurrences rather than from the fitted model — grading a law
+                # with the model the law is about would move every probability while nothing was
+                # learned. A law is refuted by observation or not at all.
+                if verdict.still_happens:
+                    try:
+                        world.refute_law(cause, effect)
+                    except Exception:  # noqa: BLE001
+                        pass
                 self._experiments_run.add(experiment)
                 rep.experiments_run += 1
                 rep.bits_gained += max(0.0, before - designer.prior_entropy())

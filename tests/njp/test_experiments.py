@@ -140,3 +140,37 @@ def test_an_experiment_is_settled_against_the_record_not_against_the_model():
     verdict = brain.world.counterfactual("lagi", "hui")
     # "the effect never happened without the cause" — which supports the arrow.
     assert verdict.answerable and verdict.still_happens is False, verdict
+
+
+# --------------------------------------------------------------------------- #
+# a law she was told, overturned by what she saw
+# --------------------------------------------------------------------------- #
+
+def test_a_stated_law_the_record_contradicts_is_refuted():
+    """`world.refute_law` had no caller anywhere, so `refuted_laws` was structurally zero.
+
+    A law she was *told* could never be contradicted by anything she *saw* — which is the whole
+    of what a world model is for. The verdict comes from occurrences over her own event record,
+    never from the fitted model: grading a law with the model the law is about moves every
+    probability while nothing is learned.
+    """
+    brain = NJPBrain()
+    brain.think("aag se garmi hoti hai")
+    session = (["aag lagi", "garmi hui"] + ["pasina aaya"] * 3 + ["garmi hui"] * 8
+               + ["pasina aaya"] * 2 + ["garmi hui"] * 4)
+    for line in session:
+        brain.think(line)
+    verdict = brain.world.counterfactual(brain.loop._as_recorded(brain.world, "aag"),
+                                         brain.loop._as_recorded(brain.world, "garmi"))
+    assert verdict.still_happens is True, verdict
+    assert brain.world.stats()["refuted_laws"] >= 1, brain.world.stats()
+
+
+def test_a_law_the_record_supports_is_not_refuted():
+    """Refutation needs a counterexample, not merely an experiment."""
+    brain = NJPBrain()
+    brain.think("aag se garmi hoti hai")
+    for _ in range(5):
+        brain.think("aag lagi")
+        brain.think("garmi hui")
+    assert brain.world.stats()["refuted_laws"] == 0, brain.world.stats()
