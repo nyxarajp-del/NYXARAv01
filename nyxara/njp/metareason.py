@@ -348,7 +348,7 @@ class MetaReasoner:
 
     def __init__(self, *, meta_learner: Any = None, beliefs: Any = None,
                  world: Any = None, classifier: Optional[ProblemClassifier] = None,
-                 max_attempts: int = 3) -> None:
+                 blackbox: Any = None, max_attempts: int = 3) -> None:
         self.classifier = classifier or ProblemClassifier()
         # How many eligible strategies may be tried before the turn is left unanswered. Bounded
         # rather than exhaustive: the point is to reach the organ that can bind to this question,
@@ -357,6 +357,10 @@ class MetaReasoner:
         self.meta_learner = meta_learner        # optional njp.selfmodel.MetaLearner
         self.beliefs = beliefs                  # optional njp.beliefs.BeliefLedger
         self.world = world                      # optional njp.world.WorldView
+        #: Optional :class:`~nyxara.njp.blackbox.BlackBox`. Where present it disaggregates this
+        #: class's own ``(kind, strategy)`` average by the *conditions* a turn happened under —
+        #: see :meth:`choose`. Absent, every choice is made exactly as it was before it existed.
+        self.blackbox = blackbox
         self.strategies: Dict[str, Strategy] = {}
         # Records loaded from a snapshot for strategies that are not registered yet. See
         # `load_dict`: a runtime-registered arm's history is held here until `register` claims it.
@@ -459,8 +463,19 @@ class MetaReasoner:
         return [s for s in pool if _STRATEGY_PATHWAY.get(s.name, "") in ("", *allowed)]
 
     def choose(self, kind: str, *, exclude: Sequence[str] = (),
-               pathways: Sequence[str] = ()) -> Optional[Strategy]:
-        """UCB1 over the strategies eligible for this kind of problem, and permitted by the act."""
+               pathways: Sequence[str] = (), conditions: Any = None) -> Optional[Strategy]:
+        """UCB1 over the strategies eligible for this kind of problem, and permitted by the act.
+
+        ``conditions`` is an optional :class:`~nyxara.njp.blackbox.Conditions`. Where it is given
+        and the black box has a record, a strategy that has measurably underperformed *under these
+        exact circumstances* is demoted by the size of its shortfall. The kind-level arm is not
+        touched: this refines a choice within the pool that arm already produced.
+
+        The penalty is subtracted and never added, and it is zero wherever the record is thin —
+        so an untried condition chooses exactly as it did before this existed. A record of her own
+        past behaviour is not independent evidence about the world, and letting it raise a score
+        would make "she has done this before" its own reason for doing it again.
+        """
         pool = [s for s in self._candidates(kind) if s.name not in set(exclude)]
         pool = self._permitted(pool, pathways)
         if not pool:
@@ -474,7 +489,16 @@ class MetaReasoner:
             except Exception:  # noqa: BLE001 — the shared bandit is optional
                 pass
         total = sum(s.trials for s in pool)
-        return max(pool, key=lambda s: s.ucb(total))
+        return max(pool, key=lambda s: s.ucb(total) - self._condition_penalty(s, conditions))
+
+    def _condition_penalty(self, strategy: Strategy, conditions: Any) -> float:
+        """What this strategy's record under these conditions costs it. Zero unless it is bad."""
+        if self.blackbox is None or conditions is None:
+            return 0.0
+        try:
+            return float(self.blackbox.penalty(conditions, strategy.name))
+        except Exception:  # noqa: BLE001 — an unreadable record changes nothing
+            return 0.0
 
     # ---- the loop ----------------------------------------------------------- #
     def solve(self, problem: str, *, context: Optional[Dict[str, Any]] = None) -> Solution:
@@ -499,7 +523,12 @@ class MetaReasoner:
             # not hold — and `simulate`, which had the answer, was never the third attempt because
             # the loop stops as soon as anything at all comes back.
             pathways = tuple(ctx.get("pathways") or ())
-            strategy = self._preferred(ctx) or self.choose(out.kind, pathways=pathways)
+            # Carried on the context like `pathways`, because the caller is the only one that
+            # knows the circumstances of the turn and this class deliberately reads no organ of
+            # its own. Absent, `choose` behaves exactly as it did before the black box existed.
+            conditions = ctx.get("conditions")
+            strategy = self._preferred(ctx) or self.choose(out.kind, pathways=pathways,
+                                                           conditions=conditions)
             if strategy is None or strategy.solve is None:
                 self.abstained += 1
                 # Two different reasons, and conflating them hides the interesting one: nothing

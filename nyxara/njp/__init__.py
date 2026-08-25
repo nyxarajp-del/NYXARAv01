@@ -184,6 +184,13 @@ from nyxara.njp.adversary import (
     SelfAttacker,
     Stance,
 )
+from nyxara.njp.blackbox import (
+    BlackBox,
+    CognitiveEpisode,
+    Conditions,
+    Verdict as EpisodeVerdict,
+    conditions_of,
+)
 from nyxara.njp.brain import NJPBrain, NJPPercept, NJPThought
 from nyxara.njp.canon import canonical_entity, canonical_relation, singular
 from nyxara.njp.cell import Cell
@@ -311,6 +318,8 @@ __all__ = [
     "SelfAttacker", "Attack", "AttackReport", "Stance", "AttackKind",
     # the one number she is not allowed to compute about herself
     "IntelligenceIndex", "IntelligenceVector", "Term",
+    # which strategy fails under which conditions, and where the record is too thin to say
+    "BlackBox", "CognitiveEpisode", "Conditions", "EpisodeVerdict", "conditions_of",
     # one entity, one key — the store's spelling rule
     "canonical_entity", "canonical_relation", "singular",
     # truth is not relevance, and reasoning is not always what a turn calls for

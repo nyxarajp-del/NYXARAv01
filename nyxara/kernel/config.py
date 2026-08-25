@@ -2503,6 +2503,16 @@ class NJPConfig(BaseModel):
     curriculum_enabled: bool = True     # the nine-rung ladder and its gating
     calculate_enabled: bool = True      # arithmetic evaluation (njp/calculate.py)
     learner_enabled: bool = True        # the Cognitive Learning Core (njp/core.py)
+    # The cognitive black box (njp/blackbox.py). Disaggregates metareason's `(kind, strategy)`
+    # average by the CONDITIONS a turn happened under, so "does this strategy fail here" is
+    # answerable at all. On because it may only ever demote a strategy with a measured record of
+    # failing under exactly the conditions at hand — off is identical to a record still empty.
+    blackbox_enabled: bool = True
+    blackbox_capacity: int = Field(default=2048, ge=16)
+    # Episodes required before a condition may be reported on at all. Below it the answer is "no
+    # record", never a number: a rate over two episodes is the flattering statistic this package
+    # exists to refuse, and "it fails here" and "I have never tried it here" are different claims.
+    blackbox_min_samples: int = Field(default=5, ge=2)
 
     # --- NJP V.06: the cortex, and the two organs that keep it honest --- #
     #
