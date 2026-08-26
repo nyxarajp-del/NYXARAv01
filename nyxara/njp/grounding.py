@@ -202,6 +202,13 @@ class GroundedTriple:
     condition: str = ""
     temporal: str = ""
     modality: str = ""            # "" | "possible" | "typical" | "necessary"
+    #: Did the surface **deny** this relation? Before this field the string ``negat`` did not
+    #: occur in this module, and ``"Zorbins don't need glarn."`` grounded to
+    #: ``("Zorbins don't", requires, glarn)`` — the negator absorbed into the subject, so the
+    #: denial of a claim was recorded as a different entity's *assertion* of it. A negated triple
+    #: is real knowledge and is kept; what it may not do is answer a question as though positive,
+    #: which :meth:`Grounder._lookup` enforces.
+    negated: bool = False
     # Where this came from — see :class:`Provenance`. Defaults to OBSERVED because every extractor
     # that predates the cortex reads a surface the Master or a document actually produced; only a
     # proposer sets anything else, and only by saying so.
@@ -231,6 +238,11 @@ class GroundedTriple:
             out["temporal"] = self.temporal
         if self.modality:
             out["modality"] = self.modality
+        # Unlike the three above, this is written whenever it is true rather than whenever it is
+        # non-empty: a reader that cannot see the negation assumes the positive, and the positive
+        # is the exact opposite of what was said.
+        if self.negated:
+            out["negated"] = True
         return out
 
 
@@ -246,6 +258,17 @@ class Answer:
     #: The weakest provenance among the triples this was built from — a claim is only as sourced as
     #: its least-sourced support. See :class:`Provenance`.
     provenance: str = Provenance.OBSERVED
+    #: Was this a **polar** question — "do Xs need Y?" rather than "what does X need?"
+    #: It travels on the Answer because an unanswered polar and an unanswered wh-question call for
+    #: different next steps, and only this layer knows which was asked. Deliberation and recall
+    #: derive an *object* for a (subject, relation) pair and have nowhere to put the object the
+    #: question already named — so on a polar gap they answer a question nobody asked, confidently.
+    #: :meth:`nyxara.njp.brain.NJPBrain._settle_polar` reads this.
+    polar: bool = False
+    #: The object a polar question named, so a later derivation can be checked *against* it.
+    #: Deliberation derives an object for a (subject, relation) pair and has no idea one was
+    #: already specified; keeping it here is what lets the brain compare rather than guess.
+    polar_object: str = ""
 
     @property
     def known(self) -> bool:
@@ -786,11 +809,38 @@ _LIST_SPLIT = re.compile(r"\s*,\s*(?:and\s+|or\s+)?|\s+and\s+", re.IGNORECASE)
 # confidence 0.0 with "no usable arrow leaves the intervened variables" — a simulator that owned
 # a causal skeleton it could never fit a single coefficient to, because nothing upstream had ever
 # handed it a number.
+#: Words that may follow a unit and are never the substance being measured. Without this the
+#: bare-adjacency reading below would name a variable after a time word: "grew 20 cm yesterday"
+#: is a measurement of growth taken yesterday, not a measurement of "yesterday".
+_NOT_A_SUBSTANCE = frozenset({
+    "yesterday", "today", "tomorrow", "now", "already", "still", "again", "ago",
+    "in", "on", "at", "to", "from", "with", "by", "for", "over", "under", "per",
+    "and", "or", "but", "than", "then", "so", "because", "while", "when",
+    "kal", "aaj", "abhi", "phir", "aur", "ya", "lekin", "se", "ko", "me", "mein", "par",
+    "tak", "hi", "bhi", "tha", "thi", "the", "hai", "hain", "mila", "mili", "liya",
+})
+
+# The noun the quantity is *of*. "of" is optional, and that is the whole point of this shape:
+# English writes both "2 litres of water" and "2 litre water", and Hindi writes neither — there is
+# no word in that position at all in "2 litre paani". Requiring the literal "of" meant the noun
+# group could match in exactly one of the three, so in the Master's own language a measurement
+# could never name its substance and every such reading fell through to the unit's dimension.
+#
+# That is the same failure the comment on `_MEASURE_SUBJECT` below records being fixed once for
+# the subject half, left reproducible verbatim in the substance half. Downstream it is what
+# decides whether the variable is called `water` — which is the word the Master uses when he asks
+# "agar paani aadha kar doon" — or `volume`, which is a dimension two different substances share
+# and which no question will ever name.
 _MEASURE = re.compile(
-    r"(?P<q>-?\d+(?:\.\d+)?)\s*"
+    # The quantity must START a token. Without the lookbehind a digit *inside* a word is read as
+    # a number — and once the noun group stopped requiring a literal "of", the word after it was
+    # read as the substance. Measured: "memvaku0 se femzoren0 hoti hai" became a measurement of
+    # `hoti` equal to 0, which destroyed the causal triple and took the seven-stage curve's
+    # control stage from 1.00 to 0.00. Latent before that change and immediately fatal after it.
+    r"(?<![^\W_])(?P<q>-?\d+(?:\.\d+)?)\s*"
     r"(?P<u>litres?|liters?|ml|cm|mm|km|kg|degrees?|celsius|hours?|hrs?|days?|"
     r"[lmg])?\b\s*"
-    r"(?:of\s+(?P<n>[a-z]+))?",
+    r"(?:of\s+)?(?P<n>[^\W\d_]+)?",
     re.IGNORECASE)
 
 # A sentence only reports a measurement if it says who was measured. Requiring the subject is
@@ -1021,7 +1071,11 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # `_read_question` with an empty predicate, took the `_ask_graph` branch, and came back
     # UNKNOWN. `_lookup` was never called; the fact was reachable only by iterating `facts`
     # directly. A relation she can be told and can never be asked is not a relation she has.
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:cause|causes|lead\s+to|leads\s+to|produce|produces)\b",
+    # `produce` deliberately absent: the assertion side files "engine produces heat" under
+    # ``produces`` (see the process-intake tests), so reading the question as ``causes`` meant a
+    # verb that could be told and never asked back — the exact defect the comment above this
+    # block names. It reaches ``produces`` through `_PREDICATE_ALIASES` like every other spelling.
+    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:cause|causes|lead\s+to|leads\s+to)\b",
      "causes"),
     (r"\bwhat\s+(?:happens|results?)\s+(?:from|because\s+of|due\s+to|with)\s+(?P<s>.+?)\??$",
      "causes"),
@@ -1201,6 +1255,10 @@ def _measurements(text: str) -> List[Tuple[str, float]]:
             continue
         unit = (match.group("u") or "").strip()
         name = (match.group("n") or "").strip()
+        # The token after the unit is only the substance if it *could* be one. Adjacency alone
+        # would name the variable after whatever came next, including a time word.
+        if name in _NOT_A_SUBSTANCE or name == unit:
+            name = ""
         if not name:
             name = _quantity_name(low, match.start())
         if not name:
@@ -1672,7 +1730,65 @@ class Grounder:
                 confidence=0.9 if not pattern.learned else 0.6 + 0.3 * pattern.precision,
                 source="pattern" if not pattern.learned else "learned-pattern", text=text))
             break
-        return out
+        return self._reconcile(low, text, out)
+
+    # ---- the semantic compiler, as extraction's second reader ---------------- #
+    def _reconcile(self, clause: str, text: str,
+                   found: List[GroundedTriple]) -> List[GroundedTriple]:
+        """What :mod:`nyxara.njp.semantics` makes of this clause, where the patterns fell short.
+
+        Two jobs, and they are separate on purpose.
+
+        **Negation is the compiler's outright, whatever the patterns produced.** The word-level
+        patterns have no representation for it — measured, ``"Zorbins don't need glarn."`` matched
+        the ordinary assertion pattern and yielded ``("Zorbins don't", requires, glarn)``. That is
+        not a near miss to be scored against a rival reading; it is a claim nobody made, and the
+        pattern that produced it cannot be repaired without giving every pattern in the file a
+        negation branch. So when the compiler reads a clause as negated, its subject and object
+        replace whatever the pattern captured, and the predicate is still canonicalised here
+        because the alias table lives on this side.
+
+        **Coverage is the compiler's only where the patterns found nothing.** This ordering is
+        what protects the existing behaviour: every sentence the 101 patterns already read is
+        still read by them, with their confidences and their sources, so nothing that passed
+        before is re-decided by a newer reader. The compiler gets the sentences that previously
+        grounded to nothing at all — which, measured over six ordinary transitive verbs, was all
+        six of them.
+        """
+        try:
+            from nyxara.njp.semantics import compile_meaning
+        except Exception:  # noqa: BLE001 — no compiler is not an error, it is the old behaviour
+            return found
+        try:
+            meaning = compile_meaning(clause)
+        except Exception:  # noqa: BLE001
+            return found
+        if not meaning.readable or meaning.kind != "assertion" or not meaning.complete:
+            return found
+        subject = self.resolve(meaning.subject)
+        if not subject:
+            return found
+        # An intransitive happening is recorded even where the patterns already read the clause,
+        # because what they produce for it is a *fact* and what it states is an *event*. The two
+        # belong in different stores and `world.from_grounding` is what separates them.
+        if not meaning.object and found:
+            return found
+        triple = GroundedTriple(
+            subject=subject,
+            predicate=self._predicate(meaning.relation),
+            object=meaning.object,
+            # Below a pattern's 0.9 and deliberately: the compiler reads structure the patterns
+            # cannot, and it reads it with less evidence — no pattern author ever confirmed that
+            # this shape means what it appears to mean.
+            confidence=0.75 if not meaning.evidential else min(0.75, meaning.confidence),
+            source="semantics", text=text,
+            negated=meaning.negated, modality=meaning.modality,
+            condition=meaning.condition, temporal=meaning.temporal)
+        if meaning.negated:
+            # The patterns' reading of a negated clause is wrong in a way that is not a matter of
+            # degree, so it is replaced rather than ranked against.
+            return [triple]
+        return found or [triple]
 
     def _extract_superlative(self, clause: str, text: str) -> List[GroundedTriple]:
         """``X is the largest Y`` → what X is, and where it ranks.
@@ -2114,6 +2230,14 @@ class Grounder:
         out = Answer()
         try:
             low = _clean(question).lower()
+            # A polar question is a different act and needs answering first, because the ordinary
+            # path cannot represent what it asks. "Do Xs need Y?" reads as (X, requires) and then
+            # returns whatever X requires — measured, it answered a polar question about `Y` by
+            # naming a *different* object entirely, which reads as fluent and is not an answer to
+            # anything that was asked.
+            polar = self._answer_polar(low, out)
+            if polar is not None:
+                return polar
             subject, predicate = self._read_question(low)
             if not predicate:
                 return self._ask_graph(question, out)
@@ -2223,9 +2347,22 @@ class Grounder:
                 return surface
         return ""
 
-    def _lookup(self, subject: str, predicate: str) -> List[GroundedTriple]:
-        """Live facts only. A superseded belief stays on record but is never answered with."""
-        return [t for t in self.facts.get((self._key(subject), predicate), []) if not t.superseded]
+    def _lookup(self, subject: str, predicate: str, *,
+                negated: bool = False) -> List[GroundedTriple]:
+        """Live facts of the requested polarity.
+
+        A superseded belief stays on record but is never answered with, and — since the semantic
+        compiler gave denials a representation — neither is a *negated* one when a positive answer
+        was asked for. The two exclusions are different in kind and both are needed: superseding
+        says this was replaced, negation says this was denied, and answering "what does X need?"
+        with something X was said **not** to need is the more damaging of the two errors because
+        it reads as knowledge.
+
+        ``negated=True`` asks for the denials instead, which is how a polar question establishes
+        that the answer is a definite *no* rather than an absence of information.
+        """
+        return [t for t in self.facts.get((self._key(subject), predicate), [])
+                if not t.superseded and bool(t.negated) == negated]
 
     def _lookup_inverse(self, obj: str, predicate: str) -> List[GroundedTriple]:
         """The same edges read backwards: everything that ``predicate``\\ s *into* ``obj``.
@@ -2246,7 +2383,8 @@ class Grounder:
             # Compared on the canonical form at both ends, for the same reason the forward
             # lookup is: "what do birds cause" and a fact recorded about "bird" are one question.
             out.extend(t for t in self.facts.get(key, ())
-                       if not t.superseded and self._key(t.object) == low)
+                       if not t.superseded and not t.negated
+                       and self._key(t.object) == low)
         return out
 
     def answer_by_recall(self, question: str, out: Optional[Answer] = None) -> Answer:
@@ -2470,11 +2608,19 @@ class Grounder:
         return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:4]
 
     def _facts_of(self, subject: str) -> List[GroundedTriple]:
-        """Every live fact stated of one subject, across all its relations."""
+        """Every live *positive* fact stated of one subject, across all its relations.
+
+        Denials are excluded here for the same reason :meth:`_lookup` excludes them, and it
+        matters more on this path: every caller treats what comes back as answerable content, so
+        a negated triple reaching recall is stated as though it were asserted. Measured, that was
+        the whole of the leak — ``_lookup`` was already filtering correctly and
+        ``"X does not need Y"`` still came back as ``Y``, because recall never went through it.
+        """
         out: List[GroundedTriple] = []
         low = self._key(subject)
         for predicate in self._by_subject.get(low, ()):
-            out.extend(t for t in self.facts.get((low, predicate), ()) if not t.superseded)
+            out.extend(t for t in self.facts.get((low, predicate), ())
+                       if not t.superseded and not t.negated)
         return out
 
     def _neighbours(self, subject: str) -> List[str]:
@@ -2503,7 +2649,122 @@ class Grounder:
             subject = self.resolve(groups.get("s") or SELF_ENTITY)
             if pred:
                 return subject, pred
-        return SELF_ENTITY, ""
+        # No pattern read this question. Before the compiler that ended the turn — measured over
+        # seven ordinary question forms, five of them reached here and were answered UNKNOWN
+        # about facts she had just been taught.
+        return self._compile_question(low)
+
+    def _answer_polar(self, low: str, out: Answer) -> Optional[Answer]:
+        """Yes, no, or unknown — the three states a polar question actually has.
+
+        ``None`` means this was not a polar question and the ordinary path should run.
+
+        **Why the third state is the point.** A polar question has a two-valued surface and a
+        three-valued answer set, and the difference between "no" and "I was never told" is the
+        whole of the epistemics. So the two are read from different evidence rather than from one
+        lookup and a default:
+
+        * a **positive** triple naming this object ⇒ ``yes``
+        * a **negated** triple naming this object ⇒ ``no``, which she can only say because
+          :mod:`nyxara.njp.semantics` gave denials a representation — before it there was no
+          stored form a definite "no" could come from
+        * neither ⇒ ``None`` is *not* returned; the answer stays unanswered and UNKNOWN, so
+          silence follows, which is the correct reply to a question about something nobody
+          mentioned
+
+        A relation held for this subject with a *different* object is deliberately not evidence of
+        "no". "X needs water" does not establish that X does not need light, and treating an open
+        world as closed is how a knowledge gap turns into a confident denial.
+        """
+        try:
+            from nyxara.njp.semantics import compile_meaning
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            meaning = compile_meaning(low, interrogative=True)
+        except Exception:  # noqa: BLE001
+            return None
+        if meaning.kind != "polar_question" or not meaning.complete:
+            return None
+        subject = self.resolve(meaning.subject)
+        predicate = self._predicate(meaning.relation)
+        if not subject:
+            return None
+        out.polar = True
+        out.polar_object = meaning.object
+        wanted = self._key(meaning.object)
+
+        def _matching(entity: str, *, negated: bool) -> List[GroundedTriple]:
+            return [t for t in self._lookup(entity, predicate, negated=negated)
+                    if self._key(t.object) == wanted]
+
+        affirmed = _matching(subject, negated=False)
+        denied = _matching(subject, negated=True)
+        if not affirmed and not denied:
+            # One stated ``is_a`` hop. "Do sparrows need water?" is answerable from
+            # ``sparrow is_a bird`` and ``bird requires water``, and refusing to walk it would
+            # make the polar path strictly weaker than the wh-path on the same knowledge — which
+            # would be a worse failure than the one this method fixed. One hop, and only over
+            # edges the Master stated: a longer walk is `nyxara.njp.core`'s job and it reports
+            # its own steps.
+            for kind in self._neighbours(subject):
+                affirmed = _matching(kind, negated=False)
+                denied = _matching(kind, negated=True)
+                if affirmed or denied:
+                    break
+        # A question negated in its own surface ("don't Xs need Y?") asks the same thing; the
+        # surface negation is a politeness, not a claim, so it does not flip the evidence.
+        if affirmed:
+            best = max(affirmed, key=lambda t: t.confidence)
+            out.text, out.confidence = "yes", best.confidence
+            out.state = (Epistemic.KNOWN if best.confidence >= self.known_floor
+                         else Epistemic.BELIEVED)
+            out.triples = affirmed
+            out.provenance = best.provenance
+            out.why = f"stated: {best.subject} {predicate} {best.object}"
+            return out
+        if denied:
+            best = max(denied, key=lambda t: t.confidence)
+            out.text, out.confidence = "no", best.confidence
+            out.state = (Epistemic.KNOWN if best.confidence >= self.known_floor
+                         else Epistemic.BELIEVED)
+            out.triples = denied
+            out.provenance = best.provenance
+            out.why = f"denied: {best.subject} {predicate} {best.object}"
+            return out
+        # Asked about, never told. Returned as an answered-nothing rather than falling through,
+        # because the ordinary path would answer this polar question with some *other* object
+        # this subject relates to — which is the failure this method exists to prevent.
+        out.state = Epistemic.UNKNOWN
+        out.why = "no claim either way about this pair"
+        return out
+
+    def _compile_question(self, low: str) -> Tuple[str, str]:
+        """``(subject, predicate)`` from :mod:`nyxara.njp.semantics`, or the honest empty answer.
+
+        Only ever reached when every question pattern declined, so this can add a reading and can
+        never overwrite one — the same discipline :meth:`_reconcile` keeps on the assertion side,
+        and for the same reason: a newer reader earning the sentences nobody else could read is a
+        different thing from a newer reader re-deciding sentences that already worked.
+        """
+        try:
+            from nyxara.njp.semantics import compile_meaning
+        except Exception:  # noqa: BLE001
+            return SELF_ENTITY, ""
+        try:
+            # Told, not inferred: `_clean` has already removed the question mark, and this method
+            # is only ever reached from `answer()`, which `ground()` only calls once
+            # `_is_question` has said yes. Letting the compiler re-derive the act from a surface
+            # that no longer carries it is how "zorbins need what" became an assertion.
+            meaning = compile_meaning(low, interrogative=True)
+        except Exception:  # noqa: BLE001
+            return SELF_ENTITY, ""
+        if meaning.kind not in ("question", "polar_question") or not meaning.relation:
+            return SELF_ENTITY, ""
+        subject = self.resolve(meaning.subject)
+        if not subject:
+            return SELF_ENTITY, ""
+        return subject, self._predicate(meaning.relation)
 
     def _ask_graph(self, question: str, out: Answer) -> Answer:
         """Last resort: the KnowledgeGraph's own NL query. Absent graph ⇒ honestly UNKNOWN."""
@@ -2883,7 +3144,20 @@ _PREDICATE_ALIASES: Dict[str, str] = {
     # so without this fold the fact is written under a key no question ever forms. Same class of
     # asymmetry as a relation with no question form at all, one layer further down and harder to
     # see, because here both halves work and simply disagree about the name.
-    "needs": "requires", "need": "requires", "requires": "requires", "require": "requires",
+    "needs": "requires", "need": "requires",
+    # The nominalised forms. "what's necessary for a zorbin?" asks the relation "zorbins need X"
+    # states, and reading them as two edges meant the nominal phrasing could never retrieve what
+    # the verbal one stored.
+    "necessary": "requires", "necessary_for": "requires", "needed": "requires",
+    "needed_for": "requires", "required": "requires", "required_for": "requires",
+    "essential": "requires", "essential_for": "requires",
+    # The produce family. The assertion pattern at `_SEED_PATTERNS` already collapses these five
+    # spellings onto one edge; without the same fold here the *question* side kept them apart, so
+    # "X emits Y" stored `produces` and "what does X emit?" asked for `emit` and found nothing.
+    # Folding is naming, not knowledge — see this table's own docstring.
+    "produce": "produces", "produces": "produces", "emit": "produces", "emits": "produces",
+    "make": "produces", "makes": "produces", "release": "produces", "releases": "produces",
+    "give_off": "produces", "gives_off": "produces", "requires": "requires", "require": "requires",
     "chahiye": "requires", "zaroorat": "requires", "चाहिए": "requires", "ज़रूरत": "requires",
     # Only the FORWARD-facing words fold to `causes`. "effect of X" and "X ka asar" both ask what
     # X leads to, which is the edge as stored. The words for the other direction — "cause",

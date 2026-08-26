@@ -134,6 +134,9 @@ class CycleReport:
     experiment: str = ""
     experiment_gain: float = 0.0
     beliefs_touched: int = 0
+    #: Clashes the grounder found and the ledger was told about. Zero here and zero because
+    #: nothing ever contradicted are different findings.
+    beliefs_contradicted: int = 0
     # The world-level prediction: what she expected the situation to lead to, and what the world
     # charged her in bits for being wrong about it. Separate from `error`, which grades her
     # against her own firing — this grades her against reality.
@@ -147,7 +150,7 @@ class CycleReport:
     def learned(self) -> bool:
         """Did anything durable change? A cycle that only observed has not learned."""
         return bool(self.restructured or self.crystallised or self.arrows
-                    or self.beliefs_touched or self.experiment)
+                    or self.beliefs_touched or self.beliefs_contradicted or self.experiment)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"turn": self.turn, "perceived": self.perceived,
@@ -161,6 +164,7 @@ class CycleReport:
                 "experiment": self.experiment,
                 "experiment_gain": round(self.experiment_gain, 5),
                 "beliefs_touched": self.beliefs_touched,
+                "beliefs_contradicted": self.beliefs_contradicted,
                 "world_predicted": self.world_predicted,
                 "world_bits": round(self.world_bits, 4),
                 "world_excess": round(self.world_excess, 4),
@@ -229,9 +233,36 @@ class Trial:
                 "accepted": self.accepted, "why": self.why[:200], "ms": round(self.ms, 3)}
 
 
+
+#: How many distinct (subject, reading) pairs are remembered so a reading offered again on
+#: a later turn is not counted as a second observation of it. Bounded because the set grows
+#: with the conversation and nothing else here is unbounded.
+_OBSERVED_MEMORY = 4096
+
+#: Held-out score below which the measure she is judged by is itself the thing limiting her.
+#: Set well under a healthy configuration — a loop that always finds something wrong is a loop
+#: whose findings carry no information.
+_BENCHMARK_FLOOR = 0.7
+
+
+def _head_noun(subject: str) -> str:
+    """``plant a`` → ``plant``. The kind, with the instance label removed.
+
+    An instance label is a trailing single character or a bare number — the way a person names
+    the third plant in a row of plants. Anything longer is part of the kind ("deep learning" is
+    not an instance of "deep"), so only that shape is stripped, and a single-token subject is
+    returned whole: one rose is its own kind, and its attributes still relate to each other.
+    """
+    tokens = str(subject or "").strip().lower().split()
+    while len(tokens) > 1 and (len(tokens[-1]) == 1 or tokens[-1].isdigit()):
+        tokens.pop()
+    return " ".join(tokens)
+
+
 # --------------------------------------------------------------------------- #
 # The field
 # --------------------------------------------------------------------------- #
+
 class RecursiveCognitiveField:
     """Both loops: the cognitive cycle per turn, and the self-modification cycle behind it."""
 
@@ -271,6 +302,10 @@ class RecursiveCognitiveField:
         self.restructures_kept = 0
         self.experiments_designed = 0
         self.surprises = 0
+        #: (subject, reading) pairs already handed to the universe. A reading re-offered on a
+        #: later turn is the same measurement, not a second one, and `Relation` keeps sufficient
+        #: statistics so it cannot tell the difference on its own.
+        self._observed: set = set()
         self.errors_diagnosed: Dict[str, int] = {}
         self.trials: List[Trial] = []
         self.accepted_trials = 0
@@ -320,6 +355,7 @@ class RecursiveCognitiveField:
                 self._repair(rep)
 
             rep.beliefs_touched = self._record_beliefs(thought, triples)
+            rep.beliefs_contradicted = self._record_contradictions(thought)
             self._design_experiment(rep)
 
             if self.concepts is not None:
@@ -419,22 +455,100 @@ class RecursiveCognitiveField:
         # Numbers the grounder extracted are the universe's actual data. A threshold triple
         # ("water boils at 100") is a variable with a value, and without this the simulator would
         # own a causal skeleton it could never fit a single coefficient to.
-        state: Dict[str, float] = {}
-        # The order the numbers were *stated* in, carried alongside their values. `obs.numbers` is
-        # filled in extraction order, so "the plant got 2 litres of water and grew 4 cm" arrives
-        # as water-then-growth — and dropping that, which is what happened before, throws away the
-        # only thing in a joint observation that can say which way an arrow runs. The numbers on
-        # their own are Markov-equivalent however many of them there are.
-        order: List[str] = []
-        for subject, obs in list(getattr(self.concepts, "_by_subject", {}).items())[-32:] \
-                if self.concepts is not None else []:
-            for key, value in obs.numbers.items():
-                name = f"{subject}.{key}"
+        # **One observation per subject, named by the property.**
+        #
+        # This used to build a single joint state per turn with every subject's numbers under
+        # ``f"{subject}.{key}"``, and both halves of that were wrong in the same way — they made
+        # every instance its own universe:
+        #
+        # * Six plants watered differently became six *relations*
+        #   (``plant a.volume → plant a.growth``, ``plant b.volume → …``) rather than six
+        #   *samples* of one relation. Within a single plant the two numbers never vary, so every
+        #   fit came back ``r2=0.0`` and ``usable_relations`` was empty however much was measured.
+        #   Measured: 12 measurement sentences, 12 variables, 30 relations, **0 usable**, and
+        #   every counterfactual answering "no usable arrow leaves the intervened variables".
+        # * Emitting all subjects in one state re-observed every earlier subject on every later
+        #   turn, so ``n`` climbed (11 for the first plant, from six readings) on duplicate rows
+        #   that added no variance at all. A count that rises without information is worse than a
+        #   low count: it clears the sample floor while leaving the fit unfittable.
+        #
+        # Named by the subject's *kind* where one has been stated, and by the bare property
+        # otherwise. The trade is explicit: two unrelated kinds that both have a "growth" and were
+        # never declared would share a variable. That is a real risk and it is smaller than the
+        # certainty it replaces — before this, nothing ever fitted at all — and stating the kind
+        # ("plant a is a plant") removes it.
+        #
+        # The order the numbers were *stated* in is carried alongside their values. `obs.numbers`
+        # is filled in extraction order, so "the plant got 2 litres of water and grew 4 cm"
+        # arrives as water-then-growth — and dropping that throws away the only thing in a joint
+        # observation that can say which way an arrow runs. The numbers on their own are
+        # Markov-equivalent however many of them there are.
+        subjects = (list(getattr(self.concepts, "_by_subject", {}).items())[-32:]
+                    if self.concepts is not None else [])
+        for subject, obs in subjects:
+            numbers = dict(getattr(obs, "numbers", None) or {})
+            if not numbers:
+                continue
+            # The same reading re-offered on a later turn is not a second observation of
+            # anything. Skipped rather than deduplicated downstream, because `Relation` keeps
+            # sufficient statistics and cannot tell a repeat from a genuine repeat measurement.
+            signature = (subject, tuple(sorted(numbers.items())))
+            if signature in self._observed:
+                continue
+            self._observed.add(signature)
+            if len(self._observed) > _OBSERVED_MEMORY:
+                self._observed = set(list(self._observed)[-_OBSERVED_MEMORY:])
+            kind = self._kind_of(subject)
+            state: Dict[str, float] = {}
+            order: List[str] = []
+            for key, value in numbers.items():
+                name = f"{kind}.{key}" if kind else str(key)
                 state[name] = value
                 order.append(name)
-        if state:
-            self.universe.observe(state, order=order)
+            if state:
+                # `reconcile` observes *and* grades: it hands the state to `observe` and then
+                # scores the newest unscored rollout against it. Calling `observe` directly, as
+                # this did, meant the model's own predictions were never compared to what
+                # happened — `reconciled` and `surprises` were structurally zero on every session,
+                # and "the model was wrong six times" was a sentence the universe could not form.
+                self.universe.reconcile(state, order=order)
         return added
+
+    def _kind_of(self, subject: str) -> str:
+        """What kind of thing this subject is — its stated kind, or the head of its own name.
+
+        **Never empty**, and that is load-bearing rather than tidy.
+        :meth:`nyxara.njp.universe.InternalUniverse._permitted` allows an arrow between two
+        variables of the *same entity* outright — "that is not a causal claim about the world, it
+        is the entity's own state being internally consistent" — and it reads the entity from the
+        part of the name before the dot. An undotted variable therefore has no entity, so the
+        permission falls through to the world model, which has never heard of ``paani`` or
+        ``badha`` and refuses the pair. Measured: bare names gave 12 observations, a correct joint
+        state of ``{paani: 6.0, badha: 55.0}``, and **not one fitted relation** — while the same
+        session in English, where an ``is_a`` happened to have been stated, fitted at ``R² = 1.0``.
+        A variable naming scheme that works only when the Master remembered to declare a kind is
+        the same defect this method was added to fix, one level up.
+
+        Two sources, strongest first:
+
+        * the kind he **stated** — one ``is_a`` hop through the grounder's own store, never a
+          guess, because an inferred kind might be revised and a variable that moves is worse
+          than one that is broadly named;
+        * failing that, the head of the subject's own name. ``plant a``, ``plant b``, ``paudhe c``
+          are an instance label attached to a kind, and the label is precisely the part that
+          varies between the rows a fit is made of. Dropping it is what turns six plants into six
+          *samples* rather than six universes.
+        """
+        try:
+            grounder = getattr(self.brain, "grounder", None)
+            if grounder is not None:
+                for triple in grounder._lookup(subject, "is_a"):
+                    name = str(getattr(triple, "object", "") or "").strip().lower()
+                    if name:
+                        return name
+        except Exception:  # noqa: BLE001
+            pass
+        return _head_noun(subject)
 
     # ---- causal hypotheses --------------------------------------------------- #
     def _raise_hypotheses(self, rep: CycleReport) -> int:
@@ -592,6 +706,51 @@ class RecursiveCognitiveField:
             pass
 
     # ---- beliefs ---------------------------------------------------------------- #
+    def _record_contradictions(self, thought: Any) -> int:
+        """Tell the ledger about a clash the grounder already found.
+
+        :class:`~nyxara.njp.grounding.GroundingResult` has carried ``contradictions`` since it was
+        written — ``"my name is Jay"`` followed by ``"my name is Raj"`` produces one, correctly —
+        and across the whole package nothing read the field except ``to_dict``. So
+        :meth:`~nyxara.njp.beliefs.BeliefLedger.contradict` had no caller on the path that
+        actually produces contradictions, and ``contradictions_found`` and ``contested`` stood at
+        zero however many times the Master revised himself.
+
+        That is not merely an unreported number. ``contradict`` is where each side loses
+        confidence *in proportion to the other's earned support* — so a well-evidenced claim
+        barely moves against a bare assertion, and two bare assertions both collapse, which is the
+        correct outcome when there is no reason to prefer either. Without the call, a superseded
+        belief kept the confidence it was first held at.
+
+        Recorded here rather than in the loop because the loop closes **before**
+        :meth:`cycle` runs, so the newer of the two beliefs would not yet be held.
+        """
+        if self.beliefs is None:
+            return 0
+        found = 0
+        try:
+            grounding = getattr(getattr(thought, "percept", None), "grounding", None)
+            for prior, current in (getattr(grounding, "contradictions", None) or [])[:4]:
+                first = self._claim_of(prior)
+                second = self._claim_of(current)
+                if not first or not second or first == second:
+                    continue
+                a, b = self.beliefs.contradict(
+                    first, second, why="the record was revised")
+                if a is not None and b is not None:
+                    found += 1
+        except Exception:  # noqa: BLE001 — an unrecorded clash costs a number, never the turn
+            return found
+        return found
+
+    @staticmethod
+    def _claim_of(triple: Any) -> str:
+        """The claim string ``_record_beliefs`` files a triple under. Must match exactly."""
+        subject = str(getattr(triple, "subject", "") or "")
+        predicate = str(getattr(triple, "predicate", "") or "")
+        obj = str(getattr(triple, "object", "") or "")
+        return f"{subject} {predicate} {obj}".strip() if subject and predicate else ""
+
     def _record_beliefs(self, thought: Any, triples: Sequence[Any]) -> int:
         """Everything grounded this turn becomes a belief with its case attached."""
         if self.beliefs is None:
@@ -816,8 +975,34 @@ class RecursiveCognitiveField:
                 # Remembered so it is not proposed again from the same state. Without this the
                 # loop spends every cycle re-running its first failed experiment.
                 self._rejected.add(self._signature(modification))
-                trial.why = ("adversarial battery failed" if not trial.adversarial_passed
-                             else f"no gain ({trial.baseline:.4f} → {trial.candidate:.4f})")
+                if not trial.adversarial_passed:
+                    trial.why = "adversarial battery failed"
+                elif trial.candidate == trial.baseline:
+                    # **Exactly** equal — not merely close. A knob that moves the configuration
+                    # and leaves the held-out score identical to full float precision has not
+                    # produced a worse configuration; it has produced no measurement at all,
+                    # because the benchmark cannot see the thing it changed.
+                    #
+                    # Recorded as unmeasurable rather than as a failed trial, for the reason the
+                    # organ-level guard above already states: "Refusing is better than guessing.
+                    # It converts an invisible non-result into a stated gap." That guard asks
+                    # whether the *organ* is covered and passes `concepts` — which is covered —
+                    # while two of its three knobs are invisible anyway. Measured: `similarity`
+                    # and `invariant_share` swept across their whole legal ranges leave the
+                    # benchmark at 0.779167 to six decimal places and the concept count at 4,
+                    # because `concepts._thresholds` already searches a band around `similarity`
+                    # and keeps the best — so the base value cannot matter. `min_members` does
+                    # move it, and is correctly rejected for moving it the wrong way.
+                    #
+                    # Counting those as "no gain" reports a failed experiment where there was no
+                    # experiment, and hides the finding worth having: two knobs this loop offers
+                    # first cannot be adjudicated by the measure it adjudicates with.
+                    self.unmeasurable += 1
+                    trial.why = (f"{modification.organ}.{modification.knob} left the benchmark "
+                                 f"unchanged at {trial.baseline:.6f} — the measure cannot see "
+                                 f"this knob, so the trial decided nothing")
+                else:
+                    trial.why = f"no gain ({trial.baseline:.4f} → {trial.candidate:.4f})"
             return trial
         except Exception:  # noqa: BLE001 — a failed meta-cycle changes nothing
             trial.why = "meta-cycle failed"
@@ -836,6 +1021,33 @@ class RecursiveCognitiveField:
         exactly the failure that put six of these counters at zero for 113 turns.
         """
         found: List[Bottleneck] = []
+        # **The measure she is adjudicated by, as a bottleneck in its own right.**
+        #
+        # Every source below names an organ-specific symptom — compression, answerable share,
+        # unresolved experiments — and none of them is the held-out benchmark. So a configuration
+        # the benchmark itself scores as badly degraded is invisible here, and the whole
+        # self-improvement pipeline never starts. Measured: `min_members` forced to 4 takes the
+        # benchmark from 0.779167 to 0.458333 — a 41% fall the loop is adjudicated by — and
+        # `find_bottleneck` answers "no bottleneck worth acting on" on every cycle, forever.
+        #
+        # The failure is that the detector and the adjudicator measure different things. Worse,
+        # they can point opposite ways: refusing to form concepts at all *raises* compression
+        # (fewer, larger kinds) while collapsing coverage, so the organ-specific metric reports
+        # health exactly when the benchmark reports collapse.
+        #
+        # Blamed on whichever component actually scores worst, because that is the half dragging
+        # the total and the half a modification has to reach. Gated well below a healthy score so
+        # a brain that is doing fine is not perpetually "improving" — a loop that always finds
+        # something wrong is a loop whose findings mean nothing.
+        weakest = self._weakest_component()
+        if weakest is not None:
+            organ, score = weakest
+            if score < _BENCHMARK_FLOOR:
+                found.append(Bottleneck(
+                    organ=organ, metric="benchmark", value=score,
+                    severity=min(1.0, max(0.0, (_BENCHMARK_FLOOR - score) / _BENCHMARK_FLOOR)),
+                    why=(f"{organ} scores {score:.3f} on held-out data, which is what every "
+                         f"trial here is judged by")))
         if self.concepts is not None:
             ratio = self.concepts.compression()
             if ratio < 1.6:
@@ -1043,6 +1255,30 @@ class RecursiveCognitiveField:
             return False
 
     # ---- the benchmark ------------------------------------------------------- #
+    def _weakest_component(self) -> Optional[Tuple[str, float]]:
+        """Which half of the benchmark is dragging it, and by how much.
+
+        The benchmark is a weighted mean of two organ scores, so the mean alone cannot say what
+        to change. Returning the weaker component is what makes a benchmark bottleneck
+        *actionable* rather than merely alarming.
+        """
+        try:
+            parts: List[Tuple[str, List[Tuple[float, float]]]] = [
+                ("concepts", self._score_concepts()),
+                ("universe", self._score_universe()),
+            ]
+            scored: List[Tuple[str, float]] = []
+            for organ, rows in parts:
+                weight = sum(w for _s, w in rows)
+                if weight <= 0.0:
+                    continue
+                scored.append((organ, sum(s * w for s, w in rows) / weight))
+            if not scored:
+                return None
+            return min(scored, key=lambda row: row[1])
+        except Exception:  # noqa: BLE001
+            return None
+
     def benchmark(self) -> float:
         """Score her current cognitive configuration on data she did not tune on.
 

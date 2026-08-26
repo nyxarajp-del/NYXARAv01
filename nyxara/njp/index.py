@@ -183,6 +183,10 @@ class IntelligenceVector:
         return "\n".join(lines)
 
 
+#: Readings kept. Bounded like every other history in the package.
+_HISTORY = 64
+
+
 def _rate(numerator: Any, denominator: Any) -> Optional[float]:
     try:
         den = float(denominator)
@@ -197,6 +201,12 @@ class IntelligenceIndex:
     def __init__(self, *, seed: int = 0, width: int = 6) -> None:
         self.seed = int(seed)
         self.width = int(width)
+        #: Readings over time. The scalar alone answers "how good is she", which this module
+        #: says it cannot answer; the series answers "is she better than she was".
+        self.history: List[IntelligenceVector] = []
+        self.measurements = 0
+        self.regressions_found = 0
+        self.last_regressions: Dict[str, Any] = {}
 
     # ---- the terms that need a benchmark run ------------------------------ #
 
@@ -320,6 +330,49 @@ class IntelligenceIndex:
         return term
 
     # ---- the measurement -------------------------------------------------- #
+
+    def track(self, brain: Any = None, *, benchmarks: bool = True,
+              prepare: Any = None) -> IntelligenceVector:
+        """Measure, keep it, and compare it to the last one. The time series is the point.
+
+        :meth:`measure` returns a reading; a reading on its own answers "how good is she", which
+        is the question this module's own header says it cannot answer. *"Is she better than she
+        was"* needs two readings and a comparison, and :meth:`IntelligenceVector.regressions` has
+        been able to make that comparison since it was written, with no caller anywhere.
+        """
+        vector = self.measure(brain, benchmarks=benchmarks, prepare=prepare)
+        previous = self.history[-1] if self.history else None
+        if previous is not None:
+            try:
+                found = vector.regressions(previous)
+                if found:
+                    self.regressions_found += len(found)
+                    self.last_regressions = found
+            except Exception:  # noqa: BLE001
+                pass
+        self.measurements += 1
+        self.history.append(vector)
+        del self.history[:-_HISTORY]
+        return vector
+
+    @property
+    def trend(self) -> Optional[float]:
+        """Change in the scalar since the first reading that had one. ``None`` under two."""
+        scalars = [v.scalar for v in self.history if v.scalar is not None]
+        return (scalars[-1] - scalars[0]) if len(scalars) >= 2 else None
+
+    def stats(self) -> Dict[str, Any]:
+        latest = self.history[-1] if self.history else None
+        return {
+            "measurements": self.measurements,
+            "scalar": (round(latest.scalar, 5)
+                       if latest is not None and latest.scalar is not None else None),
+            "absent": list(latest.absent) if latest is not None else [],
+            "trend": (round(self.trend, 5) if self.trend is not None else None),
+            "series": [round(v.scalar, 4) for v in self.history[-8:] if v.scalar is not None],
+            "regressions_found": self.regressions_found,
+            "last_regressions": dict(self.last_regressions),
+        }
 
     def measure(self, brain: Any = None, *, benchmarks: bool = True,
                 prepare: Any = None) -> IntelligenceVector:

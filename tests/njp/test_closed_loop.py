@@ -64,7 +64,24 @@ def test_a_standing_law_is_not_read_as_a_measurement():
 def test_an_unnameable_quantity_is_dropped_rather_than_stored_under_its_unit():
     # A bare count with no noun, no governing quantity-verb and no unit names no variable. Storing
     # it anyway is how a simulator ends up fitting arrows between things that were never measured.
-    assert _measurements("the plant has 10 leaves") == []
+    assert _measurements("the plant has 10") == []
+    assert _measurements("the plant has 10 in it") == []
+
+
+def test_a_quantity_the_sentence_names_is_kept_under_that_name():
+    # "10 leaves" names its variable — the noun is right there. This case used to be dropped
+    # along with the genuinely unnameable ones because the noun group required a literal "of",
+    # so it matched "2 litres OF water" and neither "2 litre water" nor, in the language the
+    # Master actually writes in, "2 litre paani" — where no such word exists in that position.
+    #
+    # The distinction the guard above protects is unchanged: a quantity is still never stored
+    # under its *unit*, which is a dimension two different substances share. What changed is that
+    # a quantity the sentence does name is no longer thrown away for want of a preposition.
+    assert _measurements("the plant has 10 leaves") == [("leaves", 10.0)]
+    assert _measurements("plant a got 2 litre water") == [("water", 2.0)]
+    assert _measurements("paudhe ko 2 litre paani mila") == [("paani", 2.0)]
+    # A time word after a unit is not the substance being measured.
+    assert _measurements("plant a grew 20 cm yesterday") == [("growth", 20.0)]
 
 
 def test_numeric_statements_reach_the_causal_engine():
@@ -731,3 +748,107 @@ def test_an_experiment_the_record_cannot_settle_is_left_open():
     # No events at all, so nothing is answerable and nothing may be claimed.
     assert brain.designer.stats()["run"] == 0
     assert brain.designer.stats()["bits_gained"] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Instances are samples, not universes
+# --------------------------------------------------------------------------- #
+
+def test_six_instances_are_six_samples_of_one_relation():
+    """The defect this closes made the causal engine unusable however much it was measured.
+
+    ``field._sync_world`` named every variable ``f"{subject}.{key}"``, so six plants watered
+    differently became six *relations* — ``plant a.volume → plant a.growth``,
+    ``plant b.volume → …`` — rather than six *rows* of one. Within a single plant neither number
+    varies, so every fit came back ``r2=0.0``: measured, 12 measurement sentences gave 12
+    variables, 30 relations and **zero** usable ones, and every counterfactual answered "no usable
+    arrow leaves the intervened variables".
+    """
+    brain = NJPBrain()
+    for name, water, growth in (("a", 2, 20), ("b", 4, 38), ("c", 1, 11),
+                                ("d", 6, 55), ("e", 3, 29), ("f", 5, 47)):
+        brain.think(f"plant {name} got {water} litre water")
+        brain.think(f"plant {name} grew {growth} cm")
+    usable = brain.universe.usable_relations()
+    assert usable, brain.universe.stats()
+    arrow = next((r for r in usable
+                  if r.cause == "plant.water" and r.effect == "plant.growth"), None)
+    assert arrow is not None, [(r.cause, r.effect) for r in usable]
+    # Six readings, not six relations of one reading each.
+    assert arrow.n == 6, arrow.n
+    assert arrow.r2 > 0.99, arrow.r2
+
+
+def test_a_reading_offered_twice_is_not_two_observations():
+    """`Relation` keeps sufficient statistics, so it cannot tell a repeat from a re-measurement.
+
+    The old sync emitted every subject's numbers on every turn, so ``n`` climbed on duplicate rows
+    that added no variance — a count that clears the sample floor while leaving the fit
+    unfittable, which is worse than a low count.
+    """
+    brain = NJPBrain()
+    brain.think("plant a got 2 litre water")
+    brain.think("plant a grew 20 cm")
+    brain.think("plant b got 4 litre water")
+    brain.think("plant b grew 38 cm")
+    before = brain.universe.stats()["observations"]
+    for _ in range(5):
+        brain.think("plant a got 2 litre water")
+    assert brain.universe.stats()["observations"] == before
+
+
+def test_a_variable_is_named_by_its_kind_even_when_no_kind_was_stated():
+    """An undotted variable has no entity, and `universe._permitted` reads the entity to allow an
+    arrow between two attributes of one thing. Bare names therefore never fit at all — measured,
+    a correct joint state of ``{paani: 6.0, badha: 55.0}`` produced not one fitted relation."""
+    from nyxara.njp.field import _head_noun
+    assert _head_noun("plant a") == "plant"
+    assert _head_noun("paudhe c") == "paudhe"
+    assert _head_noun("plant 3") == "plant"
+    # Not an instance label — "deep learning" is not an instance of "deep".
+    assert _head_noun("deep learning") == "deep learning"
+    assert _head_noun("rose") == "rose"
+
+
+def test_the_masters_own_language_reaches_the_do_operator():
+    """The plan's worked example, taught and asked entirely in Hinglish.
+
+    Every stage of this failed for a different reason and each was fixed separately: the substance
+    could not be named without a literal "of" (which Hindi does not have in that position), and
+    the variable that resulted had no entity head, so the pair was never permitted to fit.
+    """
+    brain = NJPBrain()
+    for name, water, growth in (("a", 2, 20), ("b", 4, 38), ("c", 1, 11),
+                                ("d", 6, 55), ("e", 3, 29), ("f", 5, 47)):
+        brain.think(f"paudhe {name} ko {water} litre paani mila")
+        brain.think(f"paudhe {name} {growth} cm badha")
+    arrow = next((r for r in brain.universe.usable_relations()
+                  if r.cause == "paudhe.paani"), None)
+    assert arrow is not None, brain.universe.stats()
+    assert arrow.n == 6 and arrow.r2 > 0.99
+    answer = brain.think("agar paani aadha kar doon to kya hoga").answer or ""
+    assert "paudhe.badha" in answer, answer
+
+
+def test_an_english_counterfactual_names_what_it_intervened_on():
+    brain = NJPBrain()
+    for name, water, growth in (("a", 2, 20), ("b", 4, 38), ("c", 1, 11),
+                                ("d", 6, 55), ("e", 3, 29), ("f", 5, 47)):
+        brain.think(f"plant {name} got {water} litre water")
+        brain.think(f"plant {name} grew {growth} cm")
+    answer = brain.think("what happens if I halve the water?").answer or ""
+    assert "plant.water" in answer and "plant.growth" in answer, answer
+
+
+def test_a_digit_inside_a_word_is_not_a_quantity():
+    """A number has to start a token.
+
+    Latent until the noun group stopped requiring a literal "of", and immediately fatal after it:
+    "memvaku0 se femzoren0 hoti hai" was read as a measurement of `hoti` equal to 0, which
+    destroyed the causal triple. The seven-stage curve's *control* stage went 1.00 → 0.00, which
+    is the only reason this was caught rather than shipped.
+    """
+    assert _measurements("memvaku0 se femzoren0 hoti hai") == []
+    assert _measurements("h2o freezes") == []
+    # And a real quantity is untouched, decimals included.
+    assert _measurements("the plant got 2.5 litres of water") == [("water", 2.5)]

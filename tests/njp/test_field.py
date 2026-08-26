@@ -183,7 +183,26 @@ def test_a_tie_is_not_accepted():
                                                value=1.0, severity=0.9, why="test")
     trial = field.meta_cycle()
     assert not trial.accepted
-    assert "no gain" in trial.why
+    # A benchmark that returns the same number whatever changed is, by construction, one that
+    # cannot see the knob — which is what this stub makes it. Reported as the stated gap it is
+    # rather than as a failed experiment; see `meta_cycle`. The property under test is unchanged:
+    # a tie is never accepted.
+    assert "cannot see this knob" in trial.why, trial.why
+    assert field.stats()["meta_unmeasurable"] >= 1
+
+
+def test_a_measurably_worse_change_is_reported_as_no_gain():
+    """The other half of the same classification: the measure saw it, and it lost."""
+    field = _field()
+    for i in range(30):
+        field.cycle(_Thought([_Triple(f"thing{i}", "is_a", "kind")]))
+    scores = iter((0.6, 0.4))                           # baseline, then a worse candidate
+    field.benchmark = lambda: next(scores, 0.4)
+    field.find_bottleneck = lambda: Bottleneck(organ="concepts", metric="compression",
+                                               value=1.0, severity=0.9, why="test")
+    trial = field.meta_cycle()
+    assert not trial.accepted
+    assert "no gain" in trial.why, trial.why
 
 
 def test_the_adversarial_battery_rejects_a_concept_that_asserts_nothing():

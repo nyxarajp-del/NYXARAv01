@@ -83,6 +83,11 @@ _WONDER_EVERY = 16
 # for programs and then tries to compress them, which is the most expensive thing here, and a
 # library does not become worth compressing between one turn and the next.
 _DREAM_EVERY = 32
+
+#: Turns between structural-evolution cycles. Slower than everything else here on purpose: a
+#: cycle that finds a winner pays for two real batteries, and a rewire is not the kind of thing
+#: that should be attempted between one turn and the next.
+_EVOLVE_EVERY = 48
 # How often she goes after her own strongest causal claim. Slowest of the four, because an attack
 # reads the whole event record and because a belief does not need challenging every turn — but
 # on a *turn* count like the others, since a wall-clock cadence is exactly what left the slow
@@ -106,6 +111,12 @@ _STATE_WIDTH = 16
 # number as `Outcome.correct` uses — that one gates the accuracy statistic, this one grades a
 # capability, and a capability graded pass/fail on exact match learns nothing from a near miss.
 _PARTIAL_CREDIT = 0.5
+
+
+#: How many of her own questions may be outstanding as tracked work at once. A cap on how much
+#: she has undertaken is a real constraint; the per-turn slice it replaced was a cap on which
+#: questions she could *notice*, which is an accident of sorting.
+_TRACKED_QUESTIONS = 32
 
 
 @dataclass
@@ -138,11 +149,44 @@ class LoopReport:
     #: different findings, and index term R could not tell them apart.
     programs_solved: int = 0
     programs_adopted: int = 0
+    #: Adopted abstractions confirmed on tasks that arrived *after* they were adopted, and that
+    #: then survived the adversarial battery against those tasks' oracles. The second half of
+    #: Phase 5's milestone; see :mod:`nyxara.growth.zeroshot`.
+    programs_transferred: int = 0
     beliefs_settled: int = 0
     beliefs_retracted: int = 0
     questions_closed: int = 0
     experiments_run: int = 0
     bits_gained: float = 0.0
+    # Phase 3's third knowledge state — see :mod:`nyxara.njp.assume`. `assumptions_open` is the
+    # unknown-unknown surface: claims her causal model rests on that nothing has examined.
+    assumptions_mined: int = 0
+    assumptions_tested: int = 0
+    assumptions_refuted: int = 0
+    assumptions_open: int = 0
+    #: Weaknesses she named and then committed to working on. Phase 6's milestone is that a
+    #: diagnosis becomes a curriculum; this is the count of times it did.
+    weaknesses_trained: int = 0
+    #: Phase 7's milestone. A *structural* change to her own cognition — a representation, an
+    #: operator, a strategy, an edge of the selection graph — adopted after measuring strictly
+    #: better on held-out data and breaking neither battery. Never incremented by trying.
+    cognitive_rewires: int = 0
+    evolution_trials: int = 0
+    #: Stage G. One goal → plan → action → outcome, on an action she chose rather than a cadence
+    #: that fired. `goals_reached` counts the metric hitting its target, never "she acted".
+    actions_taken: int = 0
+    goals_reached: int = 0
+    #: §27. The eight-term vector, read on a cadence so *change* is visible — a single reading
+    #: answers "how good is she", which `njp.index` says outright it cannot answer.
+    index_scalar: Optional[float] = None
+    index_regressions: int = 0
+    #: §19. One claim through the eight specialists, in order.
+    deliberations: int = 0
+    deliberation_objections: int = 0
+    #: §24's code half. One profile → propose → gauntlet attempt. Enactment stays behind the
+    #: standing authorisation; what this counts is that the pipeline ran and what it decided.
+    edits_attempted: int = 0
+    edits_refused: int = 0
     # goals
     goals_added: int = 0
     goals_blocked: int = 0
@@ -182,7 +226,8 @@ class LoopReport:
         grounded nothing and predicted nothing has nothing to learn from, and reporting that
         honestly is the point of having the flag.
         """
-        return bool(self.events or self.transitions or self.scored or self.deferred_resolved
+        return bool(self.assumptions_tested or self.assumptions_mined
+                    or self.events or self.transitions or self.scored or self.deferred_resolved
                     or self.capabilities or self.trained or self.consolidated
                     or self.discovered or self.wondered or self.attacked
                     or self.generation)
@@ -195,13 +240,18 @@ class LoopReport:
                 "diagnoses": dict(self.diagnoses), "repaired": self.repaired,
                 "shapes_promoted": self.shapes_promoted,
                 "programs": {"solved": self.programs_solved,
-                             "adopted": self.programs_adopted},
+                             "adopted": self.programs_adopted,
+                             "transferred": self.programs_transferred},
                 "graded": {"strategies": self.strategies_graded,
                            "beliefs_settled": self.beliefs_settled,
                            "beliefs_retracted": self.beliefs_retracted,
                            "questions_closed": self.questions_closed,
                            "experiments_run": self.experiments_run,
                            "bits_gained": round(self.bits_gained, 4)},
+                "assumptions": {"mined": self.assumptions_mined,
+                                "tested": self.assumptions_tested,
+                                "refuted": self.assumptions_refuted,
+                                "open": self.assumptions_open},
                 "goals": {"added": self.goals_added, "blocked": self.goals_blocked,
                           "completed": self.goals_completed, "open": self.goals_open},
                 "capabilities": self.capabilities,
@@ -264,7 +314,7 @@ class LearningLoop:
                  discover_every: int = _DISCOVER_EVERY, wonder_every: int = _WONDER_EVERY,
                  attack_every: int = _ATTACK_EVERY,
                  assess_every: int = _ASSESS_EVERY, ledger_every: int = _LEDGER_EVERY,
-                 dream_every: int = _DREAM_EVERY,
+                 dream_every: int = _DREAM_EVERY, evolve_every: int = _EVOLVE_EVERY,
                  train: bool = True, defer_capacity: int = 256) -> None:
         self.brain = brain
         self.consolidate_every = max(1, int(consolidate_every))
@@ -274,6 +324,7 @@ class LearningLoop:
         self.assess_every = max(1, int(assess_every))
         self.ledger_every = max(1, int(ledger_every))
         self.dream_every = max(1, int(dream_every))
+        self.evolve_every = max(1, int(evolve_every))
         self.train_enabled = bool(train)
         self.defer_capacity = max(8, int(defer_capacity))
 
@@ -282,6 +333,26 @@ class LearningLoop:
         self.totals: Dict[str, int] = {
             "events": 0, "transitions": 0, "scored": 0, "correct": 0,
             "deferred_opened": 0, "deferred_resolved": 0, "corrections": 0,
+            # Information actually gained by running experiments, in bits. Carried per turn since
+            # `_run_experiments` was written and never accumulated, so a session could gain real
+            # bits — 0.8652 on the turn the fire/heat arrows were settled — and `stats()` would
+            # still answer 0 to "how much did she learn by experimenting". A measurement that
+            # only exists for one turn is not a measurement of a session.
+            "bits_gained": 0.0,
+            "assumptions_mined": 0, "assumptions_tested": 0,
+            "assumptions_refuted": 0, "assumptions_open": 0,
+            "weaknesses_trained": 0, "weaknesses_closed": 0,
+            "cognitive_rewires": 0, "evolution_trials": 0,
+            "actions_taken": 0, "goals_reached": 0,
+            "index_measurements": 0, "index_regressions": 0,
+            "deliberations": 0, "deliberation_objections": 0,
+            "edits_attempted": 0, "edits_refused": 0,
+            # Phase 5's milestone is `skills_created > 0`, and it was unanswerable from `stats()`
+            # while being true: `_compress_programs` fires on the dream cadence and really did
+            # adopt abstractions — measured, 12 solved and 1 adopted on turn 31 — and neither
+            # number was ever rolled up, so the session totals had no key for them at all. Same
+            # shape as `bits_gained`: carried on the report, absent from the sum.
+            "programs_solved": 0, "programs_adopted": 0, "programs_transferred": 0,
             "repaired": 0, "capabilities": 0, "train_steps": 0,
             "consolidations": 0, "discoveries": 0, "wonders": 0,
             "goals_added": 0, "goals_completed": 0,
@@ -300,6 +371,12 @@ class LearningLoop:
         # exactly one turn of history and no more.
         self._prev_fired: Tuple[int, ...] = ()
         self._prev_state: List[float] = []
+        #: How the *loop's* half of the dynamics model represents a state. A promotion from
+        #: :mod:`nyxara.njp.evolution` is the only thing that changes it; the default is exactly
+        #: what this loop has always fed.
+        self.predictive_encoding: str = "buckets16"
+        self._prev_situation: Any = None
+        self._situation_now: Any = None
         # The manifold snapshots either side of the current turn. Kept here rather than read off
         # the fabric because the fabric overwrites its own "previous" during the settle.
         self._prev_snapshot: Any = None
@@ -308,6 +385,10 @@ class LearningLoop:
         # Which goal node stands for which of her own questions, so one question is one task and
         # answering it completes that task rather than leaving a duplicate behind.
         self._question_nodes: Dict[str, str] = {}
+        #: weakness key → goal node id, so one weakness is one piece of work rather than a new
+        #: task on every assessment.
+        self._trained: Dict[str, str] = {}
+        self._closed_weaknesses = 0
         self._mission_nid: str = ""
 
         self._install_repairs()
@@ -460,20 +541,40 @@ class LearningLoop:
             # Taken before any repair can run, so `_repair_world` sees a genuine before/after pair.
             self._snapshot = getattr(settled, "snapshot", None)
 
+            # One row of raw material for Phase 7's sandbox, taken before anything else can
+            # fail. Kept here rather than inside `_observe_transition` because that method
+            # returns early whenever `world` is off or the previous state is missing, and a
+            # *trace* of what the turns looked like has no reason to depend on either.
+            situation = self._situation(
+                thought, fired,
+                str(getattr(getattr(thought, "intent", None), "kind", "") or "turn"))
+            self._situation_now = situation
+            evolution = getattr(self.brain, "evolution", None)
+            if evolution is not None:
+                evolution.observe(situation)
+
             self._count_events(thought, rep)
             self._observe_transition(thought, fired, rep)
             self._score_next_state(thought, fired, rep)
             self._deferred_answers(thought, rep)
             # A live tie is a rival hypothesis set that needs no cortex to exist.
             self._experiment_from_conflict(thought, rep)
-            self._close_curiosity(thought, rep)
+            # Goals before closure, and the order is the point: work has to be *committed to*
+            # before it can be finished. Closing first meant a question raised and answered inside
+            # one turn — which is every evidence question the moment its claim earns hard support
+            # — was already resolved when the tracker looked, so it never entered the tree, and
+            # the completion branch then found no node for it. Measured: `goals_added` climbing
+            # while `goals_completed` stayed 0 forever. Tracked first, it is committed to on the
+            # turn it is raised, closed immediately after, and completed on the next pass.
             self._track_goals(thought, rep)
+            self._close_curiosity(thought, rep)
             self._observe_capabilities(thought, rep)
             self._train_readout(fired, rep)
             self._slow(rep)
 
             self._prev_fired = fired
             self._prev_state = self._encode_state(fired)
+            self._prev_situation = self._situation_now
             self._prev_snapshot = self._snapshot
             self._roll_up(rep)
             self.last = rep
@@ -535,11 +636,36 @@ class LearningLoop:
             # what has been observed, never a list someone wrote down. Planning for an action she
             # has never seen the consequences of would still be fiction; this only stops her from
             # being unable to plan for the ones she has.
+            # What the loop hands the dynamics model, in whichever representation is currently
+            # promoted. **This is where the two feeds meet**, and it is the thing Phase 7 puts
+            # through a benchmark rather than through an argument: `field._expect` observes the
+            # turn's grounded facts into this same model, so until something measured it, one
+            # n-gram model was being fed two kinds of state in strict alternation — every order-1
+            # context for a fact was a histogram. See :mod:`nyxara.njp.evolution`.
             predictive = getattr(self.brain, "predictive", None)
-            if predictive is not None and action:
-                predictive.observe(self._prev_state, action, next_state=state)
+            situation = self._situation_now
+            if predictive is not None and action and situation is not None:
+                encoded = self._encode_for_predictive(situation)
+                previous = (self._encode_for_predictive(self._prev_situation)
+                            if self._prev_situation is not None else None)
+                if encoded is not None and previous is not None:
+                    predictive.observe(previous, action, next_state=encoded)
         except Exception:  # noqa: BLE001
             pass
+
+    @staticmethod
+    def _situation(thought: Any, fired: Sequence[int], action: str) -> Any:
+        from nyxara.njp.evolution import CognitiveEvolution
+        return CognitiveEvolution.situation_of(thought, fired, action)
+
+    def _encode_for_predictive(self, situation: Any) -> Any:
+        """The promoted representation, applied to one turn. Falls back to today's on anything odd."""
+        try:
+            from nyxara.njp.evolution import ENCODERS
+            encoder = ENCODERS.get(self.predictive_encoding) or ENCODERS["buckets16"]
+            return encoder(situation)
+        except Exception:  # noqa: BLE001
+            return None
 
     @staticmethod
     def _encode_state(cells: Sequence[int]) -> List[float]:
@@ -646,10 +772,32 @@ class LearningLoop:
             if getattr(grounding, "is_question", False):
                 self._open_deferred(thought, grounder, predictor, grounding, rep)
             else:
-                self._resolve_deferred(grounding, predictor, rep)
+                self._resolve_deferred(grounding, predictor, rep, grounder)
             rep.deferred_open = len(self._deferred)
         except Exception:  # noqa: BLE001
             pass
+
+    @staticmethod
+    def _deferred_key(grounder: Any, subject: str, predicate: str) -> str:
+        """The key both halves of the deferred channel must agree on.
+
+        **The defect this exists for.** Opening read ``(subject, predicate)`` from
+        ``Grounder._read_question``, which resolves the entity — ``"what does a plant need?"`` gave
+        ``plant``. Closing built its key from the raw ``triple.subject``, which is whatever the
+        sentence happened to say — ``"plants need water"`` gave ``plants``. Two keys for one
+        entity, so the fact that answers the question never found the question, and
+        ``deferred_resolved`` was 0 for every session ever run: she asked, was told, and could not
+        connect the two.
+
+        ``Grounder._key`` is the store's own spelling rule and folds both to ``plant``. Using
+        anything else here means this map disagrees with the store it is keyed against — which is
+        the ``birds``/``bird`` failure :mod:`nyxara.njp.canon` was written for, in a second place.
+        """
+        try:
+            folded = grounder._key(subject)
+        except Exception:  # noqa: BLE001
+            folded = str(subject or "").strip().lower()
+        return f"deferred:{folded}:{predicate}"
 
     def _open_deferred(self, thought: Any, grounder: Any, predictor: Any,
                        grounding: Any, rep: LoopReport) -> None:
@@ -676,7 +824,7 @@ class LearningLoop:
             said = str(getattr(answer, "text", "") or "")
             if not said:
                 said = str(getattr(thought, "answer", "") or "")
-            key = f"deferred:{subject.lower()}:{predicate}"
+            key = self._deferred_key(grounder, subject, predicate)
             if key in self._deferred:
                 return
             predictor.predict(key, said or "<unknown>",
@@ -742,8 +890,53 @@ class LearningLoop:
                         continue
                     if curiosity.resolve(question, str(getattr(triple, "object", "") or "")):
                         rep.questions_closed += 1
+            self._close_evidence_questions(curiosity, rep)
         except Exception:  # noqa: BLE001
             pass
+
+    def _close_evidence_questions(self, curiosity: Any, rep: LoopReport) -> None:
+        """Close a question that asked for *evidence*, when the evidence arrived.
+
+        These are the questions :mod:`nyxara.njp.epistemic` raises — "what would settle whether
+        birds requires water is true? (no hard evidence)" — and they are shaped unlike every other
+        question in the store: their ``subject`` is a whole **claim** and their ``predicate`` is
+        the literal string ``evidence``. The resolution path above matches a question's subject
+        and predicate against an incoming *triple's*, so it compares ``birds requires water``
+        against ``birds`` and ``evidence`` against ``requires``, and can never match either.
+
+        They were therefore unresolvable by the only mechanism that resolves anything. Measured,
+        that reached two counters deep: they accumulate forever, they are what
+        ``_goals_from_curiosity`` files as tasks — three of the four nodes in a typical session —
+        and so ``goals_completed`` was 0 permanently while ``goals_added`` climbed.
+
+        What settles such a question is what its own text asks for: the claim acquiring hard
+        evidence, or reality deciding it outright. Both are now things that happen —
+        ``_record_prediction_evidence`` files a confirmed guess as ``PREDICTION``, which is hard,
+        and ``beliefs.settle`` records an outcome — so this is a real condition being met, not a
+        question being retired for being old. A question that is merely *stale* is a different
+        state and :meth:`nyxara.njp.curiosity.Curiosity.stale_questions` already owns it.
+        """
+        beliefs = getattr(self.brain, "beliefs", None)
+        if beliefs is None:
+            return
+        try:
+            for question in list(curiosity.open_questions()):
+                if str(getattr(question, "predicate", "") or "") != "evidence":
+                    continue
+                claim = str(getattr(question, "subject", "") or "")
+                if not claim:
+                    continue
+                case = beliefs.why(claim)
+                if not case.get("known"):
+                    continue
+                settled = case.get("outcome") is not None
+                if not (case.get("hard_support") or settled):
+                    continue
+                answer = "settled by reality" if settled else "hard evidence arrived"
+                if curiosity.resolve(question, answer):
+                    rep.questions_closed += 1
+        except Exception:  # noqa: BLE001
+            return
 
     def _stake_a_belief(self, thought: Any, said: str, subject: str, predicate: str) -> None:
         """Record what she just asserted as a belief that can later be found wrong.
@@ -773,11 +966,12 @@ class LearningLoop:
         except Exception:  # noqa: BLE001 — an unrecorded belief loses the grade, never the turn
             pass
 
-    def _resolve_deferred(self, grounding: Any, predictor: Any, rep: LoopReport) -> None:
+    def _resolve_deferred(self, grounding: Any, predictor: Any, rep: LoopReport,
+                          grounder: Any = None) -> None:
         """A fact arrived. Grade any open question it answers, and any answer it corrects."""
         try:
             for triple in (getattr(grounding, "triples", None) or []):
-                key = f"deferred:{triple.subject.lower()}:{triple.predicate}"
+                key = self._deferred_key(grounder, triple.subject, triple.predicate)
                 pending = self._deferred.pop(key, None)
                 if pending is None:
                     continue
@@ -867,6 +1061,13 @@ class LearningLoop:
             metareason = getattr(self.brain, "metareason", None)
             if metareason is not None and pending.solution is not None:
                 metareason.outcome(pending.solution, correct=correct)
+                # The same join, told to the recorder. `_Deferred` keeps the answering turn's
+                # Solution exactly so an outcome can be routed back to it, and the black box
+                # needs that join for the same reason `metareason` does: a grade read off the
+                # turn it *arrives* on belongs to a statement that chose no strategy.
+                blackbox = getattr(self.brain, "blackbox", None)
+                if blackbox is not None:
+                    blackbox.grade(pending.solution, correct=bool(correct))
                 rep.strategies_graded += 1
         except Exception:  # noqa: BLE001
             pass
@@ -896,12 +1097,75 @@ class LearningLoop:
                                          why=f"the Master stated {triple.object}")
                 if settled is not None:
                     rep.beliefs_settled += 1
+                    if correct:
+                        self._record_prediction_evidence(beliefs, pending, triple)
                 elif not correct:
                     if beliefs.retract(pending.answered, why="contradicted by observation"):
                         rep.beliefs_retracted += 1
         except Exception:  # noqa: BLE001
             pass
 
+
+    @staticmethod
+    def _record_prediction_evidence(beliefs: Any, pending: "_Deferred", triple: Any) -> None:
+        """A guess that reality confirmed is **hard** evidence, and it is the only kind she earns.
+
+        :class:`~nyxara.njp.beliefs.EvidenceKind` calls three kinds hard — ``PROOF``,
+        ``OBSERVATION``, ``PREDICTION`` — and only a hard reason may establish a belief on its
+        own; everything else can corroborate and no amount of it lifts the soft ceiling. Measured
+        across a whole session, ``with_hard_evidence`` was **0**: the single call to
+        ``beliefs.support`` anywhere in this package passes ``TESTIMONY``, so the ledger's entire
+        establishment path was written, tested, and unreachable. Every belief she held was held on
+        being told, and nothing she worked out could ever be worth more than hearsay.
+
+        ``PREDICTION`` is defined as "she predicted it and the prediction held on **held-out**
+        data", and a resolved deferred answer is exactly that by construction rather than by
+        assertion: the guess was recorded before the fact arrived, and the thing that grades it is
+        the Master's own later sentence, which is independent of the guess in the strong sense —
+        it is not something she produced. That independence is the whole reason
+        :meth:`_deferred_answers` refuses to close a question with anything but a *statement*.
+
+        Only on a correct settlement. A wrong guess is a refutation, and the retraction path
+        beside this one already owns it; recording it here as evidence *for* something would be
+        the exact inversion this ledger exists to prevent.
+        """
+        try:
+            from nyxara.njp.beliefs import EvidenceKind
+            detail = (f"answered {pending.answered!r} for "
+                      f"{pending.subject} {pending.predicate}, and the Master then stated "
+                      f"{triple.object!r}")
+            # **Both namings of the same proposition.** `_stake_a_belief` files what she *said* —
+            # the bare answer, "water" — while `field._record_beliefs` files the claim shape,
+            # "sparrows requires water". They are one proposition under two keys and both are
+            # held, so evidence filed against only the first leaves the second still resting on
+            # testimony alone.
+            #
+            # That is not a cosmetic gap. `epistemic` raises "what would settle whether sparrows
+            # requires water is true?" keyed on the *claim* shape, so the question asking for
+            # exactly this evidence could never see it arrive — and the task that question becomes
+            # could never complete, which is why `goals_completed` was 0 with `goals_added`
+            # climbing.
+            for claim in (pending.answered,
+                          f"{triple.subject} {triple.predicate} {triple.object}".strip()):
+                if not claim:
+                    continue
+                if beliefs.support(claim, EvidenceKind.PREDICTION,
+                                   detail=detail, source="deferred-answer") is not None:
+                    continue
+                # Not held yet. The loop closes at step 10 and `field._record_beliefs` stakes the
+                # Master's statement at step 11, so on the very turn a deferred answer resolves,
+                # the claim shape does not exist for `support` to attach to and the evidence was
+                # silently dropped. Holding it here is not inventing anything — it is the triple
+                # the Master just stated, held exactly as the field is about to hold it a moment
+                # later, and `hold` is keyed so the field's call is then a no-op rather than a
+                # duplicate.
+                beliefs.hold(claim, confidence=EvidenceKind.WEIGHTS[EvidenceKind.TESTIMONY],
+                             produced_by="grounding",
+                             why="grounded from the Master's statement")
+                beliefs.support(claim, EvidenceKind.PREDICTION,
+                                detail=detail, source="deferred-answer")
+        except Exception:  # noqa: BLE001 — evidence that cannot be filed never breaks a turn
+            return
 
     # ---- goals ------------------------------------------------------------- #
     def _track_goals(self, thought: Any, rep: LoopReport) -> None:
@@ -948,6 +1212,17 @@ class LearningLoop:
             goal_name = str(getattr(intent, "goal", "") or "").strip() or \
                 str(getattr(thought, "stimulus", ""))[:80]
             if not goal_name:
+                return
+            # A command whose every action was negated is an instruction *not* to do something,
+            # and it must not become a thing to do. The polarity filter above already drops the
+            # negated actions, and the goal was created regardless — so "mat karo" ("don't do it")
+            # produced a goal node named "mat karo", which is the worst possible reading of an
+            # instruction and exactly what this method's docstring says it refuses.
+            stated = list(getattr(intent, "actions", None) or [])
+            polarity = getattr(intent, "polarity", None) or {}
+            if stated and not actions:
+                return
+            if not stated and any(not polarity.get(a, True) for a in polarity):
                 return
 
             goal = tree.add(goal_name, kind="goal",
@@ -1021,7 +1296,20 @@ class LearningLoop:
             mission = self._own_mission(tree)
             if mission is None:
                 return
-            for question in curiosity.open_questions()[:4]:
+            # Every open question whose VOI decision was to go and look, not the top four by
+            # value. **The decision is the commitment; the rank is not.** With a per-turn slice
+            # only the four highest-valued questions were ever filed as work, and questions
+            # resolve independently of their rank — so the one that got its answer was routinely
+            # one that had never been committed to. Measured: `goals_added` climbing to 4 and
+            # sticking there, `goals_completed` 0, and the question that did resolve
+            # ("what would settle whether crows requires water is true?") absent from the tree.
+            #
+            # Bounded by the total tracked instead, so the tree cannot grow without limit — a cap
+            # on how much work she may have outstanding is a real constraint, where a cap on which
+            # work she may notice is an accident of sorting.
+            for question in curiosity.open_questions():
+                if len(self._question_nodes) >= _TRACKED_QUESTIONS:
+                    break
                 if str(getattr(question, "action", "")) not in ("gather", "investigate"):
                     continue
                 name = str(getattr(question, "text", ""))[:80]
@@ -1188,6 +1476,24 @@ class LearningLoop:
         if turn % self.dream_every == 0:
             self._compress_programs(rep)
 
+        if turn % self.evolve_every == 0:
+            self._evolve(rep)
+
+        if turn % self.evolve_every == 0:
+            self._measure_index(rep)
+
+        if turn % self.wonder_every == 0:
+            self._deliberate(rep)
+
+        if turn % self.evolve_every == 0:
+            self._propose_edit(rep)
+
+        # Before wondering, deliberately. `curiosity._from_assumptions` reads the miner's untested
+        # set, so mining has to have run for this turn's questions to include the ones she cannot
+        # feel — and testing has to have run for the ones already examined to stop being offered.
+        if turn % self.wonder_every == 0:
+            self._mine_assumptions(rep)
+
         if turn % self.wonder_every == 0:
             try:
                 curiosity = getattr(self.brain, "curiosity", None)
@@ -1203,6 +1509,12 @@ class LearningLoop:
                     got = curriculum.assess(self.brain)
                     rep.stage = str(getattr(got, "current", "") or "")
                     rep.stages_mastered = len(getattr(got, "mastered", None) or ())
+                    rep.weaknesses_trained = self._train_on_weakness(got)
+                    # And then she acts on it. Phase 6 turned a weakness into work she committed
+                    # to; this is the turn that does some of it. The same assessment feeds both,
+                    # because a goal read from a stale report is a goal about a brain she no
+                    # longer is.
+                    self._pursue(got, rep)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1334,6 +1646,24 @@ class LearningLoop:
             counts = getattr(world, "_counts", None) or {}
             if effect in counts:
                 return effect
+            # The **actor** of an intransitive occurrence, which is the third naming and the one
+            # a stated law actually uses. "aag lagi" files under the action — `Event.key` drops
+            # the actor when there is no object — so the record holds `lagi` while the law that
+            # raised the hypothesis says `aag`. No stem is shared between those two words in any
+            # language, so the stem rule below can never bridge it, and the pair is not a near
+            # miss but a different vocabulary. Measured: 13 events recorded, 9 candidate links,
+            # and every experiment still unresolvable.
+            #
+            # Matched on identity and only when exactly one recorded key carries that actor, for
+            # the same reason the stem match is: settling a hypothesis against the wrong event is
+            # worse than leaving it open.
+            wanted = str(effect or "").strip().lower()
+            by_actor = {str(getattr(e, "key", "") or "")
+                        for e in (getattr(world, "events", None) or [])
+                        if str(getattr(e, "actor", "") or "").strip().lower() == wanted}
+            by_actor = {k for k in by_actor if k in counts}
+            if len(by_actor) == 1:
+                return next(iter(by_actor))
             stem = str(effect or "")[:4].lower()
             if len(stem) < 4:
                 return effect
@@ -1365,7 +1695,304 @@ class LearningLoop:
             report = engine.step()
             rep.programs_solved = int(getattr(report, "solved", 0) or 0)
             rep.programs_adopted = int(getattr(report, "abstractions_adopted", 0) or 0)
+            rep.programs_transferred = int(getattr(report, "transferred", 0) or 0)
+            self._file_programs(engine)
         except Exception:  # noqa: BLE001 — a failed compression leaves the library as it was
+            return
+
+    def _file_programs(self, engine: Any) -> None:
+        """Put adopted abstractions where a skill belongs — procedural memory.
+
+        An abstraction is *how to compute something*, which is the definition of the procedural
+        level, and it lived only inside the engine that induced it. Filing it is what makes
+        "she has learned a skill" a statement about her memory rather than about one organ's
+        internal dict.
+        """
+        remember = getattr(self.brain, "_remember_skill", None)
+        if remember is None:
+            return
+        try:
+            library = getattr(engine, "library", None)
+            for name, abstraction in (getattr(library, "abstractions", None) or {}).items():
+                body = getattr(abstraction, "body", None)
+                remember(f"program:{name}",
+                         f"{name} := {body.pretty() if body is not None else '?'}",
+                         detail=f"arity {getattr(abstraction, 'arity', 0)}")
+        except Exception:  # noqa: BLE001
+            return
+
+    def _evolve(self, rep: LoopReport) -> None:
+        """One structural-evolution cycle. Phase 7's milestone runs through here.
+
+        Deliberately on the loop rather than inside :mod:`nyxara.njp.evolution`: the organ knows
+        how to propose, sandbox and gate a rewire, and nothing but the loop knows *when* she has
+        lived enough turns to have anything to propose from. An organ that schedules itself is
+        the shape this repository keeps finding at zero — fully built, fully tested, never called.
+        """
+        try:
+            evolution = getattr(self.brain, "evolution", None)
+            if evolution is None:
+                return
+            trial = evolution.cycle(self.brain)
+            rep.evolution_trials = 1
+            rep.cognitive_rewires = int(bool(getattr(trial, "promoted", False)))
+            # Nothing to reset. A promotion re-fits the model from the whole trace in the new
+            # representation (`CognitiveEvolution.refit`), and `close` sets `_prev_situation` to
+            # *this* turn's situation immediately after `_slow` returns — so the next turn's
+            # `previous` is already this turn, re-encoded. Clearing it here would only drop one
+            # real transition; it was tried and it is dead code, since the assignment below
+            # overwrites it in the same call.
+        except Exception:  # noqa: BLE001 — a failed cycle rewires nothing
+            return
+
+    def _propose_edit(self, rep: LoopReport) -> None:
+        """§24's code half: profile → propose → Truth Gauntlet, on a turn cadence.
+
+        `SelfEvolver.beat` has run the whole pipeline correctly from the day it was written and
+        **nothing in a plain session ever called it**: the only caller is `njp/pulse.py`, which
+        beats on wall-clock time and does not run when she is simply being spoken to. So
+        `attempts`, `kept` and `rolled_back` all read zero — not because the loop is broken but
+        because it had never been asked to take a step.
+
+        `force=True` because the loop is the scheduler here; `beat`'s own `every_s` gate exists
+        for the wall-clock caller and applying both would mean two schedulers disagreeing.
+
+        **Enactment is not what this turns on.** Writing to disk stays behind
+        `self_improvement.autonomous_enact`, which the test suite forces off, and the pipeline
+        already stops there and says so. What was missing was everything *before* that line ever
+        happening — and it is the part that produces evidence: measured on one session, she
+        profiled `njp.fabric`, generated a concrete edit, and the gauntlet **refuted** the
+        improvement claim on held-out predictions before it touched anything.
+        """
+        try:
+            evolver = getattr(self.brain, "evolver", None)
+            if evolver is None:
+                return
+            step = evolver.beat(oversight=getattr(self.brain, "oversight", None), force=True)
+            if step is None:
+                return
+            rep.edits_attempted = 1
+            rep.edits_refused = int(not bool(getattr(step, "kept", False)))
+        except Exception:  # noqa: BLE001 — a failed beat changes nothing
+            return
+
+    def _deliberate(self, rep: LoopReport) -> None:
+        """Put her most load-bearing current claim through the eight specialists.
+
+        The claim is her strongest *believed* proposition rather than a random one: a society that
+        deliberates over things nobody is relying on is a committee. What she is actually resting
+        weight on is what is worth attacking.
+        """
+        try:
+            society = getattr(self.brain, "society", None)
+            beliefs = getattr(self.brain, "beliefs", None)
+            if society is None or beliefs is None:
+                return
+            claim = ""
+            top = (beliefs.stats() or {}).get("top")
+            if isinstance(top, dict):
+                claim = str(top.get("claim") or top.get("proposition") or "")
+            if not claim:
+                held = [b for b in getattr(beliefs, "beliefs", {}).values()
+                        if getattr(b, "claim", "")]
+                if held:
+                    claim = str(getattr(max(held, key=lambda b: getattr(b, "confidence", 0.0)),
+                                        "claim", ""))
+            if not claim:
+                return
+            case = society.deliberate(self.brain, claim)
+            rep.deliberations = 1
+            rep.deliberation_objections = len(case.objections)
+        except Exception:  # noqa: BLE001
+            return
+
+    def _measure_index(self, rep: LoopReport) -> None:
+        """Read the intelligence vector, and compare it to the last reading.
+
+        The comparison is the whole of it. `IntelligenceVector.regressions` has been able to say
+        which term went backwards since it was written and had no caller, so a self-improvement
+        loop that made her measurably worse on one axis while improving another had nothing that
+        would notice.
+        """
+        try:
+            index = getattr(self.brain, "index", None)
+            if index is None:
+                return
+            before = int(getattr(index, "regressions_found", 0) or 0)
+            vector = index.track(self.brain)
+            rep.index_scalar = vector.scalar
+            rep.index_regressions = int(getattr(index, "regressions_found", 0) or 0) - before
+        except Exception:  # noqa: BLE001 — an unread index is a missing number, never a failed turn
+            return
+
+    def _pursue(self, report: Any, rep: LoopReport) -> None:
+        """One goal → plan → action → outcome. Stage G, and it had never happened.
+
+        `NJPBrain.pursue`'s docstring argued — correctly, at the time — that calling the planner
+        from the turn loop "would add a scheduled no-op and move a counter off zero without
+        anything having happened". That is exactly the failure this package keeps finding, and it
+        is why this calls :mod:`nyxara.njp.doing` rather than the planner: the actions there are
+        ones she really performs, the goal is the metric the curriculum already says is blocking
+        her, and `goals_reached` counts the metric reaching its target rather than the call
+        returning.
+        """
+        try:
+            doing = getattr(self.brain, "doing", None)
+            if doing is None:
+                return
+            attempt = doing.act(self.brain, report=report)
+            rep.actions_taken = int(bool(getattr(attempt, "ran", False)))
+            rep.goals_reached = int(bool(getattr(attempt, "reached", False)))
+        except Exception:  # noqa: BLE001 — a failed pursuit does nothing, never breaks the turn
+            return
+
+    def _train_on_weakness(self, report: Any) -> int:
+        """Turn a named weakness into work she has committed to. Returns how many are new.
+
+        **This is the second half of Phase 6's milestone and the half that did not exist.** The
+        first half already worked: :meth:`nyxara.njp.selfmodel.SelfModel.weakest` names the
+        capability she is worst at, :attr:`nyxara.njp.curriculum.Report.blocked_by` names what is
+        holding the current stage, and — since :mod:`nyxara.njp.blackbox` — she can also name the
+        *condition* under which a strategy of hers fails. Measured, all three answered:
+        ``('prediction', 0.243, weak=True)``, ``"only 10 of 12 required concepts.observations"``,
+        ``"derive fails 100% of the time when ungrounded, against 50% overall"``.
+
+        And nothing happened next. A weakness she can name and does not act on is a diagnosis, not
+        a curriculum, and the plan asks for the second.
+
+        Each becomes a task under her own standing mission, which is the same place a question she
+        decided to investigate goes — because it is the same kind of thing: work she has taken on
+        and can be measured against. Completion is not "she tried"; it is the weakness no longer
+        being named by the organ that named it, which :meth:`_close_trained_weaknesses` checks.
+
+        Three sources, deliberately, because they fail differently. A capability score is an
+        average over everything; a blocked stage is a threshold on one metric; a failure mode is a
+        join. A brain that only watched the average would keep practising what it is already
+        mediocre at and never notice the one condition it is reliably broken under.
+        """
+        tree = getattr(self.brain, "goals", None)
+        if tree is None:
+            return 0
+        added = 0
+        try:
+            mission = self._own_mission(tree)
+            if mission is None:
+                return 0
+            for key, name in self._weaknesses(report):
+                if key in self._trained:
+                    continue
+                task = tree.add(name[:80], parent=mission.nid, kind="task",
+                                expected_value=0.8, cost=0.3)
+                if task is None:
+                    continue
+                self._trained[key] = task.nid
+                added += 1
+            self._close_trained_weaknesses(tree, report)
+        except Exception:  # noqa: BLE001 — a weakness she cannot file is one she still has
+            return added
+        return added
+
+    def _weaknesses(self, report: Any) -> List[Tuple[str, str]]:
+        """``(key, what to practise)`` from every organ that can name a weakness."""
+        out: List[Tuple[str, str]] = []
+        try:
+            model = getattr(self.brain, "self_model", None)
+            weakest = model.weakest() if model is not None else None
+            if weakest is not None and getattr(weakest, "weak", False):
+                out.append((f"capability:{weakest.name}",
+                            f"practise {weakest.name} — measured at {weakest.level:.2f}"))
+            blocked = str(getattr(report, "blocked_by", "") or "")
+            # `Report.current` is a *StageResult*; the letter and name are on its `.stage`.
+            # Read off the result directly, every stage keyed as "stage:?" — one key for all of
+            # them, so moving from one rung to the next would look like the same weakness
+            # persisting and the task would never close.
+            result = getattr(report, "current", None)
+            stage = getattr(result, "stage", None) if result is not None else None
+            if blocked and stage is not None:
+                out.append((f"stage:{getattr(stage, 'letter', '?')}",
+                            f"unblock {getattr(stage, 'name', 'the current stage')}: {blocked}"))
+            blackbox = getattr(self.brain, "blackbox", None)
+            mode = blackbox.weakest_condition() if blackbox is not None else None
+            if mode is not None:
+                out.append((f"mode:{mode.condition}:{mode.strategy}",
+                            f"stop using {mode.strategy} when {mode.condition} — {mode.why()}"))
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def _close_trained_weaknesses(self, tree: Any, report: Any) -> None:
+        """Complete a training task when the organ that named the weakness stops naming it.
+
+        Not when she has practised, and not on a timer. "I worked on it" is what a system says
+        when it cannot tell whether it improved, and the whole point of naming the weakness with a
+        measurement was so that the same measurement could close it.
+        """
+        try:
+            still = {key for key, _name in self._weaknesses(report)}
+            for key, nid in list(self._trained.items()):
+                if key in still:
+                    continue
+                if tree.complete(nid) is not None:
+                    self._closed_weaknesses += 1
+                self._trained.pop(key, None)
+        except Exception:  # noqa: BLE001
+            return
+
+    def _mine_assumptions(self, rep: LoopReport) -> None:
+        """Surface what her arrows assume, test what can be tested, and record what was found.
+
+        This is the top of Phase 3's chain and the half that did not exist::
+
+            unknown  →  hypothesis  →  experiment  →  result  →  discovery
+
+        The *unknown* is an assumption nothing has examined; the *hypothesis* is its negation; the
+        *experiment* is a query over her own event record; the *result* is the verdict; and a
+        refutation is a **discovery**, because she can name what she found — the rival cause, the
+        reversal, the confounder.
+
+        A refuted assumption is also stated to the world model as a real link where the record
+        supports one. Finding that ``C`` also causes ``B`` and then not recording ``C → B`` would
+        make the discovery a remark rather than a change to what she believes.
+        """
+        miner = getattr(self.brain, "assumptions", None)
+        world = getattr(self.brain, "world", None)
+        if miner is None or world is None:
+            return
+        try:
+            rep.assumptions_mined = len(miner.mine(world))
+            decided = miner.test(world)
+            rep.assumptions_tested = len(decided)
+            for assumption in decided:
+                if not assumption.discovery:
+                    continue
+                rep.assumptions_refuted += 1
+                self._record_discovery(assumption)
+            rep.assumptions_open = len(miner.unknown_unknowns())
+        except Exception:  # noqa: BLE001 — an unexamined arrow is where she started
+            return
+
+    def _record_discovery(self, assumption: Any) -> None:
+        """Write a refuted assumption back into the model it was an assumption *of*.
+
+        Only the two kinds that name a **relation** the world can hold. A missing condition and a
+        confounder are real findings and neither is an arrow: "something unmodelled decides when"
+        names no variable, and a shared upstream cause is already two arrows the record has. Those
+        stay as discoveries and as questions; inventing an edge for them would be recording a
+        conclusion she has not reached.
+        """
+        from nyxara.njp.assume import AssumptionKind
+        world = getattr(self.brain, "world", None)
+        if world is None:
+            return
+        try:
+            if assumption.kind == AssumptionKind.SOLE_CAUSE and assumption.found:
+                world.state_law(assumption.found, assumption.effect, kind="causes")
+            elif assumption.kind == AssumptionKind.DIRECTED and assumption.found:
+                # The reverse runs about as strongly. Recording it is not asserting the arrow
+                # backwards — it is admitting both directions are live, which is what the record
+                # actually says and what an intervention would have to settle.
+                world.state_law(assumption.effect, assumption.cause, kind="causes")
+        except Exception:  # noqa: BLE001
             return
 
     def _run_experiments(self, rep: LoopReport) -> None:
@@ -1398,7 +2025,12 @@ class LearningLoop:
                 experiment = f"remove:{cause}"
                 if not cause or not effect or experiment in self._experiments_run:
                     continue
-                verdict = world.counterfactual(cause, self._as_recorded(world, effect))
+                # BOTH ends are reconciled, not only the effect. The cause is named by the same
+                # law in the same vocabulary and is looked up in the same table, so mapping one
+                # and not the other leaves the pair half-translated — which is indistinguishable
+                # from an unanswerable question and was being reported as one.
+                verdict = world.counterfactual(self._as_recorded(world, cause),
+                                               self._as_recorded(world, effect))
                 if not verdict.answerable:
                     continue
                 # "still happens without it" refutes the arrow; "never happens without it"
@@ -1406,6 +2038,20 @@ class LearningLoop:
                 before = designer.prior_entropy()
                 designer.observe_result(
                     experiment, "present" if verdict.still_happens else "absent")
+                # The effect happened **without** the cause, over her own event record. That
+                # refutes the stated arrow, and `world.refute_law` is what records it — a method
+                # with no caller anywhere in the package, so `refuted_laws` was structurally zero
+                # and a law she had been told could never be contradicted by anything she saw.
+                #
+                # Wired here because this is the one place the verdict is computed, and it is
+                # computed from occurrences rather than from the fitted model — grading a law
+                # with the model the law is about would move every probability while nothing was
+                # learned. A law is refuted by observation or not at all.
+                if verdict.still_happens:
+                    try:
+                        world.refute_law(cause, effect)
+                    except Exception:  # noqa: BLE001
+                        pass
                 self._experiments_run.add(experiment)
                 rep.experiments_run += 1
                 rep.bits_gained += max(0.0, before - designer.prior_entropy())
@@ -1429,6 +2075,33 @@ class LearningLoop:
             self.totals["beliefs_retracted"] += rep.beliefs_retracted
             self.totals["questions_closed"] += rep.questions_closed
             self.totals["experiments_run"] += rep.experiments_run
+            self.totals["programs_solved"] += rep.programs_solved
+            self.totals["programs_adopted"] += rep.programs_adopted
+            self.totals["programs_transferred"] += rep.programs_transferred
+            self.totals["weaknesses_trained"] += rep.weaknesses_trained
+            if rep.index_scalar is not None:
+                self.totals["index_measurements"] += 1
+            self.totals["index_regressions"] += rep.index_regressions
+            self.totals["edits_attempted"] += rep.edits_attempted
+            self.totals["edits_refused"] += rep.edits_refused
+            self.totals["deliberations"] += rep.deliberations
+            self.totals["deliberation_objections"] += rep.deliberation_objections
+            self.totals["actions_taken"] += rep.actions_taken
+            self.totals["goals_reached"] += rep.goals_reached
+            self.totals["cognitive_rewires"] += rep.cognitive_rewires
+            self.totals["evolution_trials"] += rep.evolution_trials
+            self.totals["weaknesses_closed"] = self._closed_weaknesses
+            self.totals["assumptions_mined"] += rep.assumptions_mined
+            self.totals["assumptions_tested"] += rep.assumptions_tested
+            self.totals["assumptions_refuted"] += rep.assumptions_refuted
+            # A level, not a sum — and only written on a turn the pass actually ran. Assigning it
+            # unconditionally overwrote a real surface of 16 with the 0 that every non-cadence
+            # turn carries, so the one number Phase 3 exists to report read zero except on one
+            # turn in ten.
+            if rep.assumptions_mined or rep.assumptions_tested:
+                self.totals["assumptions_open"] = rep.assumptions_open
+            self.totals["bits_gained"] = round(
+                float(self.totals.get("bits_gained", 0.0)) + float(rep.bits_gained or 0.0), 4)
             self.totals["capabilities"] += rep.capabilities
             self.totals["train_steps"] += int(rep.trained)
             self.totals["consolidations"] += int(rep.consolidated)
@@ -1451,7 +2124,8 @@ class LearningLoop:
             "deferred_open": len(self._deferred),
             "cadence": {"consolidate": self.consolidate_every,
                         "discover": self.discover_every,
-                        "wonder": self.wonder_every, "dream": self.dream_every},
+                        "wonder": self.wonder_every, "dream": self.dream_every,
+                        "evolve": self.evolve_every},
             "training": self.train_enabled,
             "last": self.last.to_dict() if self.last is not None else None,
         }

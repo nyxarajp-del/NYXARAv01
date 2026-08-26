@@ -226,6 +226,52 @@ from nyxara.njp.relevance import (
     is_verified,
     revise_confidence,
 )
+from nyxara.njp.blackbox import BlackBox, Episode, FailureMode
+from nyxara.njp.doing import (
+    Affordance,
+    CognitiveAgency,
+    Goal,
+)
+from nyxara.njp.society import (
+    Case,
+    CognitiveSociety,
+    Contribution,
+    Role,
+)
+from nyxara.njp.teacher import (
+    CortexTeacher,
+    Distillation,
+    Distiller,
+    Lesson,
+    RecordedTeacher,
+    Step,
+    Teacher,
+    TeacherCouncil,
+    Verdict as TeachingVerdict,
+    Verification,
+)
+from nyxara.njp.evolution import (
+    CognitiveEvolution,
+    EvolutionTrial,
+    Measurement,
+    Mutation,
+    Situation,
+)
+from nyxara.njp.assume import (
+    Assumption,
+    AssumptionKind,
+    AssumptionMiner,
+    AssumptionStatus,
+)
+from nyxara.njp.economy import Budget, CognitiveEconomy, Tier, budget_for
+from nyxara.njp.semantics import (
+    Meaning,
+    SemanticCompiler,
+    Tag,
+    Token,
+    compile_meaning,
+    tag_tokens,
+)
 from nyxara.njp.universe import Hypothesis as UniverseHypothesis
 from nyxara.njp.evolve import EvolutionStep, ModuleCost, Profiler, SelfEvolver
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
@@ -317,4 +363,21 @@ __all__ = [
     "SpeechAct", "Act", "SpeechActReader", "Pathway", "CognitivePolicy",
     "RelevanceGate", "RelevanceScore",
     "revise_confidence", "is_verified", "is_meta_commentary",
+    # NJP V.09 — language compiled into a typed representation, so the open half of a sentence
+    # stops being a list somebody has to keep adding to
+    "SemanticCompiler", "Meaning", "Tag", "Token", "compile_meaning", "tag_tokens",
+    # NJP V.10 — required computation, not maximum computation
+    "CognitiveEconomy", "Budget", "Tier", "budget_for",
+    # NJP V.11 — the third knowledge state: what her model assumes and nothing has examined
+    "AssumptionMiner", "Assumption", "AssumptionKind", "AssumptionStatus",
+    # NJP V.12 — one row per act of thinking, so a failure *mode* can be read off a join
+    "BlackBox", "Episode", "FailureMode",
+    # NJP V.13 — structural change to her own cognition, adopted only on measured evidence
+    "CognitiveEvolution", "Mutation", "EvolutionTrial", "Measurement", "Situation",
+    # NJP V.14 — Phase 4: a teacher's *structure*, verified and kept after the teacher is gone
+    "Teacher", "TeacherCouncil", "RecordedTeacher", "CortexTeacher",
+    "Lesson", "Step", "Verification", "TeachingVerdict", "Distiller", "Distillation",
+    # NJP V.15 — §7 goal → plan → action → outcome, and §19 eight specialists over one claim
+    "CognitiveAgency", "Goal", "Affordance",
+    "CognitiveSociety", "Role", "Case", "Contribution",
 ]

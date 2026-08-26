@@ -351,6 +351,16 @@ class NJPBrain:
         self.meta = self._build_meta(c)
         self.goals = self._build_goals(c)
         self.curiosity = self._build_curiosity(c)
+        self.assumptions = self._build_assumptions(c)
+        self.blackbox = self._build_blackbox(c)
+        self.evolution = self._build_evolution(c)
+        self.doing = self._build_doing(c)
+        self.index = self._build_index(c)
+        self.society = self._build_society(c)
+        #: The chain `_strategy_compose` walked on this turn, if it walked one. Set by the
+        #: strategy and read by the turn that called it — `MetaReasoner.solve` copies its
+        #: context, so there is no other route back.
+        self._composition: Any = None
         self.attention = self._build_attention(c)
         self.environment = self._build_environment(c)
         self.readout = self._build_readout(c)
@@ -643,6 +653,104 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — she answers what she is asked and wonders nothing
             return None
 
+    def _build_assumptions(self, c: Any) -> Any:
+        """What every arrow she believes is resting on, and which of it nothing has examined.
+
+        Phase 3's missing half. She could say what she knows and what she does not; neither
+        answers the question that actually kills a model — *which assumptions have I never
+        tested?* See :mod:`nyxara.njp.assume`.
+        """
+        if not self._gate("assumptions", True):
+            return None
+        try:
+            from nyxara.njp.assume import AssumptionMiner
+            return AssumptionMiner()
+        except Exception:  # noqa: BLE001 — she reasons on unexamined arrows, as she always did
+            return None
+
+    def _build_blackbox(self, c: Any) -> Any:
+        """The flight recorder — one row per act of thinking, kept so a *join* can be read.
+
+        Every organ keeps its own counters and none of them can answer "under which conditions
+        does my strategy historically fail?", because that is a question about strategy ×
+        situation and the average is the only thing anything held. See :mod:`nyxara.njp.blackbox`.
+        """
+        if not self._gate("blackbox", True):
+            return None
+        try:
+            from nyxara.njp.blackbox import BlackBox
+            return BlackBox()
+        except Exception:  # noqa: BLE001 — she thinks the same, she just cannot review it
+            return None
+
+    def _build_evolution(self, c: Any) -> Any:
+        """Phase 7 — structural change to her own cognition, adopted only on evidence.
+
+        A knob is :meth:`nyxara.njp.field.RecursiveCognitiveField.meta_cycle`'s business. This one
+        owns what a knob cannot reach: a new operator, a new representation, a new strategy, a new
+        edge of the selection graph — each through sandbox, benchmark, adversarial, regression and
+        an old-versus-new comparison before anything is promoted. See :mod:`nyxara.njp.evolution`.
+        """
+        if not self._gate("evolution", True):
+            return None
+        try:
+            from nyxara.njp.evolution import CognitiveEvolution
+            return CognitiveEvolution(gates=bool(self._cfg("evolution_gates", True)))
+        except Exception:  # noqa: BLE001 — she keeps the cognition she was written with
+            return None
+
+    def _build_doing(self, c: Any) -> Any:
+        """Stage G: the actions she can actually take, and choosing between them.
+
+        Not a body. A set of cognitive actions she already performs on fixed cadences, plus the
+        one thing nothing did — asking *which of them would move the number that is stuck*. See
+        :mod:`nyxara.njp.doing`.
+        """
+        if not self._gate("doing", True):
+            return None
+        try:
+            from nyxara.njp.doing import CognitiveAgency
+            return CognitiveAgency()
+        except Exception:  # noqa: BLE001 — she keeps acting on the cadence and choosing nothing
+            return None
+
+    def _build_index(self, c: Any) -> Any:
+        """§27: the one number she is not allowed to compute about herself.
+
+        `njp/index.py` has computed the eight-term vector since it was written and **nothing has
+        ever called it** — `measure()` had zero callers in the package, so the engine the plan
+        names as the answer to "capability claim nahi — evidence" produced evidence for nobody.
+        """
+        if not self._gate("index", True):
+            return None
+        try:
+            from nyxara.njp.index import IntelligenceIndex
+            # Width 6, which is the benchmark's own default and not a speed compromise. Four
+            # was tried and it reads `G = 0.000` — the generalization stage teaches six members
+            # and holds four out, so a narrower run does not measure it faster, it measures
+            # something else and reports the answer as a zero. A term silently zeroed by a
+            # config choice takes the whole product with it: `I_t` read 0.0000 while every other
+            # term was healthy.
+            return IntelligenceIndex(seed=self._cfg("index_seed", 0),
+                                     width=self._cfg("index_width", 6))
+        except Exception:  # noqa: BLE001 — she is measured by her organs' counters alone
+            return None
+
+    def _build_society(self, c: Any) -> Any:
+        """§19: eight specialists over one world model, in sequence — never a vote.
+
+        Three of the eight existed before this and none over NJP's world model: `Explorer` and
+        `Skeptic` are classes in `growth/ecosystem.py`, `Scientist` one in `growth/scientist.py`,
+        and Mathematician, Engineer, Historian, Strategist and Judge did not exist at all.
+        """
+        if not self._gate("society", True):
+            return None
+        try:
+            from nyxara.njp.society import CognitiveSociety
+            return CognitiveSociety()
+        except Exception:  # noqa: BLE001 — every organ still works alone, as it always has
+            return None
+
     def _build_attention(self, c: Any) -> Any:
         """The bottleneck. Every organ competes; exactly one wins the turn.
 
@@ -854,10 +962,37 @@ class NJPBrain:
                     # Its own measured success rate, not a number anyone picked. A shape promoted
                     # on a strong record starts believed to that degree and no further.
                     prior=float(candidate.success if candidate.success is not None else 0.5))
+                self._remember_skill(
+                    name, f"reason by {' → '.join(shape)}",
+                    detail=(f"used {candidate.seen}× with {candidate.success:.0%} success, "
+                            f"saving {candidate.saving:.2f}"))
                 added += 1
         except Exception:  # noqa: BLE001 — a failed promotion leaves the registry as it was
             return added
         return added
+
+    def _remember_skill(self, key: str, text: str, *, detail: str = "") -> None:
+        """File a skill in **procedural** memory — the level that holds *how to do something*.
+
+        Phase 5 names procedural memory as a thing to build, and measured over a full session the
+        level was empty: ``{'working': 0, 'episodic': 42, 'semantic': 8, 'procedural': 0}``. Not
+        because nothing qualified — she was inventing reusable programs and promoting reasoning
+        shapes on their own cadences — but because neither had anywhere to be *kept*. A skill that
+        lives only in the organ that produced it is one the rest of her cannot find.
+
+        Procedural is the right level rather than a convenient one: its policy is stability by
+        **use** over ninety days, where episodic decays and semantic is promoted by recurrence.
+        A way of doing something is not a fact that keeps being restated; it is a capability that
+        should survive not being needed for a while.
+        """
+        if self.levels is None or not key:
+            return
+        try:
+            from nyxara.njp.levels import Level
+            self.levels.remember(key, f"{text} — {detail}" if detail else text,
+                                 level=Level.PROCEDURAL, source="skill", claim=key)
+        except Exception:  # noqa: BLE001 — an unfiled skill still works where it was made
+            return
 
     # ---- the repairs, one per error kind ---------------------------------- #
     def _repair_planning(self, outcome: Any) -> bool:
@@ -1280,7 +1415,8 @@ class NJPBrain:
             return None
         try:
             from nyxara.njp.metareason import MetaReasoner, ProblemKind
-            meta = MetaReasoner(meta_learner=self.meta, beliefs=self.beliefs, world=self.world)
+            meta = MetaReasoner(meta_learner=self.meta, beliefs=self.beliefs,
+                                world=self.world, universe=self.universe)
             if self.ladder is not None or self.reasoner is not None:
                 meta.register("ladder", (ProblemKind.SYMBOLIC, ProblemKind.CONTRADICTION),
                               self._strategy_ladder, prior=0.6)
@@ -1304,6 +1440,18 @@ class NJPBrain:
                 meta.register("derive",
                               (ProblemKind.FACTUAL, ProblemKind.CAUSAL, ProblemKind.EMPIRICAL),
                               self._strategy_derive, prior=0.65)
+                # Composition along one relation, which `derive` does not do: `derive` chains
+                # *different* predicates (`is_a` then `needs`), and this chains one with itself.
+                # Two different walks, and only the first of them had a caller.
+                # **FACTUAL only, and the reason is arithmetic.** `max_attempts` is 3, and CAUSAL
+                # already has `causal`, `simulate` and `derive`. A fourth arm there does not add
+                # an option, it makes one unreachable: `test_a_strategy_that_produces_nothing_
+                # yields_to_one_that_can` exists because `causal` abstains on an intervention and
+                # `simulate` has to be reachable behind it, and a fourth candidate pushed
+                # `simulate` past the budget. Causal reachability is answered by `_strategy_causal`
+                # instead, which is the arm that owns causal questions.
+                meta.register("compose", (ProblemKind.FACTUAL,),
+                              self._strategy_compose, prior=0.55)
             if self.calculator is not None:
                 # Registered for EMPIRICAL as well as SYMBOLIC, and that is not belt-and-braces.
                 # `grounded is False` adds 0.5 to EMPIRICAL on every unanswered question, so a
@@ -1414,13 +1562,22 @@ class NJPBrain:
         Nothing here drives it. It is constructed and held, so the index can read its curve and a
         caller can step it; the WAKE/SLEEP/DREAM loop stays something run deliberately rather than
         something every turn pays for.
+
+        **The transfer verifier is attached, and Phase 5's milestone is why.** That milestone is
+        two claims — ``skills_created > 0`` *and the skills transfer to unseen tasks* — and the
+        engine has always had the hook for the second (``self.transfer.transfer_all(...)``, called
+        on every SLEEP) with nothing in the repository implementing it. The attribute defaulted to
+        ``None``, the guard above the call was always false, and ``transferred`` was structurally
+        zero on every cycle ever run. See :mod:`nyxara.growth.zeroshot`.
         """
         if not self._gate("noesis", True):
             return None
         try:
             from nyxara.growth.noesis import NoesisEngine
+            from nyxara.growth.zeroshot import ZeroShotTransfer
             return NoesisEngine(seed=self._cfg("seed", 42),
-                                tasks_per_cycle=self._cfg("noesis_tasks_per_cycle", 12))
+                                tasks_per_cycle=self._cfg("noesis_tasks_per_cycle", 12),
+                                transfer=ZeroShotTransfer())
         except Exception:  # noqa: BLE001 — a brain without a program library still thinks
             return None
 
@@ -1466,6 +1623,62 @@ class NJPBrain:
             return self.agent.pursue(goal, actuator=actuator, steps=steps)
         except Exception:  # noqa: BLE001
             return []
+
+    #: What a polar answer looks like when some other path has already reduced it to one.
+    #: Registers rather than synonyms: she answers in both, and a verdict in either is still a
+    #: verdict, not an object to be checked against what was asked.
+    _POLAR_VERDICTS_LOCAL = ("yes", "no", "haan", "nahi", "haan.", "nahi.")
+
+    @staticmethod
+    def _settle_polar(thought: NJPThought) -> None:
+        """Turn a derived *object* into the yes/no a polar question actually asked for.
+
+        Deliberation and recall answer a ``(subject, relation)`` pair with whatever object they
+        can reach, and they have no idea the question already named one. Two failures follow from
+        that, and they need opposite remedies — which is why this compares rather than blocks:
+
+        * Taught only ``X needs A`` and asked ``"do Xs need B?"``, she replied ``A``. True,
+          confident, and an answer to a question nobody asked. The derived object does not match,
+          so there is nothing to affirm and the reply is silence.
+        * Told ``aag causes garmi`` and ``garmi causes pasina`` and asked
+          ``"does aag cause pasina?"``, the answer is **yes** — and it is only reachable through
+          the two-hop composition :mod:`nyxara.njp.core` performs. An earlier version of this
+          guard stopped deliberation outright on a polar gap and lost exactly that: the grounder's
+          own single ``is_a`` hop cannot compose a causal chain, and refusing to let anything else
+          try made the polar path strictly weaker than the wh-path over the same knowledge.
+
+        So the ladder runs in full and its result is *checked* here. Matching is on the canonical
+        form at both ends, because "pasina" derived and "pasina" asked are one answer however each
+        was spelled.
+        """
+        try:
+            grounding = getattr(getattr(thought, "percept", None), "grounding", None)
+            answer = getattr(grounding, "answer", None)
+            if not getattr(answer, "polar", False):
+                return
+            asked = str(getattr(answer, "polar_object", "") or "").strip().lower()
+            derived = str(thought.answer or "").strip().lower()
+            if not asked or not derived:
+                return
+            # Already a verdict. The ladder has its own polar handling on some paths — a two-hop
+            # causal chain comes back as "yes" rather than as the object it walked to — and this
+            # method is here to convert *objects*, not to re-judge judgements. Without the guard
+            # it compared "yes" against the asked object, found no match, and discarded a
+            # correctly composed answer: the measured cost was
+            # ``test_a_composed_answer_is_reachable_from_a_spoken_question``.
+            if derived in NJPBrain._POLAR_VERDICTS_LOCAL:
+                return
+            # Substring in either direction: a derivation legitimately arrives with its route
+            # attached ("pasina, via garmi"), and the asked object is legitimately a shorter
+            # phrase than the stored one.
+            if asked in derived or derived in asked:
+                thought.answer = "yes"
+                return
+            # Derived something else entirely. The pair was never established, and naming the
+            # other object would be answering a different question.
+            thought.answer = ""
+        except Exception:  # noqa: BLE001
+            return
 
     def _recall(self, thought: NJPThought) -> None:
         """Answer from a relation the question did not ask for, about the entity it did name.
@@ -1704,6 +1917,13 @@ class NJPBrain:
 
     def _strategy_causal(self, problem: str, ctx: Dict[str, Any]) -> Any:
         try:
+            # "does aag cause pasina" is a causal question about *two named things*, and
+            # explanation does not answer it — `world.why("aag")` explains the wrong end. The
+            # chain that does answer it is `core.connects`, priced by the predicate's own
+            # transitivity. Handled here rather than by a fourth CAUSAL arm; see the registration.
+            composed = self._strategy_compose(problem, ctx)
+            if composed:
+                return composed
             subject = str(ctx.get("subject") or "").strip().lower()
             if not subject or self.world is None:
                 return None
@@ -1713,6 +1933,97 @@ class NJPBrain:
             return ", ".join(c.cause for c in getattr(why, "causes", [])[:3])
         except Exception:  # noqa: BLE001
             return None
+
+    def _strategy_compose(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        """Walk the relation the question names, however many hops it takes.
+
+        **The machinery has been here the whole time and nothing could reach it.**
+        :meth:`~nyxara.njp.core.CognitiveLearningCore.reach` and
+        :meth:`~nyxara.njp.core.CognitiveLearningCore.connects` compose *any* predicate, priced by
+        that predicate's own transitivity posterior — and the only two calls to either, anywhere in
+        the package, pass the literal string ``"causes"`` from inside ``core.py`` itself. The
+        seven-stage benchmark's own comment records the same finding from the other side: it used
+        to call them directly, "so it measured the *organ* and reported 20/20 while the same
+        question asked in words returned ''".
+
+        So a causal chain composed through ``think`` and every other relation did not. Measured::
+
+            zorbo se vanth hoti hai / vanth se pluron hoti hai
+            "zorbo se kya kya hota hai"     -> "pluron"     ✓
+            zorbo kizzles vanth / vanth kizzles pluron
+            "does zorbo kizzle pluron?"     -> ""           ✗   (core.connects: yes, 0.234)
+
+        The parse was never the problem either: :func:`~nyxara.njp.semantics.compile_meaning`
+        returns ``subject='zorbo', relation='kizzle', object='pluron'`` for that sentence. Three
+        finished parts, no wire between them.
+
+        **One hop is not this strategy's answer.** ``recall`` owns lookups, and returning a direct
+        edge here would take credit for them — the bandit would then learn to prefer this arm for
+        questions it adds nothing to. Only a genuinely *composed* derivation is returned.
+        """
+        try:
+            if self.learner is None:
+                return None
+            from nyxara.njp.semantics import compile_meaning
+            meaning = compile_meaning(problem)
+            relation = str(getattr(meaning, "relation", "") or "").strip().lower()
+            subject = str(getattr(meaning, "subject", "") or "").strip().lower()
+            obj = str(getattr(meaning, "object", "") or "").strip().lower()
+            if not relation or not subject:
+                return None
+            # "what does zorbo *ultimately* kizzle" parses its subject as "zorbo ultimately" —
+            # an adverb sits inside the noun phrase and the tagger has no word class for it.
+            # Resolved against the store rather than by a stop-list: the prefix that actually has
+            # outgoing edges of this relation is the subject, and a name nothing knows anything
+            # about is not one.
+            for candidate in self._subject_prefixes(subject, relation):
+                resolved = self._resolve_relation(candidate, relation)
+                got = (self.learner.connects(candidate, obj, resolved) if obj
+                       else self.learner.reach(candidate, resolved))
+                if getattr(got, "kind", "") != "composed":
+                    continue
+                # Kept for the caller, which prices the answer's confidence off the derivation
+                # that produced it. See `_answer_by_reasoning`.
+                self._composition = got
+                return "yes" if obj else str(getattr(got, "answer", "") or "") or None
+            return None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _resolve_relation(self, subject: str, relation: str) -> str:
+        """The predicate the *store* filed, given the verb the question used.
+
+        They are not the same string and cannot be assumed to be. "does aag cause pasina" compiles
+        to ``cause``; the grounder files ``causes``. It happened to match for ``kizzle`` and that
+        near-miss is exactly how this kind of bug survives: the first case tried works, so nothing
+        looks wrong until a relation whose lemma differs comes along and the walk silently finds
+        no edges at all.
+
+        Resolved against the subject's own outgoing predicates rather than by a lemmatiser, so it
+        can only ever return a relation this subject actually has.
+        """
+        try:
+            wanted = relation.rstrip("s")
+            predicates = {str(p) for s, p, _o, _c in self.learner._edges()
+                          if str(s) == subject}
+            if relation in predicates:
+                return relation
+            for predicate in sorted(predicates):
+                if predicate.rstrip("s") == wanted:
+                    return predicate
+        except Exception:  # noqa: BLE001
+            return relation
+        return relation
+
+    def _subject_prefixes(self, subject: str, relation: str) -> List[str]:
+        """``subject`` and the shorter readings of it that the store has heard of."""
+        tokens = subject.split()
+        out = [subject]
+        for size in range(len(tokens) - 1, 0, -1):
+            shorter = " ".join(tokens[:size])
+            if shorter and shorter not in out:
+                out.append(shorter)
+        return out[:3]
 
     def _strategy_simulate(self, problem: str, ctx: Dict[str, Any]) -> Any:
         """Answer by intervening on the world model rather than recalling what went with what.
@@ -1871,11 +2182,29 @@ class NJPBrain:
             # it again here would be the same graph search twice per turn for one answer.
             cached = ctx.get("derived")
             if cached:
-                return str(cached)
-            derived = self.learner.answer(problem)
-            if not derived.ok:
+                answer = str(cached)
+            else:
+                derived = self.learner.answer(problem)
+                if not derived.ok:
+                    return None
+                answer = derived.answer or None
+            if not answer:
                 return None
-            return derived.answer or None
+            # **A polar question names the object it is asking about.** `core.answer` returns the
+            # store's best object for the subject whatever was asked, so "does zorbo kizzle
+            # pluron?" came back "vanth" — non-empty, criticised clean, and accepted. The turn was
+            # then answered, so the retry loop never ran and `compose` — which composes the two
+            # hops the question actually asks about — never got a turn. Answering a different
+            # question is not a defect the critic can see, because the answer it is handed is a
+            # perfectly good answer to a question nobody asked.
+            from nyxara.njp.semantics import compile_meaning
+            meaning = compile_meaning(problem)
+            asked = str(getattr(meaning, "object", "") or "").strip().lower()
+            if str(getattr(meaning, "focus", "") or "") == "truth" and asked:
+                if str(answer).strip().lower() != asked:
+                    return None
+                return "yes"
+            return answer
         except Exception:  # noqa: BLE001
             return None
 
@@ -2115,6 +2444,12 @@ class NJPBrain:
                     out.intent = self.intent.read(out.stimulus)
                 except Exception:  # noqa: BLE001
                     out.intent = None
+            # `field._predict_world` labels its transition with `brain._last_intent_kind`, and
+            # **nothing in the package ever assigned it** — one read, no writes, so every
+            # observation the field gave the dynamics model carried the empty action label while
+            # the loop's half carried a real one. Two halves of one model disagreeing about
+            # whether an action happened. Written here, where the intent is first known.
+            self._last_intent_kind = str(getattr(out.intent, "kind", "") or "")
 
             # 2-4. perceive and ground
             out.percept = self.perceive(out.stimulus, remember=remember, intent=out.intent)
@@ -2172,6 +2507,10 @@ class NJPBrain:
                 # would keep `unknown` at confidence 0.0 however well it was derived. Re-run
                 # rather than move: the first pass also feeds the echo check, which has to
                 # happen before deliberation, not after it.
+                # A polar question's derived object becomes the yes/no it asked for, before the
+                # epistemic pass reads the answer — otherwise the state is computed for a reply
+                # that is about to change.
+                self._settle_polar(out)
                 if out.answer:
                     self._set_epistemic(out)
                     # A deliberated answer came by a *form* of reasoning, and the genome has been
@@ -2241,6 +2580,12 @@ class NJPBrain:
             # a loop that ran before it would be scoring a fabric state that no longer exists.
             if self.loop is not None:
                 out.loop = self.loop.close(out)
+
+            # 10b. RECORD — one row for this act of thinking, after the loop so the report is
+            # on the thought and before the field so the row describes the turn as it was
+            # answered rather than as the field left it.
+            if self.blackbox is not None:
+                self.blackbox.record(out)
 
             # 11. THE FIELD — form concepts from what was grounded, keep the simulated universe
             # in step with the causal skeleton, and put this turn's error through the self-critic
@@ -2340,10 +2685,56 @@ class NJPBrain:
                 # only over the exact sentence that stated it.
                 if obj and predicate in ("causes", "produces", "requires"):
                     self.discoverer.observe([subject], consequent)
+                # And the same episode under the subject's **kind**, which is the one thing that
+                # makes any of this compress.
+                #
+                # Every antecedent set here is built from the *instance*, so `sparrow requires
+                # water`, `crow requires water` and `robin requires water` share no subset at all
+                # and every candidate rule has support 1. Measured over a whole session: 70
+                # episodes, 4 discovery passes, **0 abstractions**, compression 1.0 — which
+                # `concepts` defines as "does not pay for itself". The compressor was not failing;
+                # it was being fed data in which nothing could recur.
+                #
+                # Recorded under the kind the Master **stated**, never one she guessed, for the
+                # same reason `field._kind_of` prefers a stated kind: an inferred kind would make
+                # a rule out of her own conjecture and then test it as though it came from the
+                # world. The generalisation is not trusted for being proposed — the discoverer
+                # fits on one split and scores on held-out episodes, so a kind-level rule that
+                # does not hold dies exactly like any other.
+                if obj:
+                    for kind in self._kinds_of(subject):
+                        # Substituting a subject with its kind turns `sparrow is_a bird` into
+                        # `{bird, is_a} → bird` — a tautology, and one that scores five supports
+                        # and crowds out the rules worth finding. A rule whose antecedent already
+                        # contains its consequent says nothing about the world.
+                        if kind == consequent:
+                            continue
+                        self.discoverer.observe([kind, predicate], consequent)
             if not seen and concepts and thought.answer:
                 self.discoverer.observe(concepts, thought.answer[:60])
         except Exception:  # noqa: BLE001 — a missed episode costs one sample, never the turn
             pass
+
+    def _kinds_of(self, subject: str) -> List[str]:
+        """The kinds this subject was *stated* to belong to — one hop, stated only, at most two.
+
+        One hop rather than the full ``is_a`` chain: a walk to the root would file the same
+        episode under `sparrow`, `bird`, `animal` and `thing`, and a rule about `thing` is a rule
+        about everything, which compresses nothing and pollutes every held-out score with a
+        pattern that trivially holds.
+        """
+        try:
+            grounder = self.grounder
+            if grounder is None or not subject:
+                return []
+            out: List[str] = []
+            for triple in grounder._lookup(subject, "is_a")[:2]:
+                kind = str(getattr(triple, "object", "") or "").strip().lower()
+                if kind and kind != subject:
+                    out.append(kind)
+            return out
+        except Exception:  # noqa: BLE001
+            return []
 
     def _prepare_evidence(self, thought: NJPThought) -> None:
         """Lay out what the gauntlet may read about *this* claim, and nothing else.
@@ -2490,8 +2881,21 @@ class NJPBrain:
                         if self.genome is not None:
                             thought.trace = self.genome.record(
                                 derived, question=thought.stimulus)
+                # `solve` copies the context, so a strategy cannot hand anything back through it.
+                # `compose` walks a chain the pre-computed `learner.answer` above did not — that
+                # one stops at the first hop — so without this the turn is answered by one
+                # derivation and its confidence is priced off another, or off none at all.
+                # Measured: "what does zorbo ultimately kizzle" answering "pluron" and reported as
+                # `believed 0.00`, which is not a hedge, it is a contradiction.
+                self._composition = None
                 solution = self.metareason.solve(thought.stimulus, context=context)
                 thought.solution = solution
+                if (str(getattr(solution, "strategy", "")) == "compose"
+                        and self._composition is not None):
+                    thought.derivation = self._composition
+                    if self.genome is not None:
+                        thought.trace = self.genome.record(self._composition,
+                                                           question=thought.stimulus)
                 if solution.assertable and solution.answer:
                     thought.answer = str(solution.answer)
                     return
@@ -2842,6 +3246,26 @@ class NJPBrain:
             if not text:
                 return ""
             thought.recalled = "taught under this exact question"
+            # **Priced by whether the store still agrees, not left at zero.** This path returns
+            # before anything attaches evidence, so a question asked twice came back as
+            # `believed 0.00` on the second ask while the first read `believed 0.448` — and that
+            # is not a hedge, it is a contradiction, and it feeds calibration, the black box and
+            # the router. Measured at the base commit, so it is not new.
+            #
+            # The number is a check rather than a floor: `learner.answer` walks the same facts
+            # again, and only an answer the walk still reaches gets its confidence. A memory the
+            # store can no longer support keeps today's behaviour, which is the correct outcome
+            # for it — a recalled claim that no longer follows should not be stated confidently.
+            if self.learner is not None:
+                try:
+                    derived = self.learner.answer(thought.stimulus)
+                    if (derived.ok and str(derived.answer or "").strip().lower()
+                            == text.strip().lower()):
+                        thought.derivation = derived
+                        thought.confidence = max(float(thought.confidence or 0.0),
+                                                 float(derived.confidence or 0.0))
+                except Exception:  # noqa: BLE001 — an uncheckable memory is priced as it was
+                    pass
             return text[:1000]
         except Exception:  # noqa: BLE001
             return ""
@@ -3449,6 +3873,11 @@ class NJPBrain:
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),
                             ("compiler", self.compiler),
+                            ("blackbox", self.blackbox),
+                            ("assumptions", self.assumptions),
+                            ("index", self.index),
+                            ("society", self.society),
+                            ("evolution", self.evolution),
                             ("epistemic", self.epistemic)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
@@ -3456,6 +3885,18 @@ class NJPBrain:
                 out[name] = organ.stats()
             except Exception:  # noqa: BLE001
                 out[name] = {"error": "stats failed"}
+        # Stage G scores `agency.success_rate`, and until `doing` existed the only thing under
+        # that key was `Agent`, whose counters cannot move without an action vocabulary. Merged
+        # rather than replaced: the planner over the dynamics model is still real and still
+        # reported; what is added is the half that can actually be exercised.
+        if self.doing is not None:
+            try:
+                got = self.doing.stats()
+                out["doing"] = got
+                block = out.get("agency")
+                out["agency"] = {**block, **got} if isinstance(block, dict) else dict(got)
+            except Exception:  # noqa: BLE001
+                pass
         if self.memory is not None:
             try:
                 # The whole surface, not just the count. `recalls_undecided` and
@@ -3517,9 +3958,17 @@ class NJPBrain:
             arrow("→counterfactual", self.universe,
                   "no intervention has been compiled and run",
                   ran=bool(compiler.get("executable", 0)))
+            # Named where it actually lives. The encoder is `integrate.LearningLoop._encode_state`
+            # — never `njp.predictive._encode_state`, which does not exist — and since Phase 7 it
+            # is one of several the loop may feed, chosen by measurement rather than by the line
+            # that was written first. The arrow is open while the promoted representation is still
+            # the sixteen-bucket histogram, whose own docstring shows three unrelated words
+            # sharing one state.
             arrow("→plan", self.predictive,
-                  "the state encoder cannot carry identity — see njp.predictive._encode_state",
-                  ran=False)
+                  "the promoted state representation cannot carry identity — see "
+                  "njp.evolution.ENCODERS and integrate.LearningLoop._encode_state",
+                  ran=bool(getattr(getattr(self, "loop", None), "predictive_encoding", "")
+                           not in ("", "buckets16", "buckets64")))
             arrow("test→prediction error", self.predictor,
                   "nothing has been scored", ran=bool(predict.get("scored", 0)))
             arrow("error→diagnosis", self.predictor,
@@ -3534,6 +3983,33 @@ class NJPBrain:
             arrow("meta→strategy learning", self.metareason,
                   "no kind has enough trials to name a winner",
                   ran=bool(getattr(self.metareason, "stats", lambda: {})().get("by_kind")))
+            # Phase 6's two arrows. The first is the join nothing held: a grade that never
+            # reaches the turn that chose is an outcome with no strategy attached, and no amount
+            # of it makes a failure *mode*. The second is the half of the milestone that did not
+            # exist — a weakness she can name and does not act on is a diagnosis, not a
+            # curriculum.
+            arrow("outcome→failure mode", self.blackbox,
+                  "no graded answer has met a condition twice, so no join exists yet",
+                  ran=bool(getattr(self.blackbox, "stats", lambda: {})().get("pairs", 0)))
+            arrow("weakness→training", self.loop,
+                  "nothing she can name as a weakness has become work she committed to",
+                  ran=bool((getattr(self.loop, "totals", None) or {}).get(
+                      "weaknesses_trained", 0)))
+            # Phase 7. A knob is the field's business; this is the arrow that says whether
+            # anything *structural* has ever survived a benchmark, and it is open until one has.
+            arrow("society→verdict", self.society,
+                  "the specialists have never been run over one claim in sequence",
+                  ran=bool(getattr(self.society, "deliberations", 0)))
+            arrow("progress→measured", self.index,
+                  "the intelligence vector has never been read, so nothing knows whether she "
+                  "is better than she was",
+                  ran=bool(getattr(self.index, "measurements", 0)))
+            arrow("goal→action", self.doing,
+                  "nothing she can do has been chosen and run against a goal",
+                  ran=bool(getattr(self.doing, "acted", 0)))
+            arrow("weakness→rewire", self.evolution,
+                  "no structural change has measured better than what she was written with",
+                  ran=bool(getattr(self.evolution, "cognitive_rewires", 0)))
             arrow("↺", self.loop)
         except Exception:  # noqa: BLE001 — an unreadable organ is left out, not guessed at
             pass

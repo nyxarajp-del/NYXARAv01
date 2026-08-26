@@ -2809,9 +2809,22 @@ class NeuralArchitectureSearch:
         for gen in range(gens):
             scored = self._score_population(population, folds, backend, seen, surrogate)
             scored.sort(key=lambda c: c.fitness, reverse=True)
-            improved = best is None or scored[0].fitness > best.fitness
+            # **Crown a measurement, never an estimate.** Under successive halving only
+            # `1/factor` of the rung is promoted to a full evaluation; the rest carry a
+            # cheap-screen score and are marked `predicted` — "honest: only a cheap screen", as
+            # `_score_population` puts it. Those screens never enter `seen`, and `pareto_front` is
+            # built from `seen`, so crowning one produced a champion that is *not on its own
+            # frontier*: with `population_size=5` and `halving_factor=3`, `keep` is 1 and four of
+            # every five candidates are screens, so a screen topping the sort is ordinary rather
+            # than exotic. Reproduced 1 run in 6 on a fixed seed, the leaderboard's first entry
+            # reading `predicted=True`.
+            #
+            # Ranking the screens is still worth doing — they decide who breeds — so they stay in
+            # `leaderboard`, flagged. What they may not do is win.
+            measured = [c for c in scored if not c.predicted] or scored
+            improved = best is None or measured[0].fitness > best.fitness
             if improved:
-                best, best_gen = scored[0], gen
+                best, best_gen = measured[0], gen
             history.append(best.fitness)          # best-so-far -> monotonic non-decreasing
             leaderboard = scored
             if surrogate is not None:             # learn from everything scored so far

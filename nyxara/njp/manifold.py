@@ -80,6 +80,16 @@ class Snapshot:
         return {"cells": list(self.cells), "tick": self.tick, "width": self.width}
 
 
+#: A cell this close to orthogonal to the predicted point is not about to fire — it is only the
+#: least unlike it. Named rather than inlined because it is a claim about the encoding, not a
+#: tuning knob: below this, cosine similarity in a 10k-dimensional space is noise.
+_FLOOR_SIM = 0.05
+
+#: How large a fall between neighbouring candidates counts as the edge of the winning set. Below
+#: this the candidates are a continuum and no cut is honest, so the statistical fallback applies.
+_MIN_RELATIVE_DROP = 0.25
+
+
 @dataclass
 class Prediction:
     """What the manifold expects next — with the margin that says whether to believe it."""
@@ -424,7 +434,19 @@ class Manifold:
             order = _np.argsort(-sims)
             scored: List[Tuple[float, int]] = [(float(sims[i]), pool[i]) for i in order]
             k = max(1, min(int(k), len(scored)))
-            top = scored[:k]
+            top = self._winners(scored, k)
+            if not top:
+                out.reason = "no candidate stood off from the field"
+                return out
+            # Predicting the entire candidate pool is not a prediction. It scores non-zero overlap
+            # against any outcome whatsoever, which is exactly why it must not be trusted: there
+            # is no field left for the winners to stand off from, and the margin computed below
+            # silently falls back to an absolute similarity that reads like a separation.
+            if len(top) >= len(scored):
+                out.cells = [cid for _s, cid in top]
+                out.margin = 0.0
+                out.reason = "every candidate was predicted — that is a state, not a prediction"
+                return out
             out.cells = [cid for _s, cid in top]
             # The margin is how far the winners stand off from the field: mean(winners) −
             # mean(everyone else). Deliberately NOT the gap between the weakest winner and the
@@ -432,7 +454,7 @@ class Manifold:
             # whenever k approaches the pool size, and reported an untrustworthy 0.0014 on a
             # prediction that was in fact clean. A cluster that genuinely separates scores high
             # however many cells the fabric happens to hold.
-            rest = scored[k:]
+            rest = scored[len(top):]
             if rest:
                 top_mean = sum(s for s, _c in top) / float(len(top))
                 rest_mean = sum(s for s, _c in rest) / float(len(rest))
@@ -446,6 +468,73 @@ class Manifold:
         except Exception:  # noqa: BLE001 — a failed foresight is no foresight, never a crash
             out.reason = "prediction failed"
             return out
+
+    @staticmethod
+    def _winners(scored: Sequence[Tuple[float, int]], k: int) -> List[Tuple[float, int]]:
+        """Which cells are actually predicted — cut where the similarities fall away.
+
+        **The defect this replaces.** ``scored[:k]`` returned exactly ``k`` cells whatever they
+        scored, with ``k`` derived from the seed width rather than from the evidence. Measured on
+        a live fabric, the similarities were ``0.600, 0.595, 0.278, 0.230, 0.095`` — a clean break
+        after the second — and ``k`` was 6 against a pool of 5, so all five came back as "about to
+        fire". The manifold had separated the winners perfectly and the selection threw the
+        separation away.
+
+        That is not merely imprecise, it is **arithmetically unscoreable**. The outcome is graded
+        on Jaccard overlap, so predicting six cells when three fire caps the score at 0.5 however
+        right the prediction is, and the correctness floor needs 0.75. Every prediction was
+        counted wrong by construction: ``scored = 6, correct = 0, accuracy = 0.0`` over a session
+        in which the map was, in fact, working.
+
+        **The rule.** Sort descending, then cut at the largest *relative* drop between neighbours.
+        Relative rather than absolute, because similarity magnitudes shift with how much the map
+        has learned and a fixed threshold would be right at one point in a session and wrong at
+        another. ``k`` stops being a quota and becomes a cap: the evidence decides how many cells
+        are about to fire, and ``k`` only bounds how many may be named.
+
+        A single dominant winner is a legitimate answer, so the search starts at one. Cells below
+        :data:`_FLOOR_SIM` are never named however the gaps fall — a cell essentially orthogonal
+        to the predicted point is not about to fire, it is merely the least unlike it.
+        """
+        live = [(s, c) for s, c in scored if s >= _FLOOR_SIM]
+        if not live:
+            return []
+        limit = max(1, min(int(k), len(live)))
+        # Each gap is measured against its own left neighbour. Normalising against the strongest
+        # candidate instead is the more intuitive rule and it was tried: on the distribution this
+        # method was written for it cuts at the visually obvious elbow, which is why it is easy to
+        # believe in. Measured over four sessions it was worse — 12 correct against 15, and the
+        # whole of the difference on the repetitive session, where the wider set the local rule
+        # names is the one that matches how many cells actually fire. The two rules tie on the
+        # other three. The local rule is kept because the measurement chose it; the intuition is
+        # recorded here because it is a plausible thing for a later reader to "fix".
+        #
+        # Honest about the disagreement: on the manifold's own looser hit criterion (Jaccard 0.5
+        # rather than the predictor's 0.75) the top-normalised rule scores better, 40 hits against
+        # 31. The two metrics do not agree, and this comment exists so that is visible rather
+        # than being settled silently by whoever edits next.
+        best_cut, best_drop = limit, -1.0
+        for i in range(1, limit):
+            here, following = live[i - 1][0], live[i][0]
+            if here <= 0.0:
+                break
+            drop = (here - following) / here
+            if drop > best_drop:
+                best_drop, best_cut = drop, i
+        if best_drop >= _MIN_RELATIVE_DROP:
+            return live[:best_cut]
+        # No break worth the name among candidates that already cleared the noise floor — so they
+        # all fire. That is not a fallback for want of anything better; it is what the absence of
+        # a gap *means* once :data:`_FLOOR_SIM` has removed everything the encoding cannot
+        # distinguish from zero.
+        #
+        # A statistical bar was tried here instead — keep the candidates above the mean — and it
+        # is wrong in precisely the case that matters most. A cleanly learned transition looks
+        # like a tight cluster: ``{1,2,3} → {4,5,6}`` taught twelve times scores 0.515, 0.495,
+        # 0.488 and then falls off a cliff to 0.011. The floor removes the cliff, the three
+        # winners are all genuine, and "above the mean" of three near-identical numbers keeps
+        # one of them. It turned the manifold's canonical success into a two-thirds miss.
+        return live[:limit]
 
     def score_prediction(self, predicted: Sequence[int], actual: Sequence[int]) -> float:
         """Jaccard overlap of predicted vs actual firing. Feeds the ledger's accuracy column."""
