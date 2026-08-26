@@ -226,6 +226,27 @@ def _run_adversarial(args: argparse.Namespace) -> int:
     return 0 if report.families else 1
 
 
+def _run_acquisition(args: argparse.Namespace) -> int:
+    """Phase 4's critical test: what survives the teacher being switched off.
+
+    Three arms over identical facts — no teacher, the teacher answering, and the teacher's
+    demonstrations distilled and then the teacher removed — scored on chains it never saw. Exits
+    non-zero only on a run that produced no arms; the retention figure is evidence, not a gate.
+    """
+    from nyxara.eval.acquisition import run_acquisition_benchmark
+
+    seed = 20260826 if args.seed is None else int(args.seed)
+    report = run_acquisition_benchmark(seed=seed, chains=int(args.chains),
+                                       hops=int(args.hops))
+    print(report.render())
+    if args.save:
+        import json
+        with open(args.save, "w", encoding="utf-8") as fh:
+            json.dump(report.to_dict(), fh, indent=2)
+        print(f"\nacquisition run saved -> {args.save}")
+    return 0 if report.arms else 1
+
+
 def _run_ablate(args: argparse.Namespace) -> int:
     """Measure each turn-path faculty against its own absence, and print what may be concluded.
 
@@ -332,6 +353,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="adversarial: run only this family (repeatable). Each family draws "
                              "its own seeded vocabulary, so one family alone poses exactly the "
                              "items it would have posed inside a full run")
+    parser.add_argument("--acquisition", action="store_true",
+                        help="run Phase 4's acquisition test (eval/acquisition.py): NJP alone vs "
+                             "NJP + teacher vs NJP after distillation with the teacher SWITCHED "
+                             "OFF, scored on chains the teacher never saw")
+    parser.add_argument("--chains", type=int, default=4,
+                        help="acquisition: chains per arm (half the questions are controls)")
+    parser.add_argument("--hops", type=int, default=4,
+                        help="acquisition: links per chain. Four is where the default "
+                             "transitivity prior stops her, so it is where the arms separate")
     parser.add_argument("--ablate", action="store_true",
                         help="measure each turn-path faculty against its OWN ABSENCE on the "
                              "held-out fold (eval/ablation.py): does it beat not having it? "
@@ -344,7 +374,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=None,
                         help="seed for a deterministic batch (same seed ⇒ same problems, so "
                              "before/after edits are compared on identical questions). Defaults "
-                             "to 0 for --frontier and to the battery's own seed for --adversarial")
+                             "to 0 for --frontier and to each battery's own seed for "
+                             "--adversarial and --acquisition")
     parser.add_argument("--tier", type=int, default=None,
                         help="frontier: probe at this fixed difficulty tier (default: the "
                              "curriculum's current frontier tier)")
@@ -390,6 +421,8 @@ def main(argv: list[str] | None = None) -> int:
         from nyxara.eval.general_novel import run_general
         report = run_general()
         return 0 if report.accuracy >= 0.0 else 1
+    if args.acquisition:
+        return _run_acquisition(args)
     if args.adversarial:
         return _run_adversarial(args)
     if args.frontier:

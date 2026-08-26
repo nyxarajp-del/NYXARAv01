@@ -85,3 +85,20 @@ def test_an_adversarial_run_saves_as_json(tmp_path, capsys):
     payload = json.loads(saved.read_text(encoding="utf-8"))
     assert payload["seed"] == 20260823
     assert [f["family"] for f in payload["families"]] == ["polar"]
+
+
+def test_the_acquisition_test_is_reachable_and_reports_retention(capsys):
+    """Phase 4's critical test, from the command line: three arms and the one number that says
+    whether anything survived the teacher being switched off."""
+    rc = main(["--acquisition", "--seed", "42", "--chains", "3"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "acquisition" in out.lower()
+    for arm in ("alone", "taught", "distilled"):
+        assert arm in out
+    assert "RETENTION" in out
+
+
+def test_the_acquisition_test_keeps_its_own_default_seed(capsys):
+    assert main(["--acquisition", "--chains", "2"]) == 0
+    assert "seed 20260826" in capsys.readouterr().out

@@ -354,6 +354,10 @@ class NJPBrain:
         self.assumptions = self._build_assumptions(c)
         self.blackbox = self._build_blackbox(c)
         self.evolution = self._build_evolution(c)
+        #: The chain `_strategy_compose` walked on this turn, if it walked one. Set by the
+        #: strategy and read by the turn that called it — `MetaReasoner.solve` copies its
+        #: context, so there is no other route back.
+        self._composition: Any = None
         self.attention = self._build_attention(c)
         self.environment = self._build_environment(c)
         self.readout = self._build_readout(c)
@@ -1381,6 +1385,11 @@ class NJPBrain:
                 meta.register("derive",
                               (ProblemKind.FACTUAL, ProblemKind.CAUSAL, ProblemKind.EMPIRICAL),
                               self._strategy_derive, prior=0.65)
+                # Composition along one relation, which `derive` does not do: `derive` chains
+                # *different* predicates (`is_a` then `needs`), and this chains one with itself.
+                # Two different walks, and only the first of them had a caller.
+                meta.register("compose", (ProblemKind.FACTUAL, ProblemKind.CAUSAL),
+                              self._strategy_compose, prior=0.55)
             if self.calculator is not None:
                 # Registered for EMPIRICAL as well as SYMBOLIC, and that is not belt-and-braces.
                 # `grounded is False` adds 0.5 to EMPIRICAL on every unanswered question, so a
@@ -1856,6 +1865,71 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _strategy_compose(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        """Walk the relation the question names, however many hops it takes.
+
+        **The machinery has been here the whole time and nothing could reach it.**
+        :meth:`~nyxara.njp.core.CognitiveLearningCore.reach` and
+        :meth:`~nyxara.njp.core.CognitiveLearningCore.connects` compose *any* predicate, priced by
+        that predicate's own transitivity posterior — and the only two calls to either, anywhere in
+        the package, pass the literal string ``"causes"`` from inside ``core.py`` itself. The
+        seven-stage benchmark's own comment records the same finding from the other side: it used
+        to call them directly, "so it measured the *organ* and reported 20/20 while the same
+        question asked in words returned ''".
+
+        So a causal chain composed through ``think`` and every other relation did not. Measured::
+
+            zorbo se vanth hoti hai / vanth se pluron hoti hai
+            "zorbo se kya kya hota hai"     -> "pluron"     ✓
+            zorbo kizzles vanth / vanth kizzles pluron
+            "does zorbo kizzle pluron?"     -> ""           ✗   (core.connects: yes, 0.234)
+
+        The parse was never the problem either: :func:`~nyxara.njp.semantics.compile_meaning`
+        returns ``subject='zorbo', relation='kizzle', object='pluron'`` for that sentence. Three
+        finished parts, no wire between them.
+
+        **One hop is not this strategy's answer.** ``recall`` owns lookups, and returning a direct
+        edge here would take credit for them — the bandit would then learn to prefer this arm for
+        questions it adds nothing to. Only a genuinely *composed* derivation is returned.
+        """
+        try:
+            if self.learner is None:
+                return None
+            from nyxara.njp.semantics import compile_meaning
+            meaning = compile_meaning(problem)
+            relation = str(getattr(meaning, "relation", "") or "").strip().lower()
+            subject = str(getattr(meaning, "subject", "") or "").strip().lower()
+            obj = str(getattr(meaning, "object", "") or "").strip().lower()
+            if not relation or not subject:
+                return None
+            # "what does zorbo *ultimately* kizzle" parses its subject as "zorbo ultimately" —
+            # an adverb sits inside the noun phrase and the tagger has no word class for it.
+            # Resolved against the store rather than by a stop-list: the prefix that actually has
+            # outgoing edges of this relation is the subject, and a name nothing knows anything
+            # about is not one.
+            for candidate in self._subject_prefixes(subject, relation):
+                got = (self.learner.connects(candidate, obj, relation) if obj
+                       else self.learner.reach(candidate, relation))
+                if getattr(got, "kind", "") != "composed":
+                    continue
+                # Kept for the caller, which prices the answer's confidence off the derivation
+                # that produced it. See `_answer_by_reasoning`.
+                self._composition = got
+                return "yes" if obj else str(getattr(got, "answer", "") or "") or None
+            return None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _subject_prefixes(self, subject: str, relation: str) -> List[str]:
+        """``subject`` and the shorter readings of it that the store has heard of."""
+        tokens = subject.split()
+        out = [subject]
+        for size in range(len(tokens) - 1, 0, -1):
+            shorter = " ".join(tokens[:size])
+            if shorter and shorter not in out:
+                out.append(shorter)
+        return out[:3]
+
     def _strategy_simulate(self, problem: str, ctx: Dict[str, Any]) -> Any:
         """Answer by intervening on the world model rather than recalling what went with what.
 
@@ -2013,11 +2087,29 @@ class NJPBrain:
             # it again here would be the same graph search twice per turn for one answer.
             cached = ctx.get("derived")
             if cached:
-                return str(cached)
-            derived = self.learner.answer(problem)
-            if not derived.ok:
+                answer = str(cached)
+            else:
+                derived = self.learner.answer(problem)
+                if not derived.ok:
+                    return None
+                answer = derived.answer or None
+            if not answer:
                 return None
-            return derived.answer or None
+            # **A polar question names the object it is asking about.** `core.answer` returns the
+            # store's best object for the subject whatever was asked, so "does zorbo kizzle
+            # pluron?" came back "vanth" — non-empty, criticised clean, and accepted. The turn was
+            # then answered, so the retry loop never ran and `compose` — which composes the two
+            # hops the question actually asks about — never got a turn. Answering a different
+            # question is not a defect the critic can see, because the answer it is handed is a
+            # perfectly good answer to a question nobody asked.
+            from nyxara.njp.semantics import compile_meaning
+            meaning = compile_meaning(problem)
+            asked = str(getattr(meaning, "object", "") or "").strip().lower()
+            if str(getattr(meaning, "focus", "") or "") == "truth" and asked:
+                if str(answer).strip().lower() != asked:
+                    return None
+                return "yes"
+            return answer
         except Exception:  # noqa: BLE001
             return None
 
@@ -2694,8 +2786,21 @@ class NJPBrain:
                         if self.genome is not None:
                             thought.trace = self.genome.record(
                                 derived, question=thought.stimulus)
+                # `solve` copies the context, so a strategy cannot hand anything back through it.
+                # `compose` walks a chain the pre-computed `learner.answer` above did not — that
+                # one stops at the first hop — so without this the turn is answered by one
+                # derivation and its confidence is priced off another, or off none at all.
+                # Measured: "what does zorbo ultimately kizzle" answering "pluron" and reported as
+                # `believed 0.00`, which is not a hedge, it is a contradiction.
+                self._composition = None
                 solution = self.metareason.solve(thought.stimulus, context=context)
                 thought.solution = solution
+                if (str(getattr(solution, "strategy", "")) == "compose"
+                        and self._composition is not None):
+                    thought.derivation = self._composition
+                    if self.genome is not None:
+                        thought.trace = self.genome.record(self._composition,
+                                                           question=thought.stimulus)
                 if solution.assertable and solution.answer:
                     thought.answer = str(solution.answer)
                     return

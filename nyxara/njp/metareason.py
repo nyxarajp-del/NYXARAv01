@@ -74,6 +74,7 @@ _STRATEGY_PATHWAY: Dict[str, str] = {
     "ladder": "reason",
     "causal": "reason",
     "derive": "reason",
+    "compose": "reason",
     "calculate": "reason",
 }
 

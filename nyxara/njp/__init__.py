@@ -227,6 +227,18 @@ from nyxara.njp.relevance import (
     revise_confidence,
 )
 from nyxara.njp.blackbox import BlackBox, Episode, FailureMode
+from nyxara.njp.teacher import (
+    CortexTeacher,
+    Distillation,
+    Distiller,
+    Lesson,
+    RecordedTeacher,
+    Step,
+    Teacher,
+    TeacherCouncil,
+    Verdict as TeachingVerdict,
+    Verification,
+)
 from nyxara.njp.evolution import (
     CognitiveEvolution,
     EvolutionTrial,
@@ -351,4 +363,7 @@ __all__ = [
     "BlackBox", "Episode", "FailureMode",
     # NJP V.13 — structural change to her own cognition, adopted only on measured evidence
     "CognitiveEvolution", "Mutation", "EvolutionTrial", "Measurement", "Situation",
+    # NJP V.14 — Phase 4: a teacher's *structure*, verified and kept after the teacher is gone
+    "Teacher", "TeacherCouncil", "RecordedTeacher", "CortexTeacher",
+    "Lesson", "Step", "Verification", "TeachingVerdict", "Distiller", "Distillation",
 ]
