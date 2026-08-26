@@ -178,7 +178,7 @@ def test_a_change_that_damages_the_language_surface_is_refused():
     harmful = Mutation(kind="representation", name="wreck",
                        apply=lambda b: (setattr(b, "grounder", None), True)[1],
                        revert=lambda b: True)
-    adversarial, regression, note = brain.evolution._gates(brain, harmful)
+    adversarial, regression, _honest, note = brain.evolution._gates(brain, harmful)
     assert not (adversarial and regression)
     assert note
 
@@ -187,7 +187,7 @@ def test_a_harmless_change_clears_both_gates():
     brain = NJPBrain()
     benign = Mutation(kind="representation", name="noop",
                       apply=lambda b: True, revert=lambda b: True)
-    adversarial, regression, note = brain.evolution._gates(brain, benign)
+    adversarial, regression, _honest, note = brain.evolution._gates(brain, benign)
     assert adversarial and regression
     assert note == ""
 
@@ -197,7 +197,7 @@ def test_a_gate_that_cannot_run_refuses():
     box = CognitiveEvolution()
     exploding = Mutation(kind="representation", name="boom",
                          apply=lambda b: (_ for _ in ()).throw(RuntimeError("no")))
-    adversarial, regression, note = box._gates(SimpleNamespace(), exploding)
+    adversarial, regression, _honest, note = box._gates(SimpleNamespace(), exploding)
     assert not adversarial and not regression
     # And the reason says what went wrong, because "a gate failed" is the report that gets a
     # gate quietly disabled by whoever reads it next.

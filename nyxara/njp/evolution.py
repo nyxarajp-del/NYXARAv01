@@ -239,6 +239,9 @@ class EvolutionTrial:
     adversarial_passed: Optional[bool] = None
     regression_passed: Optional[bool] = None
     rows: int = 0
+    #: Set when the candidate's own measure rose while another axis fell — a win it traded for
+    #: rather than earned. See :mod:`nyxara.njp.immune`.
+    hacked: bool = False
     promoted: bool = False
     unmeasurable: bool = False
     why: str = ""
@@ -256,7 +259,7 @@ class EvolutionTrial:
                 "candidate": None if self.candidate is None else round(self.candidate, 5),
                 "gain": round(self.gain, 5), "rows": self.rows,
                 "adversarial_passed": self.adversarial_passed,
-                "regression_passed": self.regression_passed,
+                "regression_passed": self.regression_passed, "hacked": self.hacked,
                 "promoted": self.promoted, "unmeasurable": self.unmeasurable,
                 "why": self.why[:240], "ms": round(self.ms, 2)}
 
@@ -287,6 +290,10 @@ class CognitiveEvolution:
         self.total_gain = 0.0
         #: What the loop currently feeds the dynamics model. Changed only by a promotion.
         self.encoding = DEFAULT_ENCODING
+        #: The third gate. Reads the axes the two batteries already produced and refuses a
+        #: candidate whose own measure rose while another fell.
+        from nyxara.njp.immune import RewardHacking
+        self.immune = RewardHacking()
         self.adopted: List[Dict[str, Any]] = []
         self._rejected: set = set()
         #: ``(scored, correct)`` at the last promotion, so what happened *after* it can be read
@@ -816,9 +823,10 @@ class CognitiveEvolution:
                              f"{measured.rows} rows, wants +{required:.4f})")
                 return trial
 
-            trial.adversarial_passed, trial.regression_passed, note = self._gates(
-                brain, trial.mutation)
-            if not (trial.adversarial_passed and trial.regression_passed):
+            (trial.adversarial_passed, trial.regression_passed,
+             honest, note) = self._gates(brain, trial.mutation, gain=gain)
+            trial.hacked = not honest
+            if not (trial.adversarial_passed and trial.regression_passed and honest):
                 self._rejected.add(trial.mutation.signature)
                 self.refused += 1
                 trial.why = note or "a battery got worse"
@@ -858,8 +866,14 @@ class CognitiveEvolution:
         eligible, rates = self._policy(brain)
         return self._selection_score(brain, eligible, rates)
 
-    def _gates(self, brain: Any, mutation: Mutation) -> Tuple[bool, bool, str]:
-        """The adversarial battery and the seven-stage curve, on fresh brains, before and after.
+    def _gates(self, brain: Any, mutation: Mutation,
+               *, gain: float = 0.0) -> Tuple[bool, bool, bool, str]:
+        """The adversarial battery, the seven-stage curve, and where the win came from.
+
+        Three answers, and the third is the one Phase 7 shipped without: a candidate that raises
+        the number it is scored on while lowering generalisation has found the measure rather than
+        improved her. See :mod:`nyxara.njp.immune`. It costs nothing extra — both batteries are
+        already run here, and their per-axis detail was being reduced to one boolean and dropped.
 
         Both take a ``prepare`` hook precisely so a change made outside them can be measured by
         them. Neither is expected to *improve* — both sit at their ceiling — and that is what makes
@@ -867,7 +881,7 @@ class CognitiveEvolution:
         evidence that nothing was broken on the way to it.
         """
         if not self.gates:
-            return True, True, ""
+            return True, True, True, ""
         try:
             from nyxara.eval.adversarial import run_adversarial_benchmark
             from nyxara.eval.intelligence import run_intelligence_benchmark
@@ -889,12 +903,12 @@ class CognitiveEvolution:
             before = run_adversarial_benchmark(seed=20260823)
             after = run_adversarial_benchmark(seed=20260823, prepare=prepare)
             if failures:
-                return False, False, (f"the change could not be put into the sandbox brains "
-                                      f"({failures[0]}), so the batteries measured a brain it "
-                                      f"was never in")
+                return False, False, True, (
+                    f"the change could not be put into the sandbox brains ({failures[0]}), so "
+                    f"the batteries measured a brain it was never in")
             adversarial = self._not_worse(before, after)
             if not adversarial:
-                return False, False, "the adversarial battery got worse"
+                return False, False, True, "the adversarial battery got worse"
 
             # A *different* seed for the regression gate. The candidate has now been measured
             # twice; a third measurement on the same problems would only say the first two were
@@ -902,14 +916,23 @@ class CognitiveEvolution:
             old = run_intelligence_benchmark(seed=7, width=4)
             new = run_intelligence_benchmark(seed=7, width=4, prepare=prepare)
             if failures:
-                return False, False, (f"the change could not be put into the sandbox brains "
-                                      f"({failures[0]})")
+                return False, False, True, (
+                    f"the change could not be put into the sandbox brains ({failures[0]})")
             regression = float(getattr(new, "mean", 0.0) or 0.0) >= (
                 float(getattr(old, "mean", 0.0) or 0.0) - 1e-9)
+
+            # The third gate, off the reports already in hand. `before`/`old` are the
+            # unmutated runs; `after`/`new` carry the candidate.
+            verdict = self.immune.check(
+                self.immune.read(adversarial=before, intelligence=old),
+                self.immune.read(adversarial=after, intelligence=new),
+                gain=float(gain))
             note = "" if regression else "the seven-stage curve regressed"
-            return adversarial, regression, note
+            if verdict.hacked:
+                note = verdict.why
+            return adversarial, regression, not verdict.hacked, note
         except Exception:  # noqa: BLE001 — a gate that cannot run is a gate that refuses
-            return False, False, "a gate could not be run, so the change is refused"
+            return False, False, True, "a gate could not be run, so the change is refused"
 
     @staticmethod
     def _not_worse(before: Any, after: Any) -> bool:
@@ -948,6 +971,7 @@ class CognitiveEvolution:
             "refused": self.refused,
             "encoding": self.encoding,
             "total_gain": round(self.total_gain, 5),
+            "immune": self.immune.stats(),
             "adopted": list(self.adopted[-4:]),
             "last": last.to_dict() if last is not None else None,
         }
