@@ -172,6 +172,21 @@ class LoopReport:
     #: better on held-out data and breaking neither battery. Never incremented by trying.
     cognitive_rewires: int = 0
     evolution_trials: int = 0
+    #: Stage G. One goal → plan → action → outcome, on an action she chose rather than a cadence
+    #: that fired. `goals_reached` counts the metric hitting its target, never "she acted".
+    actions_taken: int = 0
+    goals_reached: int = 0
+    #: §27. The eight-term vector, read on a cadence so *change* is visible — a single reading
+    #: answers "how good is she", which `njp.index` says outright it cannot answer.
+    index_scalar: Optional[float] = None
+    index_regressions: int = 0
+    #: §19. One claim through the eight specialists, in order.
+    deliberations: int = 0
+    deliberation_objections: int = 0
+    #: §24's code half. One profile → propose → gauntlet attempt. Enactment stays behind the
+    #: standing authorisation; what this counts is that the pipeline ran and what it decided.
+    edits_attempted: int = 0
+    edits_refused: int = 0
     # goals
     goals_added: int = 0
     goals_blocked: int = 0
@@ -328,6 +343,10 @@ class LearningLoop:
             "assumptions_refuted": 0, "assumptions_open": 0,
             "weaknesses_trained": 0, "weaknesses_closed": 0,
             "cognitive_rewires": 0, "evolution_trials": 0,
+            "actions_taken": 0, "goals_reached": 0,
+            "index_measurements": 0, "index_regressions": 0,
+            "deliberations": 0, "deliberation_objections": 0,
+            "edits_attempted": 0, "edits_refused": 0,
             # Phase 5's milestone is `skills_created > 0`, and it was unanswerable from `stats()`
             # while being true: `_compress_programs` fires on the dream cadence and really did
             # adopt abstractions — measured, 12 solved and 1 adopted on turn 31 — and neither
@@ -1460,6 +1479,15 @@ class LearningLoop:
         if turn % self.evolve_every == 0:
             self._evolve(rep)
 
+        if turn % self.evolve_every == 0:
+            self._measure_index(rep)
+
+        if turn % self.wonder_every == 0:
+            self._deliberate(rep)
+
+        if turn % self.evolve_every == 0:
+            self._propose_edit(rep)
+
         # Before wondering, deliberately. `curiosity._from_assumptions` reads the miner's untested
         # set, so mining has to have run for this turn's questions to include the ones she cannot
         # feel — and testing has to have run for the ones already examined to stop being offered.
@@ -1482,6 +1510,11 @@ class LearningLoop:
                     rep.stage = str(getattr(got, "current", "") or "")
                     rep.stages_mastered = len(getattr(got, "mastered", None) or ())
                     rep.weaknesses_trained = self._train_on_weakness(got)
+                    # And then she acts on it. Phase 6 turned a weakness into work she committed
+                    # to; this is the turn that does some of it. The same assessment feeds both,
+                    # because a goal read from a stale report is a goal about a brain she no
+                    # longer is.
+                    self._pursue(got, rep)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1710,6 +1743,107 @@ class LearningLoop:
             # real transition; it was tried and it is dead code, since the assignment below
             # overwrites it in the same call.
         except Exception:  # noqa: BLE001 — a failed cycle rewires nothing
+            return
+
+    def _propose_edit(self, rep: LoopReport) -> None:
+        """§24's code half: profile → propose → Truth Gauntlet, on a turn cadence.
+
+        `SelfEvolver.beat` has run the whole pipeline correctly from the day it was written and
+        **nothing in a plain session ever called it**: the only caller is `njp/pulse.py`, which
+        beats on wall-clock time and does not run when she is simply being spoken to. So
+        `attempts`, `kept` and `rolled_back` all read zero — not because the loop is broken but
+        because it had never been asked to take a step.
+
+        `force=True` because the loop is the scheduler here; `beat`'s own `every_s` gate exists
+        for the wall-clock caller and applying both would mean two schedulers disagreeing.
+
+        **Enactment is not what this turns on.** Writing to disk stays behind
+        `self_improvement.autonomous_enact`, which the test suite forces off, and the pipeline
+        already stops there and says so. What was missing was everything *before* that line ever
+        happening — and it is the part that produces evidence: measured on one session, she
+        profiled `njp.fabric`, generated a concrete edit, and the gauntlet **refuted** the
+        improvement claim on held-out predictions before it touched anything.
+        """
+        try:
+            evolver = getattr(self.brain, "evolver", None)
+            if evolver is None:
+                return
+            step = evolver.beat(oversight=getattr(self.brain, "oversight", None), force=True)
+            if step is None:
+                return
+            rep.edits_attempted = 1
+            rep.edits_refused = int(not bool(getattr(step, "kept", False)))
+        except Exception:  # noqa: BLE001 — a failed beat changes nothing
+            return
+
+    def _deliberate(self, rep: LoopReport) -> None:
+        """Put her most load-bearing current claim through the eight specialists.
+
+        The claim is her strongest *believed* proposition rather than a random one: a society that
+        deliberates over things nobody is relying on is a committee. What she is actually resting
+        weight on is what is worth attacking.
+        """
+        try:
+            society = getattr(self.brain, "society", None)
+            beliefs = getattr(self.brain, "beliefs", None)
+            if society is None or beliefs is None:
+                return
+            claim = ""
+            top = (beliefs.stats() or {}).get("top")
+            if isinstance(top, dict):
+                claim = str(top.get("claim") or top.get("proposition") or "")
+            if not claim:
+                held = [b for b in getattr(beliefs, "beliefs", {}).values()
+                        if getattr(b, "claim", "")]
+                if held:
+                    claim = str(getattr(max(held, key=lambda b: getattr(b, "confidence", 0.0)),
+                                        "claim", ""))
+            if not claim:
+                return
+            case = society.deliberate(self.brain, claim)
+            rep.deliberations = 1
+            rep.deliberation_objections = len(case.objections)
+        except Exception:  # noqa: BLE001
+            return
+
+    def _measure_index(self, rep: LoopReport) -> None:
+        """Read the intelligence vector, and compare it to the last reading.
+
+        The comparison is the whole of it. `IntelligenceVector.regressions` has been able to say
+        which term went backwards since it was written and had no caller, so a self-improvement
+        loop that made her measurably worse on one axis while improving another had nothing that
+        would notice.
+        """
+        try:
+            index = getattr(self.brain, "index", None)
+            if index is None:
+                return
+            before = int(getattr(index, "regressions_found", 0) or 0)
+            vector = index.track(self.brain)
+            rep.index_scalar = vector.scalar
+            rep.index_regressions = int(getattr(index, "regressions_found", 0) or 0) - before
+        except Exception:  # noqa: BLE001 — an unread index is a missing number, never a failed turn
+            return
+
+    def _pursue(self, report: Any, rep: LoopReport) -> None:
+        """One goal → plan → action → outcome. Stage G, and it had never happened.
+
+        `NJPBrain.pursue`'s docstring argued — correctly, at the time — that calling the planner
+        from the turn loop "would add a scheduled no-op and move a counter off zero without
+        anything having happened". That is exactly the failure this package keeps finding, and it
+        is why this calls :mod:`nyxara.njp.doing` rather than the planner: the actions there are
+        ones she really performs, the goal is the metric the curriculum already says is blocking
+        her, and `goals_reached` counts the metric reaching its target rather than the call
+        returning.
+        """
+        try:
+            doing = getattr(self.brain, "doing", None)
+            if doing is None:
+                return
+            attempt = doing.act(self.brain, report=report)
+            rep.actions_taken = int(bool(getattr(attempt, "ran", False)))
+            rep.goals_reached = int(bool(getattr(attempt, "reached", False)))
+        except Exception:  # noqa: BLE001 — a failed pursuit does nothing, never breaks the turn
             return
 
     def _train_on_weakness(self, report: Any) -> int:
@@ -1945,6 +2079,15 @@ class LearningLoop:
             self.totals["programs_adopted"] += rep.programs_adopted
             self.totals["programs_transferred"] += rep.programs_transferred
             self.totals["weaknesses_trained"] += rep.weaknesses_trained
+            if rep.index_scalar is not None:
+                self.totals["index_measurements"] += 1
+            self.totals["index_regressions"] += rep.index_regressions
+            self.totals["edits_attempted"] += rep.edits_attempted
+            self.totals["edits_refused"] += rep.edits_refused
+            self.totals["deliberations"] += rep.deliberations
+            self.totals["deliberation_objections"] += rep.deliberation_objections
+            self.totals["actions_taken"] += rep.actions_taken
+            self.totals["goals_reached"] += rep.goals_reached
             self.totals["cognitive_rewires"] += rep.cognitive_rewires
             self.totals["evolution_trials"] += rep.evolution_trials
             self.totals["weaknesses_closed"] = self._closed_weaknesses

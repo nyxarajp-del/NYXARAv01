@@ -227,6 +227,17 @@ from nyxara.njp.relevance import (
     revise_confidence,
 )
 from nyxara.njp.blackbox import BlackBox, Episode, FailureMode
+from nyxara.njp.doing import (
+    Affordance,
+    CognitiveAgency,
+    Goal,
+)
+from nyxara.njp.society import (
+    Case,
+    CognitiveSociety,
+    Contribution,
+    Role,
+)
 from nyxara.njp.teacher import (
     CortexTeacher,
     Distillation,
@@ -366,4 +377,7 @@ __all__ = [
     # NJP V.14 — Phase 4: a teacher's *structure*, verified and kept after the teacher is gone
     "Teacher", "TeacherCouncil", "RecordedTeacher", "CortexTeacher",
     "Lesson", "Step", "Verification", "TeachingVerdict", "Distiller", "Distillation",
+    # NJP V.15 — §7 goal → plan → action → outcome, and §19 eight specialists over one claim
+    "CognitiveAgency", "Goal", "Affordance",
+    "CognitiveSociety", "Role", "Case", "Contribution",
 ]

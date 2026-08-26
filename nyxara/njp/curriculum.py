@@ -228,7 +228,11 @@ class Curriculum:
             agent = getattr(brain, "agent", None)
             if agent is not None and hasattr(agent, "stats"):
                 try:
-                    stats["agency"] = agent.stats()
+                    # Merged under whatever `brain.stats()` already reported, never over it.
+                    # `njp.doing` puts the counters Stage G is scored on into that block, and
+                    # overwriting it here would hand the rung back to the planner whose own
+                    # docstring explains why its counters cannot move.
+                    stats["agency"] = {**agent.stats(), **(stats.get("agency") or {})}
                 except Exception:  # noqa: BLE001
                     pass
 

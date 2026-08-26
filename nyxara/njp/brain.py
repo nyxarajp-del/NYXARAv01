@@ -354,6 +354,9 @@ class NJPBrain:
         self.assumptions = self._build_assumptions(c)
         self.blackbox = self._build_blackbox(c)
         self.evolution = self._build_evolution(c)
+        self.doing = self._build_doing(c)
+        self.index = self._build_index(c)
+        self.society = self._build_society(c)
         #: The chain `_strategy_compose` walked on this turn, if it walked one. Set by the
         #: strategy and read by the turn that called it — `MetaReasoner.solve` copies its
         #: context, so there is no other route back.
@@ -694,6 +697,58 @@ class NJPBrain:
             from nyxara.njp.evolution import CognitiveEvolution
             return CognitiveEvolution(gates=bool(self._cfg("evolution_gates", True)))
         except Exception:  # noqa: BLE001 — she keeps the cognition she was written with
+            return None
+
+    def _build_doing(self, c: Any) -> Any:
+        """Stage G: the actions she can actually take, and choosing between them.
+
+        Not a body. A set of cognitive actions she already performs on fixed cadences, plus the
+        one thing nothing did — asking *which of them would move the number that is stuck*. See
+        :mod:`nyxara.njp.doing`.
+        """
+        if not self._gate("doing", True):
+            return None
+        try:
+            from nyxara.njp.doing import CognitiveAgency
+            return CognitiveAgency()
+        except Exception:  # noqa: BLE001 — she keeps acting on the cadence and choosing nothing
+            return None
+
+    def _build_index(self, c: Any) -> Any:
+        """§27: the one number she is not allowed to compute about herself.
+
+        `njp/index.py` has computed the eight-term vector since it was written and **nothing has
+        ever called it** — `measure()` had zero callers in the package, so the engine the plan
+        names as the answer to "capability claim nahi — evidence" produced evidence for nobody.
+        """
+        if not self._gate("index", True):
+            return None
+        try:
+            from nyxara.njp.index import IntelligenceIndex
+            # Width 6, which is the benchmark's own default and not a speed compromise. Four
+            # was tried and it reads `G = 0.000` — the generalization stage teaches six members
+            # and holds four out, so a narrower run does not measure it faster, it measures
+            # something else and reports the answer as a zero. A term silently zeroed by a
+            # config choice takes the whole product with it: `I_t` read 0.0000 while every other
+            # term was healthy.
+            return IntelligenceIndex(seed=self._cfg("index_seed", 0),
+                                     width=self._cfg("index_width", 6))
+        except Exception:  # noqa: BLE001 — she is measured by her organs' counters alone
+            return None
+
+    def _build_society(self, c: Any) -> Any:
+        """§19: eight specialists over one world model, in sequence — never a vote.
+
+        Three of the eight existed before this and none over NJP's world model: `Explorer` and
+        `Skeptic` are classes in `growth/ecosystem.py`, `Scientist` one in `growth/scientist.py`,
+        and Mathematician, Engineer, Historian, Strategist and Judge did not exist at all.
+        """
+        if not self._gate("society", True):
+            return None
+        try:
+            from nyxara.njp.society import CognitiveSociety
+            return CognitiveSociety()
+        except Exception:  # noqa: BLE001 — every organ still works alone, as it always has
             return None
 
     def _build_attention(self, c: Any) -> Any:
@@ -3191,6 +3246,26 @@ class NJPBrain:
             if not text:
                 return ""
             thought.recalled = "taught under this exact question"
+            # **Priced by whether the store still agrees, not left at zero.** This path returns
+            # before anything attaches evidence, so a question asked twice came back as
+            # `believed 0.00` on the second ask while the first read `believed 0.448` — and that
+            # is not a hedge, it is a contradiction, and it feeds calibration, the black box and
+            # the router. Measured at the base commit, so it is not new.
+            #
+            # The number is a check rather than a floor: `learner.answer` walks the same facts
+            # again, and only an answer the walk still reaches gets its confidence. A memory the
+            # store can no longer support keeps today's behaviour, which is the correct outcome
+            # for it — a recalled claim that no longer follows should not be stated confidently.
+            if self.learner is not None:
+                try:
+                    derived = self.learner.answer(thought.stimulus)
+                    if (derived.ok and str(derived.answer or "").strip().lower()
+                            == text.strip().lower()):
+                        thought.derivation = derived
+                        thought.confidence = max(float(thought.confidence or 0.0),
+                                                 float(derived.confidence or 0.0))
+                except Exception:  # noqa: BLE001 — an uncheckable memory is priced as it was
+                    pass
             return text[:1000]
         except Exception:  # noqa: BLE001
             return ""
@@ -3799,6 +3874,9 @@ class NJPBrain:
                             ("cortex", self.cortex), ("router", self.router),
                             ("compiler", self.compiler),
                             ("blackbox", self.blackbox),
+                            ("assumptions", self.assumptions),
+                            ("index", self.index),
+                            ("society", self.society),
                             ("evolution", self.evolution),
                             ("epistemic", self.epistemic)):
             if organ is None:
@@ -3807,6 +3885,18 @@ class NJPBrain:
                 out[name] = organ.stats()
             except Exception:  # noqa: BLE001
                 out[name] = {"error": "stats failed"}
+        # Stage G scores `agency.success_rate`, and until `doing` existed the only thing under
+        # that key was `Agent`, whose counters cannot move without an action vocabulary. Merged
+        # rather than replaced: the planner over the dynamics model is still real and still
+        # reported; what is added is the half that can actually be exercised.
+        if self.doing is not None:
+            try:
+                got = self.doing.stats()
+                out["doing"] = got
+                block = out.get("agency")
+                out["agency"] = {**block, **got} if isinstance(block, dict) else dict(got)
+            except Exception:  # noqa: BLE001
+                pass
         if self.memory is not None:
             try:
                 # The whole surface, not just the count. `recalls_undecided` and
@@ -3907,6 +3997,16 @@ class NJPBrain:
                       "weaknesses_trained", 0)))
             # Phase 7. A knob is the field's business; this is the arrow that says whether
             # anything *structural* has ever survived a benchmark, and it is open until one has.
+            arrow("society→verdict", self.society,
+                  "the specialists have never been run over one claim in sequence",
+                  ran=bool(getattr(self.society, "deliberations", 0)))
+            arrow("progress→measured", self.index,
+                  "the intelligence vector has never been read, so nothing knows whether she "
+                  "is better than she was",
+                  ran=bool(getattr(self.index, "measurements", 0)))
+            arrow("goal→action", self.doing,
+                  "nothing she can do has been chosen and run against a goal",
+                  ran=bool(getattr(self.doing, "acted", 0)))
             arrow("weakness→rewire", self.evolution,
                   "no structural change has measured better than what she was written with",
                   ran=bool(getattr(self.evolution, "cognitive_rewires", 0)))
