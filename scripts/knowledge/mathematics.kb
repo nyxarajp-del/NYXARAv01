@@ -1,0 +1,72 @@
+# mathematics.kb — definitions and named results, not exercises. Anything computable belongs in
+# growth/synthesis, which generates it and proves it; what a fact store can hold is what a thing
+# is called and what it is for.
+
+# --- numbers ----------------------------------------------------------------------------------#
+mathematics | is_a=formal science | has_kind=arithmetic | has_kind=algebra | has_kind=geometry | has_kind=calculus | has_kind=statistics | involves=proof | involves=abstraction
+number | has_kind=natural number | has_kind=integer | has_kind=rational number | has_kind=irrational number | has_kind=real number | has_kind=complex number
+natural number | is_a=number | means=a counting number | has_property=whole | has_property=not negative
+integer | is_a=number | means=a whole number, positive, negative or zero
+rational number | is_a=number | means=a number that can be written as one integer over another
+irrational number | is_a=number | means=a number that cannot be written as a ratio of integers | has_kind=pi | has_kind=the square root of two
+prime number | is_a=natural number | means=a number greater than one whose only divisors are one and itself | has_property=infinitely many | has_kind=two | has_kind=three | has_kind=five | has_kind=seven
+composite number | is_a=natural number | means=a number with a divisor other than one and itself
+zero | is_a=integer | has_property=the additive identity | has_property=neither positive nor negative
+pi | is_a=irrational number | means=the ratio of a circle's circumference to its diameter | has_property=approximately three point one four one six | symbol=π
+fraction | is_a=number | has_part=numerator | has_part=denominator | means=a part of a whole
+percentage | is_a=ratio | means=a number expressed as a part of one hundred | symbol=%
+factorial | is_a=function | means=the product of all positive integers up to a given number | purpose=counting arrangements
+
+# --- operations and algebra -------------------------------------------------------------------#
+arithmetic | is_a=branch of mathematics | has_part=addition | has_part=subtraction | has_part=multiplication | has_part=division
+addition | is_a=arithmetic operation | has_property=commutative | has_property=associative | symbol=+
+subtraction | is_a=arithmetic operation | has_property=not commutative | symbol=-
+multiplication | is_a=arithmetic operation | has_property=commutative | has_property=distributive over addition | symbol=×
+division | is_a=arithmetic operation | has_property=undefined by zero | symbol=÷
+algebra | is_a=branch of mathematics | involves=variables | involves=equations | purpose=stating a relation that holds for many numbers
+variable | is_a=symbol | purpose=standing for an unknown or changing quantity
+equation | is_a=mathematical statement | means=an assertion that two expressions are equal | has_part=left hand side | has_part=right hand side
+function | is_a=mathematical object | means=a rule assigning exactly one output to each input | has_part=domain | has_part=range
+polynomial | is_a=expression | consists_of=terms | has_part=coefficient | has_part=exponent
+quadratic equation | is_a=equation | has_property=degree two | capable_of=have two real roots | requires=the quadratic formula to solve in general
+logarithm | is_a=function | means=the exponent to which a base must be raised to give a number | purpose=turning multiplication into addition | inventor=John Napier
+matrix | is_a=mathematical object | means=a rectangular array of numbers | purpose=representing linear transformations | purpose=solving systems of equations
+vector | is_a=mathematical object | has_property=magnitude | has_property=direction | purpose=representing quantities with direction
+
+# --- geometry -----------------------------------------------------------------------------------#
+geometry | is_a=branch of mathematics | involves=shape | involves=size | involves=position | author=Euclid
+point | is_a=geometric object | has_property=no dimension | has_property=a position only
+line | is_a=geometric object | has_property=one dimension | has_property=infinite in both directions
+angle | is_a=geometric quantity | unit=degree | means=the amount of turn between two lines | has_kind=acute angle | has_kind=right angle | has_kind=obtuse angle
+triangle | is_a=polygon | has_property=three sides | has_property=interior angles summing to one hundred and eighty degrees | has_kind=equilateral triangle | has_kind=isosceles triangle | has_kind=scalene triangle
+square | is_a=quadrilateral | has_property=four equal sides | has_property=four right angles
+rectangle | is_a=quadrilateral | has_property=four right angles | has_property=opposite sides equal
+circle | is_a=plane figure | has_part=centre | has_part=radius | has_part=diameter | has_part=circumference | has_property=every point equidistant from the centre
+polygon | is_a=plane figure | has_property=straight sides | has_kind=triangle | has_kind=quadrilateral | has_kind=pentagon | has_kind=hexagon
+sphere | is_a=solid | has_property=every surface point equidistant from the centre
+cube | is_a=solid | has_property=six square faces | has_property=twelve edges | has_property=eight vertices
+Pythagorean Theorem | is_a=mathematical theorem | means=in a right triangle the square on the hypotenuse equals the sum of the squares on the other two sides | author=Pythagoras | purpose=finding an unknown side
+area | is_a=measure | means=the extent of a surface | unit=square metre
+volume | is_a=measure | means=the space a solid occupies | unit=cubic metre
+perimeter | is_a=measure | means=the distance around a plane figure
+trigonometry | is_a=branch of mathematics | involves=triangles | involves=angles | has_part=sine | has_part=cosine | has_part=tangent | purpose=finding distances that cannot be measured directly
+
+# --- analysis, probability and logic ----------------------------------------------------------- #
+calculus | is_a=branch of mathematics | has_part=differentiation | has_part=integration | inventor=Isaac Newton and Gottfried Leibniz | purpose=describing change
+derivative | is_a=mathematical object | means=the instantaneous rate of change of a function | purpose=finding maxima and minima
+integral | is_a=mathematical object | means=the accumulated area under a curve | purpose=finding totals from rates
+limit | is_a=mathematical concept | means=the value a function approaches as its input approaches a point
+infinity | is_a=mathematical concept | has_property=larger than any number | has_property=not a real number | symbol=∞
+probability | is_a=branch of mathematics | means=a measure of how likely an event is | has_property=between zero and one | purpose=reasoning under uncertainty
+statistics | is_a=branch of mathematics | involves=data | involves=inference | purpose=drawing conclusions from samples
+mean | is_a=measure of central tendency | means=the sum of the values divided by their count | also_known_as=the average
+median | is_a=measure of central tendency | means=the middle value when the data are ordered | has_property=robust to outliers
+mode | is_a=measure of central tendency | means=the most frequent value
+standard deviation | is_a=measure of spread | means=the typical distance of a value from the mean
+normal distribution | is_a=probability distribution | has_property=symmetric | has_property=bell shaped | occurs_when=many small independent effects add up
+correlation | is_a=statistical measure | means=the degree to which two variables move together | has_property=not the same as causation
+logic | is_a=formal discipline | involves=inference | involves=truth values | has_kind=propositional logic | has_kind=predicate logic
+proof | is_a=argument | purpose=establishing a mathematical statement beyond doubt | has_kind=direct proof | has_kind=proof by contradiction | has_kind=proof by induction
+theorem | is_a=mathematical statement | requires=a proof
+axiom | is_a=mathematical statement | has_property=assumed without proof | purpose=serving as a starting point
+set | is_a=mathematical object | means=a collection of distinct objects | has_part=element

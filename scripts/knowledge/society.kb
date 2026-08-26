@@ -1,0 +1,73 @@
+# society.kb — government, law, belief, art and sport: the shared institutions people ask about
+# most and that a purely scientific corpus leaves out entirely.
+#
+# Where a claim is contested rather than settled, it is written as what a thing *is* or *aims at*
+# rather than as a verdict on it. A fact store is a poor place to keep an argument.
+
+# --- government and politics -------------------------------------------------------------------------------#
+government | is_a=institution | purpose=making and enforcing rules for a society | has_part=executive | has_part=legislature | has_part=judiciary | has_kind=democracy | has_kind=monarchy | has_kind=republic
+democracy | is_a=system of government | means=government in which power rests with the people through elected representatives | requires=elections | requires=free expression | requires=the rule of law
+republic | is_a=system of government | means=a state in which the head of state is elected rather than inherited
+monarchy | is_a=system of government | means=a state headed by a king or queen | has_kind=constitutional monarchy | has_kind=absolute monarchy
+dictatorship | is_a=system of government | means=rule by one person or group without effective checks | causes=suppression of opposition
+election | is_a=political process | purpose=choosing representatives | requires=voters | requires=candidates | requires=a count
+vote | is_a=political act | purpose=expressing a preference in an election
+constitution | is_a=document | purpose=setting out how a state is governed | purpose=limiting the powers of government
+parliament | is_a=legislature | purpose=making laws | purpose=holding the executive to account | has_part=member
+executive | is_a=branch of government | purpose=carrying out the law
+judiciary | is_a=branch of government | purpose=interpreting the law | purpose=settling disputes | requires=independence
+separation of powers | is_a=constitutional principle | purpose=stopping any one branch from holding all power | requires=three branches
+citizen | is_a=person | means=a member of a state with rights and duties | requires=nationality
+United Nations | is_a=international organisation | means=the body founded in 1945 to keep international peace | has_part=the Security Council | has_part=the General Assembly | purpose=coordinating between states
+diplomacy | is_a=practice | purpose=managing relations between states without force | requires=negotiation
+
+# --- law ----------------------------------------------------------------------------------------------------#
+law | is_a=system of rules | purpose=ordering behaviour in a society | requires=enforcement | has_kind=criminal law | has_kind=civil law | has_kind=constitutional law
+criminal law | is_a=law | purpose=defining offences against society | causes=punishment on conviction
+civil law | is_a=law | purpose=settling disputes between private parties | causes=compensation rather than punishment
+court | is_a=institution | purpose=deciding cases according to law | has_part=judge | has_part=evidence
+judge | is_a=person | purpose=deciding a case impartially | requires=independence
+evidence | is_a=information | purpose=establishing what happened in a case | requires=relevance
+contract | is_a=legal agreement | requires=agreement between the parties | causes=obligations enforceable at law
+right | is_a=entitlement | means=a claim a person may make that others must respect | has_kind=civil right | has_kind=human right
+human rights | is_a=set of rights | has_property=held by every person | purpose=protecting people from abuse of power
+presumption of innocence | is_a=legal principle | means=that a person is treated as innocent until proved guilty | purpose=protecting the accused from wrongful punishment
+police | is_a=institution | purpose=enforcing the law | purpose=keeping public order
+
+# --- belief and philosophy ---------------------------------------------------------------------------------------#
+religion | is_a=cultural system | involves=belief | involves=ritual | involves=community | has_kind=Christianity | has_kind=Islam | has_kind=Hinduism | has_kind=Buddhism | has_kind=Judaism | has_kind=Sikhism
+Christianity | is_a=religion | has_part=the Bible | has_property=centred on the teachings of Jesus
+Islam | is_a=religion | has_part=the Quran | has_property=centred on the teachings revealed to Muhammad
+Hinduism | is_a=religion | has_part=the Vedas | located_in=India | has_property=among the oldest living traditions
+Buddhism | is_a=religion | has_part=the four noble truths | has_property=founded on the teaching of the Buddha
+Judaism | is_a=religion | has_part=the Torah
+Sikhism | is_a=religion | has_part=the Guru Granth Sahib | located_in=Punjab
+philosophy | is_a=discipline | has_kind=metaphysics | has_kind=epistemology | has_kind=ethics | has_kind=logic | purpose=examining fundamental questions by argument
+ethics | is_a=branch of philosophy | involves=right and wrong | purpose=working out how one ought to act
+epistemology | is_a=branch of philosophy | involves=knowledge | involves=justification | purpose=asking what it takes to know something
+metaphysics | is_a=branch of philosophy | involves=existence | involves=causation
+scientific method | is_a=method | has_part=observation | has_part=hypothesis | has_part=experiment | has_part=analysis | has_part=conclusion | purpose=testing an explanation against evidence | requires=reproducibility
+hypothesis | is_a=proposed explanation | requires=testability | purpose=making a prediction that could fail
+experiment | is_a=procedure | purpose=testing a hypothesis under controlled conditions | requires=a control@0.8
+peer review | is_a=process | purpose=checking research before publication | requires=independent experts
+
+# --- culture, art and sport ----------------------------------------------------------------------------------------#
+culture | is_a=shared way of life | has_part=language | has_part=custom | has_part=art | has_part=belief | capable_of=change over generations
+art | is_a=human activity | purpose=expressing and provoking feeling and thought | has_kind=painting | has_kind=sculpture | has_kind=music | has_kind=literature | has_kind=dance | has_kind=film
+music | is_a=art form | has_part=rhythm | has_part=melody | has_part=harmony | purpose=expressing feeling
+literature | is_a=art form | has_kind=novel | has_kind=poetry | has_kind=drama | purpose=telling and examining human experience
+novel | is_a=literary form | means=an extended fictional prose narrative
+poetry | is_a=literary form | involves=rhythm | involves=imagery | has_property=compressed
+painting | is_a=art form | requires=pigment | requires=a surface
+theatre | is_a=art form | purpose=performing a story before an audience | has_part=actor | has_part=stage
+film | is_a=art form | purpose=telling a story in moving images | has_part=camera | has_part=script | has_part=editing
+museum | is_a=institution | purpose=preserving and displaying objects of value | purpose=teaching the public
+sport | is_a=activity | purpose=competing under agreed rules | purpose=physical exercise | has_kind=football | has_kind=cricket | has_kind=athletics | has_kind=swimming
+football | is_a=sport | has_property=eleven players a side | purpose=scoring goals | also_known_as=soccer
+cricket | is_a=sport | has_part=bat | has_part=ball | has_part=wicket | located_in=much of the Commonwealth
+Olympic Games | is_a=sporting event | occurs_when=every four years | purpose=bringing athletes of many nations together
+festival | is_a=cultural event | purpose=marking a season or an anniversary together | causes=shared celebration
+tradition | is_a=cultural practice | means=a practice handed down across generations | causes=continuity
+education | is_a=social institution | purpose=passing knowledge and skills to the next generation | causes=greater opportunity | requires=teachers
+literacy | is_a=skill | means=the ability to read and write | causes=access to written knowledge
+journalism | is_a=practice | purpose=reporting events to the public | requires=verification | causes=public accountability

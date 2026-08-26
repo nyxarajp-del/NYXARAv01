@@ -1,0 +1,57 @@
+# language.kb — the parts of speech, the machinery of writing, and the named languages a general
+# education recognises. This is the domain a language model most needs to be able to *say*, as
+# opposed to merely do.
+
+# --- structure --------------------------------------------------------------------------------------#
+language | is_a=system of communication | has_part=phonology | has_part=morphology | has_part=syntax | has_part=semantics | has_part=pragmatics | capable_of=change over time
+linguistics | is_a=discipline | purpose=studying language scientifically | has_kind=phonetics | has_kind=syntax | has_kind=semantics | has_kind=sociolinguistics
+grammar | is_a=set of rules | means=the rules by which words combine into sentences | has_part=syntax | has_part=morphology
+syntax | is_a=branch of grammar | involves=word order | involves=sentence structure
+semantics | is_a=branch of linguistics | involves=meaning | purpose=explaining what an expression refers to
+pragmatics | is_a=branch of linguistics | involves=context | purpose=explaining what a speaker means beyond what is said
+phoneme | is_a=unit of sound | means=the smallest sound that distinguishes one word from another
+morpheme | is_a=unit of meaning | means=the smallest part of a word that carries meaning
+word | is_a=unit of language | consists_of=morphemes | has_kind=noun | has_kind=verb | has_kind=adjective | has_kind=adverb | has_kind=pronoun | has_kind=preposition | has_kind=conjunction
+sentence | is_a=unit of language | has_part=subject | has_part=predicate | means=a group of words expressing a complete thought
+noun | is_a=part of speech | means=a word naming a person, place, thing or idea | has_kind=proper noun | has_kind=common noun | has_kind=abstract noun
+verb | is_a=part of speech | means=a word expressing an action or a state | has_part=tense | has_kind=transitive verb | has_kind=intransitive verb
+adjective | is_a=part of speech | purpose=describing a noun
+adverb | is_a=part of speech | purpose=modifying a verb, an adjective or another adverb
+pronoun | is_a=part of speech | purpose=standing in for a noun
+preposition | is_a=part of speech | purpose=relating a noun to another word
+conjunction | is_a=part of speech | purpose=joining words or clauses
+tense | is_a=grammatical category | purpose=locating an event in time | has_kind=past tense | has_kind=present tense | has_kind=future tense
+subject | is_a=sentence element | means=the thing a sentence is about
+predicate | is_a=sentence element | means=what the sentence says about the subject
+clause | is_a=grammatical unit | has_part=subject | has_part=verb | has_kind=main clause | has_kind=subordinate clause
+
+# --- writing and meaning ------------------------------------------------------------------------------#
+alphabet | is_a=writing system | means=a set of letters standing for sounds | has_kind=the Latin alphabet | has_kind=the Greek alphabet | has_kind=the Cyrillic alphabet
+writing system | has_kind=alphabet | has_kind=syllabary | has_kind=logographic script | purpose=recording language in a durable form
+script | is_a=writing system | has_kind=Devanagari | has_kind=Arabic script | has_kind=Han characters
+punctuation | is_a=set of written marks | purpose=showing structure and pause in writing | has_kind=full stop | has_kind=comma | has_kind=question mark
+metaphor | is_a=figure of speech | means=describing one thing as if it were another | purpose=making an idea vivid
+simile | is_a=figure of speech | means=a comparison using like or as
+idiom | is_a=expression | means=a phrase whose meaning is not the sum of its words | has_property=hard to translate literally
+synonym | is_a=word relation | means=a word with nearly the same meaning as another
+antonym | is_a=word relation | means=a word with the opposite meaning
+homonym | is_a=word relation | means=a word spelled or sounded the same as another with a different meaning | causes=ambiguity
+ambiguity | is_a=property of language | occurs_when=an expression allows more than one reading | causes=misunderstanding
+etymology | is_a=branch of linguistics | purpose=tracing where a word came from
+dialect | is_a=variety of a language | means=a regional or social form of a language | has_property=mutually intelligible with the standard form@0.8
+translation | is_a=process | purpose=rendering meaning from one language into another | requires=knowledge of both languages | has_property=never exact for idiom
+
+# --- named languages -----------------------------------------------------------------------------------#
+English | is_a=language | is_a=Germanic language | has_property=the most widely used second language | has_property=written in the Latin alphabet
+Hindi | is_a=language | is_a=Indo-Aryan language | has_property=written in Devanagari | located_in=India
+Mandarin Chinese | is_a=language | has_property=the most spoken first language | has_property=written in Han characters | has_property=tonal
+Spanish | is_a=language | is_a=Romance language | located_in=Spain and Latin America
+Arabic | is_a=language | is_a=Semitic language | has_property=written right to left
+French | is_a=language | is_a=Romance language | located_in=France
+Bengali | is_a=language | is_a=Indo-Aryan language | located_in=Bengal
+Russian | is_a=language | is_a=Slavic language | has_property=written in Cyrillic
+Portuguese | is_a=language | is_a=Romance language | located_in=Portugal and Brazil
+Japanese | is_a=language | has_property=written with three scripts | located_in=Japan
+Sanskrit | is_a=language | is_a=classical language | has_property=written in Devanagari | purpose=the liturgical language of Hinduism
+Latin | is_a=language | is_a=classical language | causes=the Romance languages | purpose=scientific naming
+Esperanto | is_a=constructed language | inventor=L. L. Zamenhof | purpose=serving as a neutral second language

@@ -1,0 +1,92 @@
+# history.kb — periods, turning points and the people a general education names.
+#
+# Dates live inside ``means`` clauses rather than in a predicate of their own, because the
+# question grammar has no date form and "world war two occurs when 1945" is not a sentence. A
+# definition that carries its own dates stays grammatical and stays answerable.
+#
+# The selection is deliberately wide rather than deep, and it is a selection: a fact store that
+# claimed to hold "all of history" would be lying about a subject that is mostly interpretation.
+# What is here is the skeleton of names and dates that interpretation hangs on.
+
+# --- periods -------------------------------------------------------------------------------------#
+history | is_a=discipline | purpose=understanding the past from evidence | involves=sources | involves=interpretation | requires=evidence
+prehistory | is_a=historical period | means=the time before written records
+Stone Age | is_a=historical period | means=the long period in which tools were made of stone | has_part=Palaeolithic | has_part=Neolithic
+Bronze Age | is_a=historical period | means=the period from about 3300 BC when bronze tools came into use | requires=copper | requires=tin
+Iron Age | is_a=historical period | means=the period from about 1200 BC when iron working spread
+Neolithic Revolution | is_a=historical transition | means=the shift from foraging to farming, from about 10000 BC | causes=permanent settlement | causes=food surplus | causes=the first cities
+Classical Antiquity | is_a=historical period | means=the era of Greece and Rome, roughly 800 BC to 500 AD
+Middle Ages | is_a=historical period | means=the period in Europe from about 500 to 1500 | also_known_as=the medieval period
+Renaissance | is_a=historical period | means=the European revival of art and learning from the fourteenth to the seventeenth century | located_in=Europe | causes=new painting techniques | causes=renewed interest in classical texts
+Age of Exploration | is_a=historical period | means=the European voyages of the fifteenth and sixteenth centuries | causes=contact between continents | causes=colonial empires
+Enlightenment | is_a=intellectual movement | means=the eighteenth century emphasis on reason and individual rights | causes=constitutional government | causes=modern science
+Industrial Revolution | is_a=historical transition | means=the shift to machine production from about 1760 | located_in=Britain | causes=urbanisation | causes=factory work | causes=rising fossil fuel use | requires=coal | requires=the steam engine
+Cold War | is_a=historical period | means=the rivalry between the United States and the Soviet Union from 1947 to 1991 | causes=the arms race | causes=the space race | causes=proxy wars
+Information Age | is_a=historical period | means=the era from the late twentieth century in which computing reshaped work and communication | requires=the computer | requires=the internet
+
+# --- civilisations ---------------------------------------------------------------------------------#
+Ancient Egypt | is_a=civilisation | located_in=the Nile valley | has_part=the pyramids | has_part=hieroglyphs | has_property=lasting about three thousand years
+Mesopotamia | is_a=civilisation | located_in=between the Tigris and Euphrates | also_known_as=the cradle of civilisation | causes=cuneiform writing | causes=the first cities
+Indus Valley Civilisation | is_a=civilisation | located_in=South Asia | has_part=Mohenjo-daro | has_part=Harappa | has_property=planned cities with drainage
+Ancient Greece | is_a=civilisation | causes=democracy | causes=Western philosophy | has_part=Athens | has_part=Sparta
+Roman Empire | is_a=empire | capital=Rome | has_part=the Senate | causes=Roman law | causes=aqueducts and roads | means=the Mediterranean state that lasted in the west until 476
+Maurya Empire | is_a=empire | located_in=India | has_part=Ashoka's edicts
+Mughal Empire | is_a=empire | located_in=India | has_part=the Taj Mahal | means=the Indian empire founded in 1526
+Ottoman Empire | is_a=empire | capital=Constantinople | means=the state that ruled from 1299 until 1922
+Byzantine Empire | is_a=empire | capital=Constantinople | means=the eastern continuation of the Roman empire until 1453
+Han Dynasty | is_a=dynasty | located_in=China | causes=the Silk Road trade
+Silk Road | is_a=trade network | purpose=carrying goods between China and the Mediterranean | causes=exchange of ideas | causes=spread of disease
+
+# --- turning points -----------------------------------------------------------------------------------#
+Printing Press | is_a=invention | inventor=Johannes Gutenberg | means=the movable type press of about 1440 | causes=cheap books | causes=mass literacy | causes=the spread of the Reformation
+French Revolution | is_a=revolution | means=the overthrow of the French monarchy beginning in 1789 | causes=the end of feudal privilege | causes=the declaration of the rights of man
+American Revolution | is_a=revolution | means=the war from 1775 to 1783 in which thirteen colonies left British rule | causes=the United States
+World War One | is_a=war | means=the global war fought from 1914 to 1918 | causes=the collapse of four empires | causes=the Treaty of Versailles
+World War Two | is_a=war | means=the global war fought from 1939 to 1945 | occurs_when=Germany invaded Poland in 1939 | causes=the United Nations | causes=the decolonisation of Asia and Africa
+Indian Independence | is_a=historical event | means=the end of British rule in India in 1947 | causes=the partition of India and Pakistan
+Moon Landing | is_a=historical event | means=the first crewed landing on the moon in 1969 | requires=the Apollo programme
+Fall of the Berlin Wall | is_a=historical event | means=the opening of the border between East and West Berlin in 1989 | causes=German reunification
+Universal Declaration of Human Rights | is_a=document | means=the declaration adopted by the United Nations in 1948 | purpose=setting out rights held by every person
+
+# --- people --------------------------------------------------------------------------------------------#
+#
+# ``author``, ``discoverer`` and ``inventor`` run from the *work* to the *person*, because that is
+# the direction the question runs: "tell me the author of Hamlet". Written the other way round —
+# ``william shakespeare | author=Hamlet`` — it says Shakespeare's author is Hamlet, and the parser
+# rejects the file for it, because a second work would then read as a contradiction. So people are
+# described by what they are, and their works stand as subjects of their own.
+
+Albert Einstein | is_a=physicist | is_a=Nobel laureate | birthplace=Ulm | has_property=the author of the theory of relativity
+Theory of Relativity | is_a=physical theory | author=Albert Einstein
+Isaac Newton | is_a=physicist | is_a=mathematician | birthplace=Woolsthorpe | has_property=the author of the laws of motion
+Principia Mathematica | is_a=book | author=Isaac Newton | means=the 1687 work setting out the laws of motion and universal gravitation
+Law of Universal Gravitation | is_a=physical law | discoverer=Isaac Newton | means=every mass attracts every other mass in proportion to their masses
+Marie Curie | is_a=physicist | is_a=chemist | birthplace=Warsaw | has_property=the first person to win two Nobel prizes
+Polonium | is_a=chemical element | symbol=Po | discoverer=Marie Curie
+Radium | is_a=chemical element | symbol=Ra | discoverer=Marie Curie | has_property=radioactive
+Charles Darwin | is_a=naturalist | birthplace=Shrewsbury | has_property=the author of On the Origin of Species
+On the Origin of Species | is_a=book | author=Charles Darwin | means=the 1859 work setting out evolution by natural selection
+Galileo Galilei | is_a=astronomer | is_a=physicist | birthplace=Pisa | capable_of=improve the telescope
+Moons of Jupiter | is_a=astronomical discovery | discoverer=Galileo Galilei
+Leonardo Da Vinci | is_a=polymath | is_a=painter | is_a=engineer | birthplace=Vinci
+Mona Lisa | is_a=painting | author=Leonardo da Vinci | located_in=the Louvre
+William Shakespeare | is_a=playwright | is_a=poet | birthplace=Stratford-upon-Avon
+Hamlet | is_a=play | author=William Shakespeare
+Macbeth | is_a=play | author=William Shakespeare
+Romeo and Juliet | is_a=play | author=William Shakespeare
+Mahatma Gandhi | is_a=political leader | birthplace=Porbandar | has_property=the leader of the Indian independence movement | has_property=an advocate of nonviolent resistance
+Nelson Mandela | is_a=political leader | birthplace=Mvezo | has_property=the first president of a democratic South Africa | purpose=ending apartheid
+Ada Lovelace | is_a=mathematician | birthplace=London | has_property=the author of the first published algorithm for a machine
+Alan Turing | is_a=mathematician | is_a=computer scientist | birthplace=London | purpose=breaking the Enigma cipher
+Turing Test | is_a=thought experiment | author=Alan Turing | purpose=asking whether a machine's replies are distinguishable from a person's
+Aristotle | is_a=philosopher | has_property=from ancient Greece | has_property=a founder of formal logic
+Nicomachean Ethics | is_a=book | author=Aristotle
+Confucius | is_a=philosopher | has_property=from ancient China | has_property=the teacher whose sayings were collected in the Analects
+Socrates | is_a=philosopher | has_property=a founder of Western philosophy | purpose=teaching by questioning
+Cleopatra | is_a=ruler | has_property=from ancient Egypt | has_property=the last active pharaoh
+Genghis Khan | is_a=military leader | has_property=the founder of the Mongol empire
+Christopher Columbus | is_a=explorer | means=the navigator whose 1492 voyage began sustained European contact with the Americas
+Louis Pasteur | is_a=chemist | is_a=microbiologist | birthplace=Dole
+Pasteurisation | is_a=process | discoverer=Louis Pasteur | purpose=killing pathogens in food by heating
+Germ Theory of Disease | is_a=scientific theory | means=many diseases are caused by microorganisms | causes=antiseptic surgery | causes=modern hygiene
+Florence Nightingale | is_a=nurse | is_a=statistician | birthplace=Florence | purpose=founding modern nursing

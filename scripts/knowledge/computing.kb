@@ -1,0 +1,106 @@
+# computing.kb — hardware, software, networks, data and the parts of machine learning a system
+# that is itself a learning system ought to be able to name. This is the domain where a wrong
+# fact is most likely to be noticed by the person using her, so it is the one written most
+# carefully.
+
+# --- hardware -----------------------------------------------------------------------------------#
+computer | is_a=machine | purpose=processing data | has_part=processor | has_part=memory | has_part=storage | has_part=input device | has_part=output device
+processor | is_a=hardware component | also_known_as=CPU | purpose=executing instructions | has_part=control unit | has_part=arithmetic logic unit | has_part=register | has_part=cache
+CPU | means=central processing unit | is_a=processor
+GPU | means=graphics processing unit | is_a=processor | purpose=parallel computation | purpose=training neural networks | has_property=many simple cores
+memory | is_a=hardware component | purpose=holding data the processor is working on | has_kind=RAM | has_kind=ROM | has_kind=cache
+RAM | means=random access memory | is_a=memory | has_property=volatile | has_property=fast
+storage | is_a=hardware component | purpose=keeping data when the power is off | has_kind=hard disk drive | has_kind=solid state drive
+transistor | is_a=electronic component | purpose=switching a current | purpose=amplifying a signal | part_of=integrated circuit | inventor=John Bardeen, Walter Brattain and William Shockley
+integrated circuit | is_a=electronic component | consists_of=transistors | located_in=a silicon chip | causes=the miniaturisation of computers
+motherboard | is_a=circuit board | purpose=connecting the components of a computer
+bus | is_a=hardware pathway | purpose=carrying data between components
+peripheral | is_a=device | means=hardware attached to a computer rather than inside it | has_kind=keyboard | has_kind=mouse | has_kind=printer
+
+# --- data ----------------------------------------------------------------------------------------#
+bit | is_a=unit of information | means=a single binary digit | has_property=zero or one
+byte | is_a=unit of information | means=eight bits | capable_of=hold one character in ASCII
+binary | is_a=number system | has_property=base two | purpose=representing data in hardware
+hexadecimal | is_a=number system | has_property=base sixteen | purpose=writing binary compactly
+ASCII | is_a=character encoding | means=American standard code for information interchange | has_property=seven bits per character
+unicode | is_a=character encoding standard | purpose=representing the characters of every writing system | has_kind=UTF-8
+file | is_a=named collection of data | located_in=a file system | has_part=name | has_part=contents
+database | is_a=organised collection of data | purpose=storing and querying data | has_kind=relational database | has_kind=document database | has_part=table | has_part=index
+SQL | means=structured query language | is_a=query language | purpose=querying a relational database
+index | is_a=data structure | purpose=making lookups fast | causes=slower writes
+compression | is_a=data process | purpose=reducing the size of data | has_kind=lossless compression | has_kind=lossy compression
+encryption | is_a=data process | purpose=making data unreadable without a key | requires=a key | has_kind=symmetric encryption | has_kind=public key encryption
+hash function | is_a=function | purpose=mapping data to a fixed size value | has_property=one way | purpose=checking integrity
+checksum | is_a=value | purpose=detecting accidental corruption of data
+
+# --- software and programming ---------------------------------------------------------------------#
+software | is_a=set of instructions | has_kind=system software | has_kind=application software | requires=hardware to run
+operating system | is_a=system software | purpose=managing hardware and running programs | has_kind=Linux | has_kind=Windows | has_kind=macOS | has_part=kernel | has_part=file system | has_part=scheduler
+kernel | is_a=core of an operating system | purpose=mediating access to hardware
+program | is_a=sequence of instructions | requires=a language | requires=a processor to execute it
+algorithm | is_a=procedure | means=a finite sequence of steps that solves a problem | has_property=terminating | purpose=solving a problem reliably
+data structure | is_a=way of organising data | has_kind=array | has_kind=linked list | has_kind=stack | has_kind=queue | has_kind=tree | has_kind=graph | has_kind=hash table
+array | is_a=data structure | has_property=fixed size@0.7 | has_property=constant time access by index
+stack | is_a=data structure | has_property=last in first out | has_part=push | has_part=pop
+queue | is_a=data structure | has_property=first in first out
+tree | is_a=data structure | has_part=root | has_part=node | has_part=leaf | has_property=hierarchical
+graph | is_a=data structure | has_part=vertex | has_part=edge | purpose=representing relations between things
+hash table | is_a=data structure | requires=a hash function | has_property=average constant time lookup
+recursion | is_a=programming technique | means=a function that calls itself | requires=a base case | causes=a stack overflow without one
+compiler | is_a=program | purpose=translating source code into machine code | causes=a faster program than interpretation@0.8
+interpreter | is_a=program | purpose=executing source code directly
+bug | is_a=defect in software | causes=incorrect behaviour | occurs_when=code does something other than what was intended
+debugging | is_a=activity | purpose=finding and removing a bug | involves=reproducing the failure | involves=narrowing the cause
+version control | is_a=system | purpose=recording the history of changes to code | has_kind=Git
+Git | is_a=version control system | inventor=Linus Torvalds | has_part=commit | has_part=branch | has_part=repository
+API | means=application programming interface | is_a=interface | purpose=letting one program use another
+library | is_a=collection of reusable code | purpose=saving a programmer from rewriting common work
+test | is_a=program that checks a program | purpose=catching a regression before a user does | has_kind=unit test | has_kind=integration test
+Python | is_a=programming language | has_property=interpreted | has_property=dynamically typed | inventor=Guido van Rossum | purpose=scripting | purpose=data science
+c | is_a=programming language | has_property=compiled | has_property=close to the hardware | inventor=Dennis Ritchie
+JavaScript | is_a=programming language | purpose=making web pages interactive | located_in=the browser
+sorting | is_a=computational task | has_kind=quicksort | has_kind=mergesort | has_kind=bubble sort | purpose=putting data in order
+binary search | is_a=algorithm | requires=sorted data | has_property=logarithmic time
+complexity | is_a=measure of an algorithm | means=how the cost grows with the size of the input | has_kind=time complexity | has_kind=space complexity
+
+# --- networks and the web --------------------------------------------------------------------------#
+network | is_a=set of connected computers | purpose=sharing data and resources | has_kind=local area network | has_kind=wide area network
+internet | is_a=global network of networks | purpose=connecting computers worldwide | requires=protocols | has_part=router | has_part=server
+protocol | is_a=set of rules | purpose=letting two machines agree how to communicate | has_kind=TCP | has_kind=IP | has_kind=HTTP
+IP address | is_a=identifier | purpose=naming a machine on a network
+DNS | means=domain name system | is_a=naming system | purpose=turning a domain name into an IP address
+HTTP | means=hypertext transfer protocol | is_a=protocol | purpose=fetching web pages
+HTTPS | is_a=protocol | means=HTTP carried over an encrypted connection | purpose=protecting data in transit
+server | is_a=computer | purpose=answering requests from clients
+client | is_a=computer or program | purpose=making requests to a server
+router | is_a=network device | purpose=forwarding packets between networks
+firewall | is_a=security device | purpose=filtering network traffic | purpose=blocking unwanted connections
+World Wide Web | is_a=information system | inventor=Tim Berners-Lee | located_in=the internet | has_part=web page | has_part=hyperlink
+HTML | means=hypertext markup language | is_a=markup language | purpose=describing the structure of a web page
+cloud computing | is_a=service model | means=using computing resources owned and run by someone else | purpose=scaling without buying hardware
+
+# --- artificial intelligence ---------------------------------------------------------------------#
+artificial intelligence | is_a=field of computer science | purpose=building systems that perform tasks requiring intelligence | has_kind=machine learning | has_kind=symbolic AI | involves=search | involves=learning | involves=reasoning
+machine learning | is_a=branch of artificial intelligence | means=building systems that improve from data rather than from explicit rules | has_kind=supervised learning | has_kind=unsupervised learning | has_kind=reinforcement learning | requires=data
+supervised learning | is_a=machine learning | requires=labelled data | purpose=predicting a label for new input
+unsupervised learning | is_a=machine learning | requires=unlabelled data | purpose=finding structure in data
+reinforcement learning | is_a=machine learning | requires=a reward signal | involves=an agent | involves=an environment | purpose=learning a policy by trial
+neural network | is_a=machine learning model | consists_of=layers | consists_of=weights | has_part=input layer | has_part=hidden layer | has_part=output layer | requires=training data
+deep learning | is_a=machine learning | requires=many layers | requires=large datasets | requires=substantial computation
+training | is_a=process | purpose=adjusting the weights of a model to reduce its error | requires=a loss function | requires=data
+loss function | is_a=function | purpose=measuring how wrong a model's output is | requires=a target
+gradient descent | is_a=optimisation algorithm | purpose=reducing a loss by stepping downhill | requires=a gradient | requires=a learning rate
+backpropagation | is_a=algorithm | purpose=computing the gradient of the loss with respect to each weight | requires=the chain rule
+overfitting | is_a=failure mode | occurs_when=a model learns the training data rather than the pattern | causes=poor performance on new data | requires=regularisation or more data to fix
+underfitting | is_a=failure mode | occurs_when=a model is too simple for the pattern in the data
+transformer | is_a=neural network architecture | has_part=attention | has_part=feed forward layer | purpose=modelling sequences | causes=the modern language model
+attention | is_a=neural network mechanism | purpose=letting a model weigh which parts of the input matter | part_of=transformer
+language model | is_a=machine learning model | purpose=predicting the next token in a sequence | requires=a tokenizer | requires=text
+tokenizer | is_a=component of a language model | purpose=splitting text into tokens | has_kind=byte pair encoding
+token | is_a=unit of text | means=the smallest piece a language model reads | part_of=a sequence
+embedding | is_a=vector representation | purpose=placing similar meanings near each other in a space
+fine tuning | is_a=training process | purpose=adapting a pretrained model to a narrower task | requires=a pretrained model
+hallucination | is_a=failure mode of a language model | means=producing a fluent statement that is not true | causes=loss of trust in the output
+knowledge graph | is_a=data structure | consists_of=entities | consists_of=relations | purpose=storing facts a system can query | has_part=triple
+triple | is_a=unit of a knowledge graph | has_part=subject | has_part=predicate | has_part=object
+inference | is_a=process | means=deriving a new statement from statements already held | purpose=answering a question no single fact answers

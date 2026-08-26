@@ -1,0 +1,103 @@
+# geography.kb — countries with their capitals and currencies, the physical features a general
+# education names, and the terms that describe them.
+#
+# ``capital``, ``currency`` and ``located_in`` are functional here: one value each, enforced by
+# the parser. That is the whole reason this file can carry capitals at all where
+# ``prepare_conceptnet.py`` had to drop ``/r/AtLocation`` — a hand-written source can promise
+# uniqueness and be checked on it.
+
+# --- terms ---------------------------------------------------------------------------------------#
+geography | is_a=discipline | involves=places | involves=landscapes | involves=people | has_kind=physical geography | has_kind=human geography
+continent | is_a=large landmass | has_kind=Africa | has_kind=Antarctica | has_kind=Asia | has_kind=Europe | has_kind=North America | has_kind=Oceania | has_kind=South America
+country | is_a=political territory | has_part=government | has_part=border | has_part=population
+capital city | is_a=city | purpose=seating the government of a country
+equator | is_a=line of latitude | has_property=zero degrees | purpose=dividing the earth into hemispheres
+latitude | is_a=coordinate | means=the angular distance north or south of the equator | unit=degree
+longitude | is_a=coordinate | means=the angular distance east or west of the prime meridian | unit=degree
+prime meridian | is_a=line of longitude | located_in=Greenwich | has_property=zero degrees
+time zone | is_a=region | purpose=keeping a common clock time | requires=the earth's rotation
+desert | is_a=biome | has_property=very low rainfall | has_kind=Sahara | has_kind=Gobi | has_kind=Atacama
+rainforest | is_a=biome | has_property=high rainfall | has_property=very high biodiversity | has_kind=Amazon rainforest
+tundra | is_a=biome | has_property=cold | has_property=treeless | has_property=frozen subsoil
+savanna | is_a=biome | has_property=grassland with scattered trees | located_in=the tropics
+island | is_a=landform | has_property=surrounded by water
+peninsula | is_a=landform | has_property=surrounded by water on three sides
+valley | is_a=landform | occurs_when=a river or glacier erodes a channel
+plateau | is_a=landform | has_property=raised | has_property=flat topped
+urbanisation | is_a=social process | means=the growth of the share of people living in cities | causes=pressure on housing | causes=pressure on transport
+population density | is_a=measure | means=the number of people per unit area
+
+# --- Asia ------------------------------------------------------------------------------------------#
+India | is_a=country | located_in=South Asia | capital=New Delhi | currency=the Indian rupee | has_property=the most populous country | has_part=the Himalayas | has_part=the Ganges
+China | is_a=country | located_in=East Asia | capital=Beijing | currency=the yuan | has_part=the Yangtze | has_part=the Great Wall
+Japan | is_a=island country | located_in=East Asia | capital=Tokyo | currency=the yen | has_part=Mount Fuji
+Indonesia | is_a=island country | located_in=Southeast Asia | capital=Jakarta | currency=the rupiah
+Pakistan | is_a=country | located_in=South Asia | capital=Islamabad | currency=the Pakistani rupee | has_part=the Indus
+Bangladesh | is_a=country | located_in=South Asia | capital=Dhaka | currency=the taka
+South Korea | is_a=country | located_in=East Asia | capital=Seoul | currency=the won
+Saudi Arabia | is_a=country | located_in=Western Asia | capital=Riyadh | currency=the riyal
+Turkey | is_a=country | located_in=Asia and Europe | capital=Ankara | currency=the Turkish lira
+Iran | is_a=country | located_in=Western Asia | capital=Tehran | currency=the Iranian rial
+Vietnam | is_a=country | located_in=Southeast Asia | capital=Hanoi | currency=the dong
+Thailand | is_a=country | located_in=Southeast Asia | capital=Bangkok | currency=the baht
+Nepal | is_a=country | located_in=South Asia | capital=Kathmandu | currency=the Nepalese rupee | has_part=Mount Everest
+Sri Lanka | is_a=island country | located_in=South Asia | capital=Sri Jayawardenepura Kotte | currency=the Sri Lankan rupee
+
+# --- Europe -----------------------------------------------------------------------------------------#
+United Kingdom | is_a=country | located_in=Western Europe | capital=London | currency=the pound sterling | has_part=England | has_part=Scotland | has_part=Wales | has_part=Northern Ireland
+France | is_a=country | located_in=Western Europe | capital=Paris | currency=the euro | has_part=the Seine | has_part=the Alps
+Germany | is_a=country | located_in=Central Europe | capital=Berlin | currency=the euro | has_part=the Rhine
+Italy | is_a=country | located_in=Southern Europe | capital=Rome | currency=the euro | has_part=the Alps | has_part=Sicily
+Spain | is_a=country | located_in=Southern Europe | capital=Madrid | currency=the euro
+Russia | is_a=country | located_in=Eastern Europe and North Asia | capital=Moscow | currency=the rouble | has_property=the largest country by area | has_part=Siberia
+Netherlands | is_a=country | located_in=Western Europe | capital=Amsterdam | currency=the euro | has_property=much land below sea level
+Poland | is_a=country | located_in=Central Europe | capital=Warsaw | currency=the zloty
+Sweden | is_a=country | located_in=Northern Europe | capital=Stockholm | currency=the Swedish krona
+Switzerland | is_a=country | located_in=Central Europe | capital=Bern | currency=the Swiss franc | has_part=the Alps
+Greece | is_a=country | located_in=Southern Europe | capital=Athens | currency=the euro
+Portugal | is_a=country | located_in=Southern Europe | capital=Lisbon | currency=the euro
+Norway | is_a=country | located_in=Northern Europe | capital=Oslo | currency=the Norwegian krone | has_part=fjords
+Ireland | is_a=island country | located_in=Northwestern Europe | capital=Dublin | currency=the euro
+
+# --- Africa ------------------------------------------------------------------------------------------#
+Egypt | is_a=country | located_in=North Africa | capital=Cairo | currency=the Egyptian pound | has_part=the Nile | has_part=the Pyramids of Giza
+Nigeria | is_a=country | located_in=West Africa | capital=Abuja | currency=the naira | has_property=the most populous country in Africa
+South Africa | is_a=country | located_in=Southern Africa | capital=Pretoria | currency=the rand
+Kenya | is_a=country | located_in=East Africa | capital=Nairobi | currency=the Kenyan shilling
+Ethiopia | is_a=country | located_in=East Africa | capital=Addis Ababa | currency=the birr
+Morocco | is_a=country | located_in=North Africa | capital=Rabat | currency=the dirham
+Ghana | is_a=country | located_in=West Africa | capital=Accra | currency=the cedi
+Tanzania | is_a=country | located_in=East Africa | capital=Dodoma | currency=the Tanzanian shilling | has_part=Mount Kilimanjaro
+
+# --- the Americas and Oceania --------------------------------------------------------------------------#
+United States | is_a=country | located_in=North America | capital=Washington DC | currency=the US dollar | has_part=the Mississippi | has_part=the Rocky Mountains | has_part=Alaska
+Canada | is_a=country | located_in=North America | capital=Ottawa | currency=the Canadian dollar | has_property=the second largest country by area
+Mexico | is_a=country | located_in=North America | capital=Mexico City | currency=the Mexican peso
+Brazil | is_a=country | located_in=South America | capital=Brasilia | currency=the real | has_part=the Amazon rainforest | has_property=the largest country in South America
+Argentina | is_a=country | located_in=South America | capital=Buenos Aires | currency=the Argentine peso | has_part=Patagonia
+Chile | is_a=country | located_in=South America | capital=Santiago | currency=the Chilean peso | has_part=the Atacama
+Peru | is_a=country | located_in=South America | capital=Lima | currency=the sol | has_part=Machu Picchu
+Colombia | is_a=country | located_in=South America | capital=Bogota | currency=the Colombian peso
+Australia | is_a=country | located_in=Oceania | capital=Canberra | currency=the Australian dollar | has_part=the Great Barrier Reef | has_part=the Outback
+New Zealand | is_a=island country | located_in=Oceania | capital=Wellington | currency=the New Zealand dollar
+
+# --- physical features ------------------------------------------------------------------------------------#
+Mount Everest | is_a=mountain | located_in=the Himalayas | has_property=the highest point on earth | has_property=about eight thousand eight hundred and forty nine metres
+Himalayas | is_a=mountain range | located_in=Asia | has_part=Mount Everest | has_part=K2
+Alps | is_a=mountain range | located_in=Europe | has_part=Mont Blanc
+Andes | is_a=mountain range | located_in=South America | has_property=the longest continental mountain range
+Rocky Mountains | is_a=mountain range | located_in=North America
+Sahara | is_a=desert | located_in=North Africa | has_property=the largest hot desert
+Nile | is_a=river | located_in=Africa | has_property=among the longest rivers in the world | causes=fertile land along its banks
+Amazon River | is_a=river | located_in=South America | has_property=the greatest discharge of any river
+Ganges | is_a=river | located_in=India | has_property=sacred in Hinduism
+Yangtze | is_a=river | located_in=China | has_property=the longest river in Asia
+Mississippi | is_a=river | located_in=the United States
+Pacific Ocean | is_a=ocean | has_property=the largest ocean | has_part=the Mariana Trench
+Atlantic Ocean | is_a=ocean | has_property=the second largest ocean
+Indian Ocean | is_a=ocean | located_in=between Africa, Asia and Australia
+Arctic Ocean | is_a=ocean | has_property=the smallest and shallowest ocean | has_property=covered by sea ice
+Mariana Trench | is_a=ocean trench | located_in=the Pacific Ocean | has_property=the deepest point in the ocean
+Great Barrier Reef | is_a=coral reef | located_in=Australia | has_property=the largest coral reef system | has_property=threatened by warming seas
+Amazon Rainforest | is_a=rainforest | located_in=South America | has_property=the largest tropical rainforest | purpose=absorbing carbon dioxide
+Antarctica | is_a=continent | has_property=the coldest continent | has_property=covered by an ice sheet | has_property=no permanent population
