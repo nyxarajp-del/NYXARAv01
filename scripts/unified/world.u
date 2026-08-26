@@ -1,0 +1,297 @@
+# world.u — what follows what, what would have followed instead, when, and where.
+#
+# `law` items are `cause | causes | effect | sign`, which is what `universe.declare` and
+# `world.state_law` take between them. `counterfactual` items are
+# `variable | value | effect | direction`, scored on direction because a magnitude would be
+# scoring the fit. `temporal` items are `earlier | later | relation`, `spatial` items are
+# `object | relation | reference`.
+
+# ============================ causal ============================================================ #
+@record causal fire_and_heat
+domain     = physics
+law        = fire | causes | heat | 1 ;; fire | causes | light | 1 ;; fire | causes | smoke | 1
+context    = one cause, three effects, all of which rise together with it
+text       = a bigger fire gives more heat, more light and more smoke.
+
+@record causal friction_and_wear
+domain     = physics
+law        = friction | causes | heat | 1 ;; friction | causes | wear | 1 ;; lubrication | causes | friction | -1
+text       = oil reduces friction, and friction is what produces both the heat and the wear.
+
+@record causal vaccination_and_disease
+domain     = medicine
+law        = vaccination | causes | immunity | 1 ;; immunity | causes | infection | -1 ;; vaccination rate | causes | outbreak size | -1
+note       = the chain matters: vaccination does not act on the outbreak directly, it acts through immunity.
+text       = a longer chain, where the middle link is the thing that actually does the work.
+
+@record causal deforestation_and_soil
+domain     = earth_science
+law        = tree cover | causes | soil retention | 1 ;; soil retention | causes | erosion | -1 ;; rainfall | causes | erosion | 1
+text       = removing trees does not erode the soil. it removes what was holding it against the rain.
+
+@record causal interest_and_inflation
+domain     = economics
+law        = interest rate | causes | borrowing | -1 ;; borrowing | causes | spending | 1 ;; spending | causes | inflation | 1
+text       = raising the rate reaches inflation through two steps, which is why it acts slowly.
+
+@record causal sleep_and_error_rate
+domain     = medicine
+law        = sleep | causes | reaction time | -1 ;; reaction time | causes | error rate | 1
+text       = less sleep slows the response and the slow response is what produces the errors.
+
+@record causal index_and_latency
+domain     = computing
+law        = index | causes | read latency | -1 ;; index | causes | write latency | 1 ;; read latency | causes | user complaints | 1
+note       = the same intervention moves two effects in opposite directions, which is what makes it a decision rather than an improvement.
+text       = an index buys reads and charges writes.
+
+@record causal greenhouse_gas_and_temperature
+domain     = earth_science
+law        = greenhouse gas | causes | trapped heat | 1 ;; trapped heat | causes | surface temperature | 1 ;; surface temperature | causes | sea level | 1
+text       = three links, each measured separately, and the chain is what makes the last one follow from the first.
+
+@record causal humidity_and_evaporation
+domain     = chemistry
+law        = humidity | causes | evaporation rate | -1 ;; temperature | causes | evaporation rate | 1 ;; wind | causes | evaporation rate | 1
+context    = three causes of one effect, one of which runs the other way
+text       = washing dries fastest in warm, dry, moving air, and the humidity is the term that subtracts.
+
+@record causal crowding_and_disease
+domain     = medicine
+law        = crowding | causes | contact rate | 1 ;; contact rate | causes | transmission | 1 ;; ventilation | causes | transmission | -1
+text       = crowding acts through contact, and ventilation acts on the transmission directly.
+
+# ============================ counterfactual ==================================================== #
+@record counterfactual no_water_no_growth
+domain     = biology
+law        = water | causes | growth | 1
+counterfactual = water | 0 | growth | -1
+context    = the zero intervention, which is the cleanest form of the question
+text       = if the plant had been given no water at all, it would have grown less.
+
+@record counterfactual halve_the_rate
+domain     = economics
+law        = interest rate | causes | borrowing | -1
+counterfactual = interest rate | 2 | borrowing | 1
+text       = if the rate had been cut to two percent, borrowing would have risen.
+
+@record counterfactual thicker_wire
+domain     = physics
+law        = resistance | causes | current | -1
+counterfactual = resistance | 1 | current | 1
+text       = if the resistance had been one ohm instead of five, more current would have flowed.
+
+@record counterfactual no_index
+domain     = computing
+law        = index | causes | read latency | -1
+counterfactual = index | 0 | read latency | 1
+text       = without the index the reads would have been slower, which is the claim the benchmark makes.
+
+@record counterfactual more_altitude
+domain     = earth_science
+law        = altitude | causes | temperature | -1
+counterfactual = altitude | 5 | temperature | -1
+text       = five kilometres up it would have been much colder.
+
+@record counterfactual no_catalyst
+domain     = chemistry
+law        = catalyst mass | causes | yield | 1
+counterfactual = catalyst mass | 0 | yield | -1
+text       = the same reaction with no catalyst gives less product in the same time.
+
+@record counterfactual no_seatbelt
+domain     = everyday
+law        = restraint | causes | injury severity | -1
+counterfactual = restraint | 0 | injury severity | 1
+note       = the intervention severs what makes people wear one, which is why this is do and not merely observing unbelted drivers.
+text       = comparing belted and unbelted drivers as they come also compares how they drive.
+
+@record counterfactual less_sleep
+domain     = medicine
+law        = sleep | causes | reaction time | -1
+counterfactual = sleep | 3 | reaction time | 1
+text       = on three hours the reaction time would have been much longer.
+
+# ============================ world state transitions =========================================== #
+@record world_state light_switch
+domain     = everyday
+state      = the lamp is off ;; the bulb is working ;; power is on
+action     = flip the switch
+next_state = the lamp is on ;; the bulb is working ;; power is on
+text       = one action, one thing changed, everything else the same.
+
+@record world_state switch_with_dead_bulb
+domain     = everyday
+state      = the lamp is off ;; the bulb is broken ;; power is on
+action     = flip the switch
+next_state = the lamp is off ;; the bulb is broken ;; power is on
+note       = the same action from a different state does nothing, which is what a precondition means.
+text       = the switch works and the light does not come on.
+
+@record world_state door_unlock
+domain     = everyday
+state      = the door is locked ;; the key is in hand
+action     = turn the key
+next_state = the door is unlocked ;; the key is in hand
+text       = the key is not consumed, and the door changes.
+
+@record world_state door_without_key
+domain     = everyday
+state      = the door is locked ;; the key is lost
+action     = turn the handle
+next_state = the door is locked ;; the key is lost
+text       = nothing changes, and that is a fact about the world rather than a failure to act.
+
+@record world_state boil_water
+domain     = physics
+state      = the water is cold ;; the kettle is switched off
+action     = switch the kettle on and wait
+next_state = the water is boiling ;; the kettle is switched on ;; steam is rising
+text       = one action, two things that changed and one that caused them.
+
+@record world_state ice_in_a_warm_room
+domain     = everyday
+state      = the ice is solid ;; the room is warm
+action     = wait
+next_state = the ice has melted ;; there is water in the bowl ;; the room is warm
+note       = waiting is an action. a world model that only changes when something is done to it cannot represent this.
+text       = doing nothing is a transition too.
+
+@record world_state plant_after_watering
+domain     = biology
+state      = the soil is dry ;; the plant is wilted
+action     = water the plant
+next_state = the soil is wet ;; the plant is upright
+text       = the effect on the plant lags the effect on the soil, and both follow the one action.
+
+@record world_state deploy_a_change
+domain     = computing
+state      = the old version is serving ;; the tests are green
+action     = deploy
+next_state = the new version is serving ;; the cache is cold ;; the tests are green
+note       = the cold cache is a side effect nobody asked for and every deploy has.
+text       = the intended change and the unintended one arrive together.
+
+@record world_state pour_and_spill
+domain     = everyday
+state      = the glass is full ;; the jug is full
+action     = keep pouring into the full glass
+next_state = the glass is full ;; the jug is emptier ;; the table is wet
+text       = the action has an effect and not the intended one.
+
+# ============================ temporal ========================================================== #
+@record temporal lightning_then_thunder
+domain     = physics
+temporal   = the flash is seen | the thunder is heard | the flash is always first ;; the flash is seen | the thunder is heard | about three seconds per kilometre of distance
+text       = counting the gap gives the distance, because one travels almost instantly and the other does not.
+
+@record temporal sow_then_harvest
+domain     = biology
+temporal   = sowing | harvest | three to six months for most cereals ;; sowing | germination | days to weeks
+text       = the same act has two effects at very different delays, which is why only one of them feels caused by it.
+
+@record temporal infection_then_symptoms
+domain     = medicine
+temporal   = infection | first symptoms | an incubation period of days ;; first symptoms | recovery | days to weeks
+note       = the delay is why the place a person was infected is almost never the place they felt ill.
+text       = the gap between cause and symptom is what makes contact tracing hard.
+
+@record temporal interest_change_then_inflation
+domain     = economics
+temporal   = a change in the interest rate | its effect on inflation | many months
+text       = the policy and the number it is meant to move are a year apart, so the feedback arrives after the next decision.
+
+@record temporal deploy_then_outage
+domain     = computing
+temporal   = a deploy | a memory leak causing an outage | hours later, after enough requests
+note       = a delayed effect is the hardest kind to attribute, because something else always happened in between.
+text       = the deploy looked fine for six hours, which is exactly why it was not suspected.
+
+@record temporal emission_then_warming
+domain     = earth_science
+temporal   = greenhouse gas emission | the warming it causes | decades ;; warming | sea level rise | centuries
+text       = two delays in series, both far longer than the decisions that set them.
+
+@record temporal cause_before_effect
+domain     = logic
+temporal   = the cause | the effect | never the other way round
+note       = the one ordering constraint that holds in every domain, and the reason word order is orientation evidence.
+text       = if the candidate effect happened first, it is not the effect.
+
+@record temporal exercise_then_fitness
+domain     = medicine
+temporal   = a single session of exercise | feeling tired | hours ;; regular exercise | a lower resting pulse | weeks
+text       = the immediate effect and the lasting one point in opposite directions, and only one of them is the point.
+
+# ============================ spatial =========================================================== #
+@record spatial rooms_in_a_house
+domain     = everyday
+spatial    = kitchen | inside | house ;; door | between | kitchen and hall ;; roof | above | every room
+text       = containment, adjacency and height are three different relations and only one is symmetric.
+
+@record spatial heart_in_the_chest
+domain     = biology
+spatial    = heart | inside | chest ;; lungs | beside | heart ;; diaphragm | below | lungs
+text       = where an organ is is part of what it can do, which is why the diaphragm being below the lungs matters.
+
+@record spatial india_and_neighbours
+domain     = geography
+spatial    = india | south of | the himalayas ;; sri lanka | south of | india ;; the bay of bengal | east of | india
+text       = a relation and its inverse are both true and only one is usually stated.
+
+@record spatial earth_moon_sun
+domain     = astronomy
+spatial    = the moon | orbits | the earth ;; the earth | orbits | the sun ;; the moon | between | the earth and the sun during a solar eclipse
+text       = the eclipse is a fact about an arrangement, not about the bodies.
+
+@record spatial sediment_layers
+domain     = earth_science
+spatial    = older sediment | below | younger sediment ;; a fossil | inside | the layer it was buried in
+note       = this is the one place where a spatial relation is directly a temporal one.
+text       = deeper is older, which is how a cliff face becomes a timeline.
+
+@record spatial component_on_a_board
+domain     = technology
+spatial    = the processor | on | the motherboard ;; the memory | beside | the processor ;; the heatsink | above | the processor
+text       = the memory being close to the processor is a performance fact and not a tidiness one.
+
+# ============================ grounding: a sentence to relations ================================ #
+@record grounding gardener_and_plant
+domain     = biology
+observation_text = the gardener gave the plant three litres of water and it grew five centimetres
+knowledge  = water | causes | growth ;; gardener | is_a | actor ;; plant | requires | water
+observation = water=3; growth=5
+order      = water | growth
+text       = one sentence carrying a relation, two quantities and the order that says which drove which.
+
+@record grounding kettle_boiled
+domain     = everyday
+observation_text = the kettle was switched on and after two minutes the water was boiling
+knowledge  = kettle | purpose | boiling water ;; heat | causes | boiling
+observation = minutes=2; temperature=100
+order      = minutes | temperature
+text       = a happening, not a standing fact, and the quantities are in the sentence.
+
+@record grounding the_bridge_is_closed
+domain     = everyday
+observation_text = the bridge is closed because the river flooded after two hundred millimetres of rain
+knowledge  = rain | causes | flood ;; flood | causes | bridge closure
+observation = rainfall=200; river_level=4.1
+order      = rainfall | river_level
+text       = a because clause is a stated law and the numbers beside it are a reading.
+
+@record grounding patient_improved
+domain     = medicine
+observation_text = the patient was given four hundred milligrams and reported six points of relief
+knowledge  = dose | causes | relief
+observation = dose=400; relief=6
+order      = dose | relief
+text       = the report is testimony and the two numbers are what can be fitted.
+
+@record grounding server_slowed
+domain     = computing
+observation_text = after the index was dropped the median response time rose from eighty milliseconds to two seconds
+knowledge  = index | causes | read latency ;; index | purpose | making lookups fast
+observation = index=0; latency=2000
+order      = index | latency
+text       = a before and after in one sentence, with the direction stated.

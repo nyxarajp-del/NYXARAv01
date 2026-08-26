@@ -1,0 +1,392 @@
+# abstraction.u — the categories that are about leaving the instance behind: an invariant found
+# across members, a rule found across cases, a principle carried into a domain it was never stated
+# in, and two structures recognised as the same shape.
+#
+# `abstraction` items are `antecedent + antecedent | consequent`, which is what
+# `discover.Discoverer.observe` takes. `transfer` items are
+# `from | to | principle | question | expected answer`, and the question is the whole test: a
+# principle that cannot be asked for in the new domain has not been transferred.
+
+# ============================ concept formation ================================================ #
+@record concept_formation what_makes_a_bird
+domain     = biology
+context    = four members, and the property they all share that the near misses do not
+examples   = sparrow | feathers ;; eagle | feathers ;; owl | feathers ;; penguin | feathers
+concept    = bird
+invariants = feathers
+note       = flight is not the invariant. the penguin is the member that says so, and it belongs in the examples for exactly that reason.
+generalize = kiwi ?? feathers
+text       = every bird has feathers and not every bird flies.
+
+@record concept_formation what_makes_a_mammal
+domain     = biology
+examples   = whale | milk ;; bat | milk ;; elephant | milk ;; platypus | milk
+concept    = mammal
+invariants = milk
+note       = the whale lives in water, the bat flies and the platypus lays eggs. milk is what survives all three.
+generalize = dolphin ?? milk
+text       = feeding young with milk is the property none of the awkward members break.
+
+@record concept_formation what_makes_a_prime
+domain     = mathematics
+examples   = 2 | exactly two divisors ;; 3 | exactly two divisors ;; 7 | exactly two divisors ;; 13 | exactly two divisors
+concept    = prime number
+invariants = exactly two divisors
+note       = odd is not the invariant, and two is the member that says so.
+generalize = 29 ?? exactly two divisors
+text       = a prime has exactly two divisors, and two is prime.
+
+@record concept_formation what_makes_a_metal
+domain     = chemistry
+examples   = copper | conducts electricity ;; iron | conducts electricity ;; gold | conducts electricity ;; mercury | conducts electricity
+concept    = metal
+invariants = conducts electricity
+note       = solid at room temperature is not the invariant. mercury is the member that says so.
+generalize = aluminium ?? conducts electricity
+text       = conduction survives the liquid member. hardness does not.
+
+@record concept_formation what_makes_a_lever
+domain     = physics
+examples   = crowbar | turns about a fulcrum ;; seesaw | turns about a fulcrum ;; wheelbarrow | turns about a fulcrum ;; scissors | turns about a fulcrum
+concept    = lever
+invariants = turns about a fulcrum
+generalize = nutcracker ?? turns about a fulcrum
+text       = where the fulcrum sits differs in all four, and that there is one does not.
+
+@record concept_formation what_makes_a_democracy
+domain     = society
+examples   = india | leaders chosen by the governed ;; france | leaders chosen by the governed ;; japan | leaders chosen by the governed ;; brazil | leaders chosen by the governed
+concept    = democracy
+invariants = leaders chosen by the governed
+note       = having a president is not it. japan has a monarch and is a democracy.
+generalize = norway ?? leaders chosen by the governed
+text       = the head of state can be inherited, and who chooses the government cannot.
+
+@record concept_formation what_makes_a_catalyst
+domain     = chemistry
+examples   = platinum in a car exhaust | unchanged by the reaction ;; enzyme in a cell | unchanged by the reaction ;; iron in ammonia synthesis | unchanged by the reaction
+concept    = catalyst
+invariants = unchanged by the reaction
+generalize = manganese dioxide in peroxide ?? unchanged by the reaction
+text       = it speeds the reaction and comes out of it as it went in.
+
+# ============================ concept composition ============================================== #
+@record concept_composition electromagnet
+domain     = physics
+parts      = electric current ;; coil of wire ;; iron core
+concept    = electromagnet
+text       = a magnet that can be switched off, which neither a current nor an iron bar is on its own.
+
+@record concept_composition solar_water_pump
+domain     = technology
+parts      = solar panel ;; electric motor ;; pump
+concept    = solar water pump
+text       = three known things whose combination lifts water where there is no grid.
+
+@record concept_composition hash_table
+domain     = computing
+parts      = array ;; hash function
+concept    = hash table
+text       = constant time lookup by key, which neither part gives alone.
+
+@record concept_composition amphibious_vehicle
+domain     = technology
+parts      = hull ;; wheels ;; propeller
+concept    = amphibious vehicle
+text       = a boat that drives and a car that floats are the same object described twice.
+
+@record concept_composition greenhouse
+domain     = biology
+parts      = glass ;; enclosed air ;; sunlight
+concept    = greenhouse
+text       = glass lets light in and slows heat out, and the enclosure is what makes that matter.
+
+@record concept_composition vaccine_from_pathogen
+domain     = medicine
+parts      = weakened pathogen ;; immune memory
+concept    = vaccine
+text       = immunity without the disease, out of the disease itself.
+
+# ============================ generalization ==================================================== #
+@record generalization metals_conduct
+domain     = chemistry
+examples   = copper | conducts ;; silver | conducts ;; aluminium | conducts ;; iron | conducts
+generalize = tungsten ?? conducts ;; zinc ?? conducts
+text       = four measured members and the property carried to two that were not measured.
+
+@record generalization even_squares
+domain     = mathematics
+examples   = 2 | square is even ;; 4 | square is even ;; 6 | square is even ;; 10 | square is even
+generalize = 24 ?? square is even ;; 100 ?? square is even
+text       = an even number times an even number is even, so the square of any even number is.
+
+@record generalization acids_turn_litmus_red
+domain     = chemistry
+examples   = hydrochloric acid | turns litmus red ;; sulfuric acid | turns litmus red ;; citric acid | turns litmus red
+generalize = acetic acid ?? turns litmus red
+text       = three of a kind, carried to a fourth of the same kind.
+
+@record generalization mammals_have_lungs
+domain     = biology
+examples   = whale | breathes with lungs ;; bat | breathes with lungs ;; elephant | breathes with lungs
+generalize = seal ?? breathes with lungs ;; dolphin ?? breathes with lungs
+note       = the two carried to are aquatic, which is what makes this a real generalisation and not a restatement.
+text       = living in water does not change what a mammal breathes with.
+
+@record generalization sorting_costs_grow
+domain     = computing
+examples   = 1000 records | took 0.9 milliseconds ;; 2000 records | took 3.6 milliseconds ;; 4000 records | took 14.4 milliseconds
+generalize = 8000 records ?? about 57 milliseconds
+text       = each doubling quadruples the time, so the next doubling quadruples it again.
+
+# ============================ transfer ========================================================== #
+@record transfer pressure_to_traffic
+domain     = general
+transfer   = physics | economics | a flow through a narrow section speeds up and pressure drops there | what happens to traffic where four lanes narrow to two | it backs up and the queue builds behind the narrowing
+note       = the transfer is the bottleneck, not the arithmetic. traffic is compressible in a way a fluid is not, and the record says so.
+text       = the constriction, not the equation, is what carries.
+
+@record transfer natural_selection_to_algorithms
+domain     = general
+transfer   = biology | computing | variation plus selection plus inheritance improves a population without anyone designing the improvement | how could a program improve itself with no designer | generate variants, keep the ones that score better, and let them produce the next variants
+text       = the same three ingredients, in a place with no organisms in it.
+
+@record transfer immunity_to_security
+domain     = general
+transfer   = medicine | computing | a system that recognises what it has seen before responds faster the second time | how should a network defend against an attack it has already survived | keep a signature of the attack and match against it on the next attempt
+text       = memory of an attacker is the transferable part.
+
+@record transfer diffusion_to_rumours
+domain     = general
+transfer   = chemistry | society | things spread from where they are concentrated to where they are not, and the rate falls as the difference falls | how does a rumour move through a town | fastest where few have heard it, slowing as almost everyone has
+text       = the gradient does the work in both.
+
+@record transfer lever_to_finance
+domain     = general
+transfer   = physics | economics | a small force applied far from the fulcrum moves a large load | what does borrowing do to a small amount of capital | it moves a much larger position, and it magnifies the loss the same way
+note       = the word leverage is the same word for this reason, and the magnification cutting both ways is the part that transfers and is usually dropped.
+text       = the mechanism magnifies in both directions, in both domains.
+
+@record transfer erosion_to_forgetting
+domain     = general
+transfer   = earth_science | memory | small repeated removals reshape something slowly and invisibly until a threshold is crossed | what happens to a memory that is never revisited | it thins gradually rather than vanishing at once
+text       = gradual and invisible until it is not.
+
+@record transfer immune_memory_to_caching
+domain     = general
+transfer   = medicine | computing | keeping the answer to what was asked before makes the second time cheap | why does a warm cache beat a cold one | the cost was paid once and the result kept
+
+# ============================ analogy =========================================================== #
+@record analogy atom_and_solar_system
+domain     = general
+analogy    = nucleus | electron | sun | planet | a small heavy centre with lighter things bound around it
+note       = the structure carries and the mechanism does not: electrons are not little planets and orbits are not shells. an analogy that is not told where it breaks is a lie with a diagram.
+text       = the shape is the same and the physics is not.
+
+@record analogy heart_and_pump
+domain     = general
+analogy    = heart | blood | pump | water | a device that moves fluid round a closed circuit against resistance
+text       = the pressure, the circuit and the valves all carry.
+
+@record analogy brain_and_computer
+domain     = general
+analogy    = brain | thought | computer | computation | a system that transforms inputs into outputs by many small steps
+note       = it breaks at storage. a brain has no address where a memory sits, and a machine does.
+text       = useful for the processing and misleading for the memory.
+
+@record analogy dna_and_recipe
+domain     = general
+analogy    = dna | organism | recipe | dish | instructions that are not the thing and determine the thing
+text       = you cannot eat the recipe and you cannot cook without it.
+
+@record analogy antibody_and_key
+domain     = general
+analogy    = antibody | antigen | key | lock | one shape that fits one other shape and no third
+text       = specificity is the whole point in both.
+
+@record analogy evolution_and_market
+domain     = general
+analogy    = mutation | natural selection | new product | competition | variation generated blindly and filtered by what survives
+note       = it breaks on intention. products are designed and mutations are not.
+text       = the filter is the same and the source of variation is not.
+
+@record analogy water_flow_and_current
+domain     = general
+analogy    = pressure | water flow | voltage | electric current | a difference driving a flow through a resistance
+text       = this is why the same equations fit, and why a narrow pipe is a resistor.
+
+# ============================ abstraction rules ================================================= #
+#
+# `discover.Discoverer._subsets` starts at size two, so a *single* antecedent can never become a
+# rule — and the first version of this section gave each rule two antecedents seen once, which
+# proposed nothing at all. Measured: 84 cases in, `proposed: 0` out, and it was right to.
+#
+# A rule needs the *same antecedent pair* observed many times with the incidental circumstances
+# varying, which is what evidence for an abstraction actually looks like. So each record here
+# fixes a pair, varies a third harmless antecedent twelve ways, and adds four cases with a
+# different pair and the opposite consequent. min_support is four and forty percent of the cases
+# are held back to test on, so twelve and four is the smallest honest shape that can be confirmed.
+
+@record abstraction_rule wet_ground_rule
+domain     = everyday
+abstraction = rain + no shelter + in the morning | wet ;;
+             rain + no shelter + in the evening | wet ;;
+             rain + no shelter + on a weekday | wet ;;
+             rain + no shelter + at the weekend | wet ;;
+             rain + no shelter + in spring | wet ;;
+             rain + no shelter + in autumn | wet ;;
+             rain + no shelter + with a witness present | wet ;;
+             rain + no shelter + with nobody watching | wet ;;
+             rain + no shelter + in a city | wet ;;
+             rain + no shelter + in a village | wet ;;
+             rain + no shelter + on the first attempt | wet ;;
+             rain + no shelter + on the third attempt | wet ;;
+             rain + shelter + in the morning | dry ;;
+             rain + shelter + in the evening | dry ;;
+             rain + shelter + in a city | dry ;;
+             rain + shelter + in a village | dry
+concept    = water reaching an unsheltered surface wets it, whatever else is true at the time
+note       = the twelve incidentals are there to be ruled out, which is what a held-out test does to them.
+text       = the rain and the shelter decide it and the time of day never does.
+
+@record abstraction_rule fire_needs_air
+domain     = chemistry
+abstraction = fuel + oxygen + in the morning | fire ;;
+             fuel + oxygen + in the evening | fire ;;
+             fuel + oxygen + on a weekday | fire ;;
+             fuel + oxygen + at the weekend | fire ;;
+             fuel + oxygen + in spring | fire ;;
+             fuel + oxygen + in autumn | fire ;;
+             fuel + oxygen + with a witness present | fire ;;
+             fuel + oxygen + with nobody watching | fire ;;
+             fuel + oxygen + in a city | fire ;;
+             fuel + oxygen + in a village | fire ;;
+             fuel + oxygen + on the first attempt | fire ;;
+             fuel + oxygen + on the third attempt | fire ;;
+             fuel + vacuum + in the morning | no fire ;;
+             fuel + vacuum + in the evening | no fire ;;
+             fuel + vacuum + in a city | no fire ;;
+             fuel + vacuum + in a village | no fire
+concept    = fuel needs oxygen to burn, and nothing about the occasion changes that
+text       = the same fuel burns or does not according to the air, in every circumstance tried.
+
+@record abstraction_rule illness_spread_rule
+domain     = medicine
+abstraction = infected person + close contact + in the morning | transmission ;;
+             infected person + close contact + in the evening | transmission ;;
+             infected person + close contact + on a weekday | transmission ;;
+             infected person + close contact + at the weekend | transmission ;;
+             infected person + close contact + in spring | transmission ;;
+             infected person + close contact + in autumn | transmission ;;
+             infected person + close contact + with a witness present | transmission ;;
+             infected person + close contact + with nobody watching | transmission ;;
+             infected person + close contact + in a city | transmission ;;
+             infected person + close contact + in a village | transmission ;;
+             infected person + close contact + on the first attempt | transmission ;;
+             infected person + close contact + on the third attempt | transmission ;;
+             infected person + distance + in the morning | no transmission ;;
+             infected person + distance + in the evening | no transmission ;;
+             infected person + distance + in a city | no transmission ;;
+             infected person + distance + in a village | no transmission
+concept    = proximity to an infected person carries it and distance does not
+text       = twelve different occasions, one antecedent pair, one outcome.
+
+@record abstraction_rule crop_growth_rule
+domain     = biology
+abstraction = live seed + water and light + in the morning | growth ;;
+             live seed + water and light + in the evening | growth ;;
+             live seed + water and light + on a weekday | growth ;;
+             live seed + water and light + at the weekend | growth ;;
+             live seed + water and light + in spring | growth ;;
+             live seed + water and light + in autumn | growth ;;
+             live seed + water and light + with a witness present | growth ;;
+             live seed + water and light + with nobody watching | growth ;;
+             live seed + water and light + in a city | growth ;;
+             live seed + water and light + in a village | growth ;;
+             live seed + water and light + on the first attempt | growth ;;
+             live seed + water and light + on the third attempt | growth ;;
+             live seed + no water + in the morning | no growth ;;
+             live seed + no water + in the evening | no growth ;;
+             live seed + no water + in a city | no growth ;;
+             live seed + no water + in a village | no growth
+concept    = a live seed with water and light grows, whenever it is planted
+text       = the season varies and the requirement does not.
+
+@record abstraction_rule deploy_breaks_rule
+domain     = computing
+abstraction = change + no tests + in the morning | outage ;;
+             change + no tests + in the evening | outage ;;
+             change + no tests + on a weekday | outage ;;
+             change + no tests + at the weekend | outage ;;
+             change + no tests + in spring | outage ;;
+             change + no tests + in autumn | outage ;;
+             change + no tests + with a witness present | outage ;;
+             change + no tests + with nobody watching | outage ;;
+             change + no tests + in a city | outage ;;
+             change + no tests + in a village | outage ;;
+             change + no tests + on the first attempt | outage ;;
+             change + no tests + on the third attempt | outage ;;
+             change + tests and review + in the morning | no outage ;;
+             change + tests and review + in the evening | no outage ;;
+             change + tests and review + in a city | no outage ;;
+             change + tests and review + in a village | no outage
+concept    = an unchecked change of any kind precedes the outage, and the kind of change is not what matters
+note       = the rule was about code until a config change broke it the same way, which is what widened it.
+text       = twelve unchecked changes and four checked ones, and the checks are the only thing that separates them.
+
+@record abstraction_rule battery_dies_rule
+domain     = technology
+abstraction = cold + old battery + in the morning | fails to start ;;
+             cold + old battery + in the evening | fails to start ;;
+             cold + old battery + on a weekday | fails to start ;;
+             cold + old battery + at the weekend | fails to start ;;
+             cold + old battery + in spring | fails to start ;;
+             cold + old battery + in autumn | fails to start ;;
+             cold + old battery + with a witness present | fails to start ;;
+             cold + old battery + with nobody watching | fails to start ;;
+             cold + old battery + in a city | fails to start ;;
+             cold + old battery + in a village | fails to start ;;
+             cold + old battery + on the first attempt | fails to start ;;
+             cold + old battery + on the third attempt | fails to start ;;
+             cold + new battery + in the morning | starts ;;
+             cold + new battery + in the evening | starts ;;
+             cold + new battery + in a city | starts ;;
+             cold + new battery + in a village | starts
+concept    = a battery near the end of its life fails in the cold, and a healthy one does not
+text       = neither the cold nor the age alone predicts it and the pair does.
+
+# ============================ creative synthesis ================================================ #
+@record creative_synthesis desalination_greenhouse
+domain     = technology
+parts      = greenhouse ;; seawater ;; solar evaporation ;; condensation
+concept    = a greenhouse that irrigates itself from the sea
+novelty    = the same solar heat that grows the plants distils their water, so the two costs become one
+text       = neither part is new and the pairing removes the input that made the other impossible.
+
+@record creative_synthesis vaccine_by_messenger
+domain     = medicine
+parts      = messenger rna ;; lipid nanoparticle ;; the pathogen's own protein sequence
+concept    = a vaccine that carries instructions rather than the pathogen
+novelty    = nothing infectious is administered, and the design changes by changing a sequence rather than a factory
+text       = the pathogen is never in the vial.
+
+@record creative_synthesis pumped_storage
+domain     = technology
+parts      = surplus electricity ;; two reservoirs at different heights ;; pump ;; turbine
+concept    = storing electricity as height
+novelty    = a battery made of water and gravity, with no chemistry in it at all
+text       = the surplus lifts water and the shortfall drops it.
+
+@record creative_synthesis fog_harvesting_net
+domain     = technology
+parts      = fine mesh ;; coastal fog ;; gravity ;; collecting trough
+concept    = a net that drinks
+novelty    = water taken from air in a place with no rain and no well, with nothing that moves
+text       = the fog was always there and the mesh is what makes it collectible.
+
+@record creative_synthesis cold_chain_by_evaporation
+domain     = medicine
+parts      = porous clay pot ;; wet sand ;; a second pot inside ;; dry moving air
+concept    = refrigeration with no power
+novelty    = evaporation from the sand does the cooling, so vaccines and food keep where there is no electricity
+text       = the physics is the same as sweating, applied to a container.

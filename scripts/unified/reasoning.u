@@ -1,0 +1,390 @@
+# reasoning.u — logic, uncertainty, contradiction, and the four categories that are all about
+# being wrong in a way that can be named: prediction, error taxonomy, calibration, self-correction.
+
+# ============================ logic =========================================================== #
+@record logic modus_ponens_rain
+domain     = logic
+context    = a conditional and its antecedent
+premises   = if it rains the ground gets wet ;; it is raining
+conclusion = the ground gets wet
+valid      = valid
+text       = if it rains the ground gets wet. it is raining. so the ground gets wet.
+
+@record logic modus_tollens_rain
+domain     = logic
+context    = a conditional and the denial of its consequent
+premises   = if it rains the ground gets wet ;; the ground is not wet
+conclusion = it is not raining
+valid      = valid
+text       = if it rains the ground gets wet. the ground is not wet. so it is not raining.
+
+@record logic affirming_consequent
+domain     = logic
+context    = the commonest invalid step, which looks exactly like modus ponens
+premises   = if it rains the ground gets wet ;; the ground is wet
+conclusion = it is raining
+valid      = invalid
+note       = the ground could be wet because a pipe burst. a true conclusion does not make the step valid.
+text       = the ground being wet does not establish that it rained.
+
+@record logic syllogism_mortal
+domain     = logic
+premises   = every human is mortal ;; socrates is human
+conclusion = socrates is mortal
+valid      = valid
+text       = every human is mortal. socrates is human. so socrates is mortal.
+
+@record logic transitivity_bigger
+domain     = logic
+premises   = an elephant is bigger than a horse ;; a horse is bigger than a dog
+conclusion = an elephant is bigger than a dog
+valid      = valid
+text       = bigger than is transitive, so an elephant is bigger than a dog.
+
+@record logic induction_swans
+domain     = logic
+context    = induction is defeasible by construction, and the record has to say so
+premises   = every swan observed so far was white
+conclusion = the next swan will probably be white
+valid      = defeasible
+note       = a black swan refutes it without any of the premises having been false.
+text       = many white swans make the next one likely and not certain.
+
+@record logic abduction_wet_street
+domain     = logic
+context    = inference to the best explanation, which is what a diagnosis is
+premises   = the street is wet ;; rain would make the street wet ;; no other cause is in evidence
+conclusion = it probably rained
+valid      = defeasible
+text       = rain is the best available explanation for a wet street, not the only one.
+
+@record logic denying_antecedent
+domain     = logic
+premises   = if it rains the ground gets wet ;; it is not raining
+conclusion = the ground is not wet
+valid      = invalid
+text       = the ground can be wet for reasons other than rain.
+
+@record logic disjunctive_syllogism
+domain     = logic
+premises   = the fault is in the power supply or in the board ;; the power supply tested good
+conclusion = the fault is in the board
+valid      = valid
+text       = one of two, and the first is ruled out, so the second.
+
+@record logic contrapositive_equivalence
+domain     = logic
+premises   = every mammal is warm blooded
+conclusion = anything that is not warm blooded is not a mammal
+valid      = valid
+text       = a statement and its contrapositive say the same thing.
+
+# ============================ uncertainty ====================================================== #
+@record uncertainty water_boils
+domain     = physics
+claim      = water boils at one hundred degrees celsius at sea level
+epistemic  = known
+confidence = 0.98
+text       = measured many times by many people, so this is knowledge rather than belief.
+
+@record uncertainty most_birds_fly
+domain     = biology
+claim      = a bird can fly
+epistemic  = believed
+confidence = 0.8
+note       = true of most birds and false of penguins, ostriches and kiwis. a defeasible claim held as belief.
+text       = most birds fly, and a penguin is still a bird.
+
+@record uncertainty rain_tomorrow
+domain     = everyday
+claim      = it will rain here tomorrow
+epistemic  = unknown
+confidence = 0.0
+text       = nothing on record settles this, and inventing a number would be worse than saying so.
+
+@record uncertainty dark_matter_identity
+domain     = astronomy
+claim      = dark matter is made of an undiscovered particle
+epistemic  = believed
+confidence = 0.6
+text       = the leading explanation, not an established one.
+
+@record uncertainty coin_next_toss
+domain     = mathematics
+claim      = the next toss of a fair coin will be heads
+epistemic  = unknown
+confidence = 0.5
+note       = a confidence of exactly one half is the honest report of a genuinely open case, not a weak belief.
+text       = a fair coin gives no reason to prefer either side.
+
+@record uncertainty antibiotic_on_a_virus
+domain     = medicine
+claim      = an antibiotic will cure influenza
+epistemic  = known
+confidence = 0.95
+note       = known to be false. a definite no is knowledge, and semantics gives a denial a stored form.
+text       = antibiotics act on bacteria and influenza is a virus, so it will not.
+
+# ============================ contradiction and revision ======================================= #
+@record contradiction pluto_planet
+domain     = astronomy
+contradiction = pluto is a planet ?? pluto is a dwarf planet
+revision   = the second supersedes the first
+note       = the definition changed in two thousand and six. the older claim was not a lie, and it is no longer the answer.
+text       = pluto was counted a planet until the definition of planet was tightened.
+
+@record contradiction stomach_ulcers
+domain     = medicine
+contradiction = ulcers are caused by stress ?? ulcers are usually caused by helicobacter pylori
+revision   = the second supersedes the first
+note       = evidence, not authority, moved this one. the bacterium was cultured.
+text       = stomach ulcers were blamed on stress until a bacterium was found causing most of them.
+
+@record contradiction continental_drift
+domain     = earth_science
+contradiction = the continents have always been where they are ?? the continents move on tectonic plates
+revision   = the second supersedes the first
+text       = sea floor spreading supplied the mechanism the first claim said was missing.
+
+@record knowledge_revision spinach_iron
+domain     = medicine
+knowledge  = spinach | has_property | a moderate source of iron
+contradiction = spinach has ten times the iron of other vegetables ?? spinach has iron comparable to other green vegetables
+revision   = the second supersedes the first
+note       = the famous figure came from a decimal point, and repetition is not evidence.
+text       = spinach is a reasonable source of iron and not an exceptional one.
+
+@record knowledge_revision brain_ten_percent
+domain     = medicine
+knowledge  = brain | has_property | almost entirely active over a day
+contradiction = a person uses ten percent of their brain ?? imaging shows activity across the whole brain
+revision   = the second supersedes the first
+text       = there is no idle ninety percent.
+
+@record knowledge_revision blood_colour
+domain     = biology
+knowledge  = blood | has_property | red in every vessel
+contradiction = deoxygenated blood is blue ?? deoxygenated blood is dark red
+revision   = the second supersedes the first
+note       = veins look blue through skin. that is optics, not the colour of what is inside them.
+text       = blood is red whether it is carrying oxygen or not.
+
+@record contradiction bats_blindness
+domain     = biology
+contradiction = bats are blind ?? bats can see and also echolocate
+revision   = the second supersedes the first
+text       = bats have working eyes and use sound as well.
+
+@record contradiction great_wall_from_space
+domain     = geography
+contradiction = the great wall is visible from the moon ?? the great wall is not visible to the unaided eye from orbit
+revision   = the second supersedes the first
+text       = it is long and narrow, and narrowness is what matters at that distance.
+
+# ============================ prediction, error, calibration =================================== #
+@record prediction kettle_boil_time
+domain     = everyday
+context    = a litre of water in a two kilowatt kettle
+prediction = kettle:boil_seconds | 90 | 0.7
+result     = 140
+confidence = 0.7
+text       = the kettle was predicted to boil in ninety seconds and took a hundred and forty.
+
+@record prediction train_arrival
+domain     = everyday
+prediction = train:delay_minutes | 0 | 0.6
+result     = 12
+confidence = 0.6
+text       = the train was expected on time and arrived twelve minutes late.
+
+@record error_taxonomy misheard_word
+domain     = language
+context    = the turn produced no concepts at all
+prediction = turn:content | the master asked about the weather | 0.5
+result     = the master asked about the leather sofa
+diagnosis  = perception
+evidence   = stimulus | 1 ;; concepts |
+correction = re-read the turn before grounding it
+text       = nothing was misreasoned. the words never arrived correctly.
+
+@record error_taxonomy ungrounded_statement
+domain     = language
+context    = a plain statement of fact extracted no relation at all
+prediction = turn:triples | one relation | 0.6
+result     = no relation
+diagnosis  = grounding
+evidence   = expected_triples | 1 ;; triples |
+correction = the pattern table is missing this construction
+text       = it was read and it did not become structure.
+
+@record error_taxonomy stored_and_not_retrieved
+domain     = memory
+context    = the answer was on record and something else came back
+prediction = query:answer | paris | 0.7
+result     = lyon
+diagnosis  = memory
+evidence   = in_memory | 1 ;; recalled |
+correction = the retrieval cue was too weak, not the record
+text       = the record held it and the lookup did not find it.
+
+@record error_taxonomy sparrow_needs
+domain     = biology
+context    = a correct two step inheritance that the world has an exception to
+prediction = sparrow:needs | water | 0.6
+result     = food
+diagnosis  = relation
+evidence   = derived | 1 ;; predicate | requires
+correction = lower the transitivity of that one predicate and leave the others alone
+note       = nothing was misperceived, nothing failed to ground, and every fact reasoned from was true.
+text       = the defeasible step was the thing that was wrong.
+
+@record error_taxonomy pendulum_next_swing
+domain     = physics
+context    = a miss on what follows what
+prediction = pendulum:period | 1.0 | 0.6
+result     = 2.0
+diagnosis  = world_model
+evidence   = triples | 1
+correction = refit the arrow from length to period
+text       = the expectation about the next state was the thing that missed.
+
+@record error_taxonomy right_facts_wrong_conclusion
+domain     = logic
+context    = every fact correct and the step between them invalid
+prediction = conclusion:answer | it is raining | 0.6
+result     = a pipe burst
+diagnosis  = reasoning
+evidence   = triples | 1 ;; facts_correct | 1
+correction = affirming the consequent, not a missing fact
+text       = the facts were right and the conclusion was not.
+
+@record error_taxonomy right_answer_said_badly
+domain     = language
+context    = the content matched and the phrasing lost it
+prediction = answer:text | the capital is delhi | 0.7
+result     = raajdhaani dilli hai
+diagnosis  = language
+evidence   = content_correct | 1
+correction = the generator, not the store
+text       = the right thing said wrongly is still a miss, and it is a different repair.
+
+@record error_taxonomy nothing_singles_one_out
+domain     = general
+context    = the evidence does not name an organ
+prediction = answer:text | unclear | 0.3
+result     = something else
+diagnosis  = unattributed
+evidence   = organ | none
+correction = attribute nothing
+note       = a wrong attribution trains the wrong organ, which is strictly worse than declining.
+text       = when nothing singles out an organ, blaming one is worse than blaming none.
+
+@record calibration confident_and_right
+domain     = geography
+prediction = capital:france | paris | 0.95
+result     = paris
+confidence = 0.95
+text       = high confidence, correct. this is the band that should be crowded.
+
+@record calibration confident_and_wrong
+domain     = geography
+prediction = capital:australia | sydney | 0.9
+result     = canberra
+confidence = 0.9
+note       = the costly case. surprise is error weighted by how sure she was.
+text       = high confidence, wrong. this is the band that has to stay empty.
+
+@record calibration unsure_and_right
+domain     = history
+prediction = year:printing_press | about 1440 | 0.45
+result     = about 1440
+confidence = 0.45
+text       = low confidence, correct. under-confidence is a miscalibration too.
+
+@record calibration unsure_and_wrong
+domain     = astronomy
+prediction = moons:mars | 4 | 0.3
+result     = 2
+confidence = 0.3
+text       = low confidence, wrong. this is the band behaving as it should.
+
+# ============================ self-correction ================================================== #
+@record self_correction whale_is_a_fish
+domain     = biology
+context    = an answer given, checked, and repaired
+prediction = whale:is_a | fish | 0.6
+result     = mammal
+diagnosis  = relation
+evidence   = derived | 1 ;; predicate | is_a
+correction = a whale lives in water and feeds its young with milk, so it is a mammal
+belief     = whale is_a mammal
+text       = living in water was taken for the invariant, and feeding young with milk is the one that decides.
+
+@record self_correction sun_orbits_earth
+domain     = astronomy
+prediction = sun:orbits | the earth | 0.5
+result     = the earth orbits the sun
+diagnosis  = world_model
+correction = the direction of the arrow was reversed, not its existence
+belief     = earth orbits the sun
+text       = the two were connected. which one moved round the other was the error.
+
+@record self_correction divide_by_zero
+domain     = mathematics
+prediction = ten_over_zero:value | 0 | 0.5
+result     = undefined
+diagnosis  = reasoning
+evidence   = triples | 1 ;; facts_correct | 1
+correction = division by zero has no value, and returning zero is not a smaller mistake than returning anything else
+belief     = division by zero is undefined
+text       = the operation has no answer, and inventing one is the error.
+
+@record self_correction lightning_before_thunder
+domain     = physics
+prediction = thunder:arrives | before the lightning | 0.4
+result     = after the lightning
+diagnosis  = world_model
+correction = light travels faster than sound, so the flash always arrives first
+belief     = lightning is seen before thunder is heard
+text       = both leave together and one arrives first.
+
+@record self_correction seasons_from_distance
+domain     = astronomy
+prediction = summer:cause | the earth being closer to the sun | 0.6
+result     = the tilt of the earth's axis
+diagnosis  = world_model
+correction = the southern hemisphere has winter at the same moment, which distance cannot explain
+belief     = seasons are caused by axial tilt
+text       = the two hemispheres having opposite seasons at once is what rules distance out.
+
+# ---- contradictions on a relation that really does hold one value ----------------------------- #
+#
+# The pairs above disagree on `is_a`, which holds many values, so nothing is superseded and nothing
+# should be: "pluto is a planet" and "pluto is a dwarf planet" are not a functional clash. `_revise`
+# fires on the relations in `grounding._FUNCTIONAL`, and these three are there so that path is
+# actually exercised rather than assumed.
+
+@record contradiction capital_of_myanmar
+domain     = geography
+contradiction = the capital of myanmar is yangon ?? the capital of myanmar is naypyidaw
+revision   = the second supersedes the first
+knowledge  = myanmar | capital | naypyidaw
+clash      = myanmar | capital | yangon | naypyidaw
+note       = the seat of government moved in 2006. one country holds one capital, so this is a real clash.
+text       = yangon was the capital until the government moved to naypyidaw.
+
+@record contradiction where_is_the_office
+domain     = everyday
+contradiction = the office is located in the old building ?? the office is located in the new building
+revision   = the second supersedes the first
+clash      = the office | located_in | the old building | the new building
+note       = located_in is functional, so the second reading is a correction and not an addition.
+text       = it moved, and holding both would put it in two places.
+
+@record contradiction who_is_the_author
+domain     = language
+contradiction = the report was written by the intern ?? the report was written by the analyst
+revision   = the second supersedes the first
+clash      = the report | author | the intern | the analyst
+note       = one work, one author in this record's sense, so the two cannot both stand.
+text       = the byline was corrected after the fact.

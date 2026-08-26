@@ -1,0 +1,305 @@
+# discovery.u — the categories that are about not knowing yet: a hypothesis, its rivals, the
+# experiment that separates them, the law that comes out, and the gap nobody had noticed.
+#
+# `experiment` items are `name | what it would show if true | what it would show if false`, which
+# is the shape `epistemic.EpistemicCompiler` needs to call an observation discriminating: an
+# experiment both hypotheses predict the same answer to is not an experiment.
+
+# ============================ hypothesis formation ============================================= #
+@record hypothesis plant_wilting
+domain     = biology
+observation_text = a potted plant on a sunny windowsill has wilted overnight
+hypotheses = it ran out of water | 0.4 ;; the roots are rotting from too much water | 0.25 ;; it was scorched by direct sun | 0.2 ;; it is cold damage from the window | 0.15
+unknown    = which of the four is doing it
+text       = a wilted plant has at least four ordinary explanations and they call for opposite actions.
+
+@record hypothesis engine_wont_start
+domain     = technology
+observation_text = a car turns over slowly and does not start on a cold morning
+hypotheses = the battery is weak | 0.45 ;; the starter motor is failing | 0.2 ;; the fuel is not reaching the engine | 0.2 ;; the oil is too thick for the temperature | 0.15
+text       = slow cranking narrows it, and does not settle it.
+
+@record hypothesis bread_did_not_rise
+domain     = everyday
+observation_text = a loaf came out dense and flat
+hypotheses = the yeast was dead | 0.4 ;; the water was too hot and killed it | 0.25 ;; there was too much salt against the yeast | 0.2 ;; it was not left long enough | 0.15
+text       = four causes, one symptom.
+
+@record hypothesis network_is_slow
+domain     = computing
+observation_text = a service answers in two seconds where it used to answer in eighty milliseconds
+hypotheses = a database query lost its index | 0.35 ;; the cache is cold after a deploy | 0.3 ;; an upstream dependency is slow | 0.2 ;; the machine is out of memory and swapping | 0.15
+text       = the same symptom is produced by four different failures.
+
+@record hypothesis fever_after_travel
+domain     = medicine
+observation_text = a traveller returns from a tropical region with a cyclic fever
+hypotheses = malaria | 0.4 ;; influenza | 0.25 ;; a bacterial infection | 0.2 ;; dengue | 0.15
+note       = the cycle is the feature that raises the first one above the ordinary base rate.
+text       = the pattern of the fever is doing the work, not the fever.
+
+# ============================ rival hypotheses and the experiment that splits them ============= #
+@record rival_hypotheses plant_wilting_split
+domain     = biology
+hypotheses = it ran out of water | 0.5 ;; the roots are rotting | 0.5
+experiment = push a finger into the soil | dry soil means it ran out of water | wet soil means the roots are rotting ;; lift the pot and feel its weight | light means dry | heavy means waterlogged
+outcome    = push a finger into the soil | the soil is soaking wet
+text       = one observation, and the two explanations predict opposite results, which is what makes it worth doing.
+
+@record rival_hypotheses engine_split
+domain     = technology
+hypotheses = the battery is weak | 0.5 ;; the starter motor is failing | 0.5
+experiment = switch on the headlights and watch them while cranking | they dim badly, so it is the battery | they stay bright, so it is the starter
+outcome    = switch on the headlights and watch them while cranking | the lights stayed bright
+text       = the lights and the starter share the battery, which is why this splits them.
+
+@record rival_hypotheses fever_split
+domain     = medicine
+hypotheses = malaria | 0.5 ;; influenza | 0.5
+experiment = examine a blood film under a microscope | parasites visible means malaria | no parasites means it is not malaria
+outcome    = examine a blood film under a microscope | parasites were seen
+text       = the test is chosen because the two answers point different ways, not because it is easy.
+
+@record rival_hypotheses network_split
+domain     = computing
+hypotheses = a query lost its index | 0.5 ;; the cache is cold | 0.5
+experiment = run the same request twice in a row | the second is fast, so it was the cache | both are slow, so it is the query
+outcome    = run the same request twice in a row | both requests were slow
+text       = a cold cache is warm the second time and a missing index is not.
+
+@record rival_hypotheses bread_split
+domain     = everyday
+hypotheses = the yeast was dead | 0.5 ;; the dough was not left long enough | 0.5
+experiment = stir the same yeast into warm sugar water and wait ten minutes | it foams, so the yeast was alive | it stays flat, so the yeast was dead
+outcome    = stir the same yeast into warm sugar water and wait ten minutes | it stayed flat
+text       = testing the ingredient on its own separates it from how it was used.
+
+@record rival_hypotheses light_nature
+domain     = physics
+context    = the historical case where one experiment settled two centuries of argument
+hypotheses = light is a stream of particles | 0.5 ;; light is a wave | 0.5
+experiment = shine light through two narrow slits onto a screen | two bright bands means particles | many alternating bands means a wave
+outcome    = shine light through two narrow slits onto a screen | many alternating bright and dark bands appeared
+text       = interference fringes are what a wave does and what a stream of pellets does not.
+
+# ============================ experiment design ================================================= #
+@record experiment_design does_water_drive_growth
+domain     = biology
+question   = does watering cause the growth, or does something that comes with watering cause it
+experiment = give matched plants different measured amounts of water and nothing else different | growth tracks water, so water drives it | growth is flat, so something else does
+outcome    = give matched plants different measured amounts of water and nothing else different | growth rose with water
+note       = matched plants and one thing varied. everything else held is what makes the answer about water.
+text       = vary one thing, hold the rest, and measure.
+
+@record experiment_design placebo_control
+domain     = medicine
+question   = is the improvement from the drug or from being treated at all
+experiment = give one matched group the drug and the other an identical dummy | the drug group improves more, so it is the drug | both improve equally, so it is not
+outcome    = give one matched group the drug and the other an identical dummy | the drug group improved more
+text       = the control exists because getting better is something people do anyway.
+
+@record experiment_design blind_taste
+domain     = everyday
+question   = does the expensive coffee actually taste different
+experiment = serve both unlabelled in identical cups | the expensive one is picked out reliably | the picks are no better than chance
+outcome    = serve both unlabelled in identical cups | the picks were no better than chance
+text       = the label is the thing that has to be removed for the question to be about the taste.
+
+@record experiment_design ab_test_latency
+domain     = computing
+question   = does the new index make the endpoint faster in production
+experiment = route half the traffic to each version and compare the median | the new half is faster, so the index helps | the halves match, so it does not
+outcome    = route half the traffic to each version and compare the median | the new half was forty percent faster
+text       = the two halves see the same traffic at the same time, which is what a before and after cannot promise.
+
+@record experiment_design does_heavier_fall_faster
+domain     = physics
+question   = do heavier objects fall faster than light ones
+experiment = drop a heavy and a light ball of the same shape together in still air | the heavy one lands first | they land together
+outcome    = drop a heavy and a light ball of the same shape together in still air | they landed together
+note       = same shape, so air resistance is held rather than confounded with weight.
+text       = matching the shape is what makes this a test of weight.
+
+# ============================ discovery: readings to a law ===================================== #
+@record discovery boyle_from_readings
+domain     = physics
+context    = seven readings of a gas at constant temperature, and the pattern in them
+variables  = volume | pressure
+series     = 1 | 600 ;; 1.5 | 400 ;; 2 | 300 ;; 3 | 200 ;; 4 | 150 ;; 5 | 120 ;; 6 | 100
+law        = volume | causes | pressure | -1
+concept    = the product of pressure and volume is constant
+text       = pressure halves when volume doubles, and the product stays at six hundred throughout.
+
+@record discovery hooke_from_readings
+domain     = physics
+variables  = extension | force
+series     = 0 | 0 ;; 2 | 5 ;; 4 | 10 ;; 6 | 15 ;; 8 | 20 ;; 10 | 25
+law        = extension | causes | force | 1
+concept    = force is proportional to extension while the spring is elastic
+text       = every extra two centimetres adds the same five newtons.
+
+@record discovery lapse_rate_from_readings
+domain     = earth_science
+variables  = altitude | temperature
+series     = 0 | 15 ;; 1 | 8.5 ;; 2 | 2 ;; 3 | -4.5 ;; 4 | -11 ;; 5 | -17.5
+law        = altitude | causes | temperature | -1
+concept    = temperature falls by about six and a half degrees for each kilometre of altitude
+text       = the drop is the same for every kilometre, which is what makes it a rate.
+
+@record discovery pendulum_from_readings
+domain     = physics
+variables  = length | period
+series     = 0.25 | 1 ;; 1 | 2 ;; 2.25 | 3 ;; 4 | 4 ;; 6.25 | 5
+law        = length | causes | period | 1
+concept    = the period goes with the square root of the length, so four times the length doubles it
+text       = quadrupling the length doubles the period, which is a square root and not a proportion.
+
+@record scientific_law ohm_from_readings
+domain     = physics
+variables  = voltage | current
+series     = 1 | 0.2 ;; 2 | 0.4 ;; 4 | 0.8 ;; 6 | 1.2 ;; 10 | 2
+law        = voltage | causes | current | 1
+concept    = current is voltage divided by resistance, and the resistance here is five ohms
+text       = the ratio of voltage to current is the same five at every reading.
+
+@record scientific_law demand_from_readings
+domain     = economics
+variables  = price | demand
+series     = 20 | 112 ;; 30 | 98 ;; 40 | 84 ;; 50 | 70 ;; 60 | 56 ;; 70 | 42
+law        = price | causes | demand | -1
+concept    = demand falls by a fixed amount for each rise in price over this range
+text       = every ten rupees costs fourteen kilograms of sales.
+
+@record scientific_law dose_response
+domain     = medicine
+variables  = dose | relief
+series     = 0 | 0 ;; 50 | 2.3 ;; 100 | 3.2 ;; 200 | 4.5 ;; 400 | 6.4
+law        = dose | causes | relief | 1
+concept    = relief rises with the square root of the dose, so doubling it does not double the effect
+text       = the returns fall off, which is why the fourth doubling buys much less than the first.
+
+# ============================ unknown unknowns ================================================== #
+@record unknown_unknown scurvy_before_vitamins
+domain     = medicine
+belief     = sailors fall ill on long voyages because the sea air is bad
+anomaly    = ships carrying citrus had healthy crews on the same route and the same air
+missing    = a required nutrient that fresh food supplies and salt rations do not
+text       = the model had no slot for a substance a body needs and cannot make, so the citrus result looked like luck.
+
+@record unknown_unknown mercury_orbit_precession
+domain     = astronomy
+belief     = newtonian gravity accounts for every planetary orbit
+anomaly    = mercury's orbit precesses by a small amount that no planet accounts for
+missing    = a theory in which mass curves spacetime rather than pulling across it
+text       = an unexplained residue that would not shrink was the signature of a missing theory rather than a missing planet.
+
+@record unknown_unknown childbed_fever
+domain     = medicine
+belief     = childbed fever is caused by bad air in the ward
+anomaly    = the ward staffed by doctors coming from the dissection room had far more deaths than the one staffed by midwives
+missing    = an agent carried on hands from one body to another
+text       = the difference between two wards in the same building could not be air.
+
+@record unknown_unknown ulcer_bacterium
+domain     = medicine
+belief     = no bacterium can survive the acid of the stomach
+anomaly    = ulcers healed on antibiotics, which should do nothing to a stress disorder
+missing    = an organism that neutralises acid around itself
+text       = the treatment working was the anomaly that named the missing concept.
+
+@record unknown_unknown background_hiss
+domain     = astronomy
+belief     = the antenna noise is a fault in the equipment
+anomaly    = the hiss was the same in every direction, at every hour, in every season
+missing    = radiation left over from the early universe
+text       = a fault points somewhere. this pointed everywhere, which is what said it was not a fault.
+
+# ============================ curiosity ========================================================= #
+@record curiosity what_else_causes_growth
+domain     = biology
+unknown    = whether anything besides water is driving the growth
+question   = does anything else cause growth
+note       = the question `assume.AssumptionMiner` asks of any arrow held as if it were the only one.
+text       = one measured cause does not establish that it is the only cause.
+
+@record curiosity is_the_arrow_backwards
+domain     = biology
+unknown    = whether the direction of the water and growth arrow is settled
+question   = could growth cause water instead
+text       = five readings of two variables cannot tell which drives which, and that is a real gap rather than a silly one.
+
+@record curiosity condition_on_the_law
+domain     = chemistry
+unknown    = whether the rate law holds outside the range that was measured
+question   = does temperature raise the rate only up to some point
+text       = every fitted arrow is fitted over a range, and the edge of the range is a question.
+
+@record curiosity why_two_hemispheres
+domain     = astronomy
+unknown    = why the two hemispheres have opposite seasons at the same moment
+question   = what makes summer happen in one hemisphere and winter in the other at once
+text       = the question that rules out distance and points at tilt.
+
+@record curiosity gap_in_the_periodic_table
+domain     = chemistry
+unknown    = what belongs in a gap the arrangement leaves open
+question   = what element fills this space and what should its properties be
+text       = the table predicted elements before they were found, which is a gap being read as a question.
+
+# ============================ active learning =================================================== #
+@record active_learning which_test_first
+domain     = technology
+context    = four hypotheses and limited time, so the cheapest experiment that halves the space wins
+hypotheses = the battery is weak | 0.45 ;; the starter is failing | 0.2 ;; fuel is not reaching the engine | 0.2 ;; the oil is too thick | 0.15
+experiment = watch the headlights while cranking | dim means battery | bright means not the battery ;; strip and bench test the starter | a fault means the starter | none means it is elsewhere
+outcome    = watch the headlights while cranking | the lights stayed bright
+note       = the headlight test costs seconds and removes the most likely hypothesis. the bench test costs an hour and removes one.
+text       = the experiment worth running is the one that removes the most probability per unit of cost.
+
+@record active_learning where_to_measure
+domain     = biology
+context    = the arrow is fitted over zero to six litres and the interesting question is at the edges
+hypotheses = growth keeps rising with water | 0.5 ;; growth peaks and then falls with too much water | 0.5
+experiment = take one reading at twelve litres | still rising means the first | lower than at six means the second
+outcome    = take one reading at twelve litres | growth was lower than at six litres
+note       = the informative reading is outside the measured range, not another one inside it.
+text       = a sixth reading in the middle tells you almost nothing you did not have after five.
+
+@record active_learning label_the_uncertain_ones
+domain     = computing
+context    = a limited budget for labelling, spent where the model is least sure
+hypotheses = the model has learned this boundary | 0.5 ;; the model is guessing near this boundary | 0.5
+experiment = label the examples the model scores closest to a coin flip | accuracy jumps, so the boundary was the gap | accuracy is flat, so the gap is elsewhere
+outcome    = label the examples the model scores closest to a coin flip | accuracy on held out data rose sharply
+text       = labelling what it already gets right buys nothing.
+
+# ============================ research episodes ================================================= #
+@record research did_the_index_help
+domain     = computing
+question   = did adding the index actually make the endpoint faster for users
+steps      = record the median and ninety ninth percentile before ;; add the index on half the fleet ;; route matched traffic to both halves for a day ;; compare the two distributions ;; check whether writes got slower
+conclusion = the read path is forty percent faster at the median and writes are six percent slower, which is worth it here
+note       = the limitation is stated rather than left out: one day, one traffic mix, one region.
+text       = the answer holds for the traffic that was actually measured.
+
+@record research does_the_fertiliser_pay
+domain     = economics
+question   = does the extra fertiliser earn back what it costs
+steps      = measure yield at six application rates on matched plots ;; price the extra yield at the local market rate ;; subtract the cost of the fertiliser at each rate ;; find where the net gain stops rising
+conclusion = the gain rises to about sixty kilograms per hectare and is negative beyond a hundred
+text       = more of a thing that works is not always better, and the crossing point is the finding.
+
+@record research is_the_water_safe
+domain     = medicine
+question   = is the village well the source of the outbreak
+steps      = map which households are ill and which well each uses ;; test water from every well for contamination ;; check whether households that switched wells stopped falling ill ;; look for an upstream source of the contamination
+conclusion = illness follows one well, the water from it is contaminated, and cases stop when households switch
+text       = the map, the test and the switch are three independent lines pointing at one well.
+
+@record research why_did_accuracy_drop
+domain     = computing
+question   = why did the model get worse after the retrain
+steps      = compare the new training data against the old for distribution shift ;; hold the data fixed and rerun the old code ;; hold the code fixed and rerun on the old data ;; bisect the change that moves the number
+conclusion = the label pipeline dropped a category, so the model never saw it and could not predict it
+note       = holding one side fixed at a time is what turns two suspects into one.
+text       = the data changed and the code did not, and the bisect said which change did it.
