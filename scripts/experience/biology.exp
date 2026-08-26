@@ -1,0 +1,62 @@
+# biology.exp — the scenarios `universe.observe`'s own docstring uses as its example: a plant, a
+# quantity of water, and a growth that was measured rather than assumed.
+
+@scenario plant_growth
+domain      = biology
+actor       = gardener
+action      = water
+object      = plant
+cause       = water | litres | 0 1 2 3 4 5 6
+effect      = growth | centimetres
+law         = linear a=2.0 b=1.2
+belief      = linear a=8.0 b=-0.5
+precondition= the plant is alive
+consequence = the soil is wet
+sentence    = the gardener gave the plant {cause} litres of water and it grew {effect} centimetres
+noise       = 0.06
+seed        = 301
+
+@scenario sunlight_oxygen
+domain      = biology
+actor       = biologist
+action      = illuminate
+object      = pondweed
+cause       = light intensity | lux | 200 400 800 1200 1600 2000 2400
+effect      = oxygen | bubbles per minute
+law         = sqrt a=0.0 b=0.9
+belief      = linear a=5.0 b=0.001
+precondition= the pondweed is submerged
+consequence = bubbles rise from the leaves
+sentence    = the biologist lit the pondweed at {cause} lux and it released {effect} bubbles per minute
+noise       = 0.05
+seed        = 302
+
+@scenario fertiliser_yield
+domain      = biology
+actor       = farmer
+action      = fertilise
+object      = wheat plot
+cause       = fertiliser | kilograms per hectare | 0 20 40 60 80 100 120
+effect      = yield | tonnes per hectare
+law         = sqrt a=1.2 b=0.32
+belief      = linear a=1.2 b=0.05
+precondition= the soil is prepared
+consequence = the crop stands taller
+sentence    = the farmer applied {cause} kilograms per hectare of fertiliser and the yield was {effect} tonnes per hectare
+noise       = 0.04
+seed        = 303
+
+@scenario crowding_growth
+domain      = biology
+actor       = biologist
+action      = crowd
+object      = seedling tray
+cause       = seedling density | plants per tray | 5 10 20 30 40 50 60
+effect      = height | centimetres
+law         = linear a=24.0 b=-0.25
+belief      = linear a=10.0 b=0.3
+precondition= every tray gets the same water
+consequence = the seedlings compete for light
+sentence    = the biologist planted {cause} seedlings in the tray and the average height was {effect} centimetres
+noise       = 0.05
+seed        = 304

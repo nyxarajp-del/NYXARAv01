@@ -1,0 +1,47 @@
+# medicine.exp — dose and recovery curves. These are teaching scenarios with stated laws, not
+# clinical guidance: nothing here is about any person, and the numbers are the generator's.
+
+@scenario analgesic_relief
+domain      = medicine
+actor       = researcher
+action      = dose
+object      = trial group
+cause       = dose | milligrams | 0 50 100 200 300 400 500
+effect      = relief | points on a ten point scale
+law         = sqrt a=0.0 b=0.32
+belief      = linear a=0.0 b=0.02
+precondition= the trial group is matched for age
+consequence = reported pain falls
+sentence    = the researcher gave the trial group {cause} milligrams and the relief score was {effect} points
+noise       = 0.05
+seed        = 401
+
+@scenario sleep_reaction_time
+domain      = medicine
+actor       = researcher
+action      = restrict sleep of
+object      = volunteer
+cause       = sleep | hours | 3 4 5 6 7 8 9
+effect      = reaction time | milliseconds
+law         = linear a=760.0 b=-45.0
+belief      = linear a=200.0 b=25.0
+precondition= the volunteer is otherwise healthy
+consequence = the volunteer responds more slowly
+sentence    = the researcher let the volunteer sleep {cause} hours and the reaction time was {effect} milliseconds
+noise       = 0.04
+seed        = 402
+
+@scenario exercise_resting_pulse
+domain      = medicine
+actor       = physiologist
+action      = train
+object      = participant
+cause       = exercise | hours per week | 0 1 2 3 5 7 9
+effect      = resting pulse | beats per minute
+law         = linear a=78.0 b=-2.4
+belief      = linear a=60.0 b=1.5
+precondition= the participant is cleared for exercise
+consequence = the heart works less at rest
+sentence    = the physiologist had the participant train {cause} hours per week and the resting pulse was {effect} beats per minute
+noise       = 0.03
+seed        = 403

@@ -1,0 +1,77 @@
+# earth_and_everyday.exp — the ordinary worlds. A corpus of laboratory scenarios teaches a model
+# that measurement happens in laboratories; these are the same loop in a kitchen and outdoors.
+
+@scenario altitude_temperature
+domain      = earth_science
+actor       = climber
+action      = ascend
+object      = mountain path
+cause       = altitude | kilometres | 0 0.5 1 1.5 2 3 4 5
+effect      = temperature | degrees celsius
+law         = linear a=15.0 b=-6.5
+belief      = linear a=15.0 b=2.0
+precondition= the weather is settled
+consequence = the climber puts on a jacket
+sentence    = the climber reached {cause} kilometres of altitude and the temperature was {effect} degrees celsius
+noise       = 0.03
+seed        = 701
+
+@scenario rainfall_river_level
+domain      = earth_science
+actor       = hydrologist
+action      = gauge
+object      = river
+cause       = rainfall | millimetres | 0 10 25 50 75 100 150
+effect      = river level | metres
+law         = sqrt a=0.6 b=0.22
+belief      = linear a=4.0 b=-0.01
+precondition= the catchment is not already flooded
+consequence = the banks come closer to overtopping
+sentence    = the hydrologist recorded {cause} millimetres of rainfall and the river level was {effect} metres
+noise       = 0.04
+seed        = 702
+
+@scenario ice_melt_rate
+domain      = everyday
+actor       = cook
+action      = warm
+object      = bowl of ice
+cause       = room temperature | degrees celsius | 2 6 10 14 18 22 26 30
+effect      = melt rate | grams per minute
+law         = linear a=-1.5 b=0.62
+belief      = linear a=12.0 b=-0.3
+precondition= the ice starts frozen
+consequence = a puddle forms in the bowl
+sentence    = the cook left the bowl of ice at {cause} degrees celsius and it melted at {effect} grams per minute
+noise       = 0.06
+seed        = 703
+
+@scenario tyre_stopping_distance
+domain      = everyday
+actor       = driver
+action      = brake
+object      = car
+cause       = grip | coefficient | 0.2 0.3 0.4 0.5 0.6 0.7 0.8
+effect      = stopping distance | metres
+law         = inverse a=0.0 b=12.5
+belief      = linear a=5.0 b=20.0
+precondition= the driver brakes as hard as the tyres allow
+consequence = the car takes longer to stop
+sentence    = the driver braked with a grip of {cause} and the stopping distance was {effect} metres
+noise       = 0.04
+seed        = 704
+
+@scenario study_hours_marks
+domain      = everyday
+actor       = student
+action      = revise
+object      = exam paper
+cause       = study | hours | 0 2 4 8 12 16 20 25
+effect      = marks | percent
+law         = sqrt a=32.0 b=11.5
+belief      = linear a=32.0 b=0.8
+precondition= the syllabus is the same for everyone
+consequence = more questions are answered correctly
+sentence    = the student revised for {cause} hours and scored {effect} percent
+noise       = 0.05
+seed        = 705
