@@ -146,6 +146,37 @@ def test_search_report_exposes_pareto_front():
     assert report.champion.fingerprint() in champ_fps
 
 
+def test_the_champion_is_a_measurement_not_a_cheap_screen(monkeypatch):
+    """Regression: under successive halving only ``1/factor`` of each rung is fully evaluated and
+    the rest carry a screen score marked ``predicted`` — "honest: only a cheap screen". Screens
+    never enter the evaluation cache the Pareto front is built from, so crowning one produced a
+    champion that was not on its own frontier. With ``population_size=5`` and ``halving_factor=3``
+    four of every five candidates are screens, so a screen topping the sort was ordinary: it
+    reproduced 1 run in 6 on a fixed seed, and order-dependently in the full suite, because the
+    hall of fame warm-starts each population from what ran before it.
+
+    Driven rather than repeated. Handing the top fitness to a screen is exactly what halving can
+    do on its own, and asserting the rule directly does not need six searches — which would seed
+    the shared hall of fame and change the neighbours' results, the very coupling that hid this.
+    """
+    nas = NeuralArchitectureSearch(cfg=_cfg(), seed_corpus=_CORPUS)
+    real = nas._score_population
+
+    def screen_wins(genomes, folds, backend, seen, surrogate):
+        scored = real(genomes, folds, backend, seen, surrogate)
+        best = max(c.fitness for c in scored)
+        for candidate in scored:
+            if candidate.predicted:
+                candidate.fitness = best + 1.0
+                break
+        return scored
+
+    monkeypatch.setattr(nas, "_score_population", screen_wins)
+    report = nas.search()
+    assert any(c.predicted for c in report.leaderboard), "no screen ran; the rung was fully evaluated"
+    assert report.champion.fingerprint() in {c.genome.fingerprint() for c in report.pareto_front}
+
+
 def test_leaderboard_is_sorted_by_fitness():
     nas = NeuralArchitectureSearch(cfg=_cfg(), seed_corpus=_CORPUS)
     report = nas.search()
