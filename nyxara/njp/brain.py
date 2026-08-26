@@ -1388,7 +1388,14 @@ class NJPBrain:
                 # Composition along one relation, which `derive` does not do: `derive` chains
                 # *different* predicates (`is_a` then `needs`), and this chains one with itself.
                 # Two different walks, and only the first of them had a caller.
-                meta.register("compose", (ProblemKind.FACTUAL, ProblemKind.CAUSAL),
+                # **FACTUAL only, and the reason is arithmetic.** `max_attempts` is 3, and CAUSAL
+                # already has `causal`, `simulate` and `derive`. A fourth arm there does not add
+                # an option, it makes one unreachable: `test_a_strategy_that_produces_nothing_
+                # yields_to_one_that_can` exists because `causal` abstains on an intervention and
+                # `simulate` has to be reachable behind it, and a fourth candidate pushed
+                # `simulate` past the budget. Causal reachability is answered by `_strategy_causal`
+                # instead, which is the arm that owns causal questions.
+                meta.register("compose", (ProblemKind.FACTUAL,),
                               self._strategy_compose, prior=0.55)
             if self.calculator is not None:
                 # Registered for EMPIRICAL as well as SYMBOLIC, and that is not belt-and-braces.
@@ -1855,6 +1862,13 @@ class NJPBrain:
 
     def _strategy_causal(self, problem: str, ctx: Dict[str, Any]) -> Any:
         try:
+            # "does aag cause pasina" is a causal question about *two named things*, and
+            # explanation does not answer it — `world.why("aag")` explains the wrong end. The
+            # chain that does answer it is `core.connects`, priced by the predicate's own
+            # transitivity. Handled here rather than by a fourth CAUSAL arm; see the registration.
+            composed = self._strategy_compose(problem, ctx)
+            if composed:
+                return composed
             subject = str(ctx.get("subject") or "").strip().lower()
             if not subject or self.world is None:
                 return None
@@ -1908,8 +1922,9 @@ class NJPBrain:
             # outgoing edges of this relation is the subject, and a name nothing knows anything
             # about is not one.
             for candidate in self._subject_prefixes(subject, relation):
-                got = (self.learner.connects(candidate, obj, relation) if obj
-                       else self.learner.reach(candidate, relation))
+                resolved = self._resolve_relation(candidate, relation)
+                got = (self.learner.connects(candidate, obj, resolved) if obj
+                       else self.learner.reach(candidate, resolved))
                 if getattr(got, "kind", "") != "composed":
                     continue
                 # Kept for the caller, which prices the answer's confidence off the derivation
@@ -1919,6 +1934,31 @@ class NJPBrain:
             return None
         except Exception:  # noqa: BLE001
             return None
+
+    def _resolve_relation(self, subject: str, relation: str) -> str:
+        """The predicate the *store* filed, given the verb the question used.
+
+        They are not the same string and cannot be assumed to be. "does aag cause pasina" compiles
+        to ``cause``; the grounder files ``causes``. It happened to match for ``kizzle`` and that
+        near-miss is exactly how this kind of bug survives: the first case tried works, so nothing
+        looks wrong until a relation whose lemma differs comes along and the walk silently finds
+        no edges at all.
+
+        Resolved against the subject's own outgoing predicates rather than by a lemmatiser, so it
+        can only ever return a relation this subject actually has.
+        """
+        try:
+            wanted = relation.rstrip("s")
+            predicates = {str(p) for s, p, _o, _c in self.learner._edges()
+                          if str(s) == subject}
+            if relation in predicates:
+                return relation
+            for predicate in sorted(predicates):
+                if predicate.rstrip("s") == wanted:
+                    return predicate
+        except Exception:  # noqa: BLE001
+            return relation
+        return relation
 
     def _subject_prefixes(self, subject: str, relation: str) -> List[str]:
         """``subject`` and the shorter readings of it that the store has heard of."""

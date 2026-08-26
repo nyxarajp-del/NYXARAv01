@@ -333,15 +333,14 @@ def _norm_relation(brain: Any, relation: str) -> str:
 
     ``kizzles`` is filed as ``kizzle``. Reading the posterior under the surface form would report
     a relation nothing has ever moved, and the whole measurement would sit at its prior looking
-    like nothing was learned.
+    like nothing was learned. Delegated to the brain's own resolution so there is one rule for
+    this and not a second, looser one living in the benchmark.
     """
     try:
-        for _s, predicate, _o, _c in brain.learner._edges():
-            if str(predicate).startswith(relation[:max(3, len(relation) - 2)]):
-                return str(predicate)
+        subject = next(str(s) for s, _p, _o, _c in brain.learner._edges())
+        return brain._resolve_relation(subject, relation)
     except Exception:  # noqa: BLE001
-        pass
-    return relation
+        return relation
 
 
 def _transitivity(brain: Any, relation: str) -> float:
