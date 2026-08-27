@@ -1,0 +1,114 @@
+# physics.kb — mechanics, thermodynamics, waves, electromagnetism, relativity, quanta.
+#
+# Written for a fact store, so every line is a relation between two named things rather than a
+# paragraph. Where a claim is a generalisation that has known exceptions, it carries an @override
+# below the default confidence rather than being left out.
+
+# --- quantities and their units ------------------------------------------------------------- #
+force | is_a=physical quantity | unit=newton | causes=acceleration | causes=deformation
+newton | is_a=unit of force | symbol=N | means=the force that accelerates one kilogram at one metre per second squared
+energy | is_a=physical quantity | unit=joule | has_property=conserved | has_property=convertible between forms
+joule | is_a=unit of energy | symbol=J | means=the work done by one newton acting over one metre
+power | is_a=physical quantity | unit=watt | means=the rate at which energy is transferred
+watt | is_a=unit of power | symbol=W | means=one joule per second
+pressure | is_a=physical quantity | unit=pascal | means=force divided by area | causes=fluid flow from high to low
+pascal | is_a=unit of pressure | symbol=Pa | means=one newton per square metre
+temperature | is_a=physical quantity | unit=kelvin | means=the average kinetic energy of the particles in a body
+kelvin | is_a=unit of temperature | symbol=K | has_property=absolute
+electric current | is_a=physical quantity | unit=ampere | means=the rate of flow of electric charge
+ampere | is_a=unit of electric current | symbol=A
+voltage | is_a=physical quantity | unit=volt | also_known_as=potential difference | causes=current in a conductor
+volt | is_a=unit of voltage | symbol=V
+resistance | is_a=physical quantity | unit=ohm | causes=heating in a conductor | has_property=proportional to length
+frequency | is_a=physical quantity | unit=hertz | means=the number of cycles per second
+hertz | is_a=unit of frequency | symbol=Hz
+mass | is_a=physical quantity | unit=kilogram | has_property=a measure of inertia | has_property=independent of location
+kilogram | is_a=unit of mass | symbol=kg
+length | is_a=physical quantity | unit=metre | symbol=m
+time | is_a=physical quantity | unit=second | symbol=s
+charge | is_a=physical quantity | unit=coulomb | has_property=conserved | has_kind=positive charge | has_kind=negative charge
+
+# --- mechanics ------------------------------------------------------------------------------ #
+mechanics | is_a=branch of physics | involves=motion | involves=force | has_kind=classical mechanics | has_kind=quantum mechanics
+newton's first law | is_a=law of motion | means=a body stays at rest or in uniform motion unless a net force acts on it | also_known_as=the law of inertia
+newton's second law | is_a=law of motion | means=the net force on a body equals its mass times its acceleration
+newton's third law | is_a=law of motion | means=every action has an equal and opposite reaction
+inertia | is_a=property of matter | means=the resistance of a body to a change in its motion | requires=mass
+acceleration | is_a=physical quantity | means=the rate of change of velocity | requires=a net force | unit=metre per second squared
+velocity | is_a=vector quantity | means=speed in a stated direction | has_property=direction
+speed | is_a=scalar quantity | means=distance travelled per unit time
+momentum | is_a=vector quantity | means=mass times velocity | has_property=conserved in a closed system
+friction | is_a=contact force | causes=heat | causes=wear | causes=a slowing of motion | has_property=opposite to relative motion
+gravity | is_a=fundamental force | causes=weight | causes=tides | causes=orbits | has_property=always attractive | has_property=proportional to mass
+weight | is_a=force | means=the force gravity exerts on a mass | has_property=dependent on location
+work | is_a=physical quantity | means=force applied over a distance | unit=joule
+kinetic energy | is_a=form of energy | means=the energy a body has because it is moving | requires=motion
+potential energy | is_a=form of energy | means=the energy a body has because of its position | has_kind=gravitational potential energy | has_kind=elastic potential energy
+lever | is_a=simple machine | purpose=multiplying force | has_part=fulcrum | has_part=load | has_part=effort
+pulley | is_a=simple machine | purpose=changing the direction of a force | purpose=lifting loads
+inclined plane | is_a=simple machine | purpose=raising a load with less force
+centripetal force | is_a=force | means=the inward force that keeps a body moving in a circle | requires=circular motion
+torque | is_a=physical quantity | means=the turning effect of a force | causes=rotation | unit=newton metre
+
+# --- thermodynamics ------------------------------------------------------------------------- #
+thermodynamics | is_a=branch of physics | involves=heat | involves=work | involves=entropy
+first law of thermodynamics | is_a=physical law | means=energy cannot be created or destroyed | also_known_as=conservation of energy
+second law of thermodynamics | is_a=physical law | means=the entropy of an isolated system never decreases | causes=the arrow of time
+entropy | is_a=physical quantity | means=a measure of the disorder of a system | has_property=increasing in an isolated system
+heat | is_a=form of energy transfer | causes=expansion | causes=a rise in temperature | occurs_when=two bodies at different temperatures are in contact
+conduction | is_a=mode of heat transfer | requires=direct contact | occurs_when=particles pass energy to their neighbours
+convection | is_a=mode of heat transfer | requires=a fluid | occurs_when=warm fluid rises and cool fluid sinks
+radiation | is_a=mode of heat transfer | has_property=needs no medium | occurs_when=a body emits electromagnetic waves
+absolute zero | is_a=temperature | means=the temperature at which particles have minimum energy | has_property=zero kelvin | has_property=unreachable
+melting | is_a=change of state | occurs_when=a solid is heated to its melting point | requires=energy
+boiling | is_a=change of state | occurs_when=a liquid reaches its boiling point | requires=energy
+evaporation | is_a=change of state | occurs_when=molecules leave a liquid surface | causes=cooling of the remaining liquid
+condensation | is_a=change of state | occurs_when=a vapour is cooled | causes=dew | causes=cloud formation
+
+# --- waves, sound and light ----------------------------------------------------------------- #
+wave | is_a=disturbance that transfers energy | has_part=crest | has_part=trough | has_kind=transverse wave | has_kind=longitudinal wave
+wavelength | is_a=physical quantity | means=the distance between two successive crests | unit=metre
+amplitude | is_a=physical quantity | means=the maximum displacement of a wave from rest | causes=loudness in sound
+sound | is_a=longitudinal wave | requires=a medium | capable_of=reflect | capable_of=refract | has_property=slower in air than in water
+echo | is_a=reflected sound | occurs_when=sound reflects from a distant surface
+light | is_a=electromagnetic wave | has_property=travels at 299792458 metres per second in vacuum | capable_of=reflect | capable_of=refract | capable_of=diffract
+reflection | is_a=wave behaviour | occurs_when=a wave bounces off a surface | causes=images in a mirror
+refraction | is_a=wave behaviour | occurs_when=a wave changes speed entering a new medium | causes=the bending of light | causes=a rainbow
+diffraction | is_a=wave behaviour | occurs_when=a wave passes an edge or a narrow gap
+interference | is_a=wave behaviour | occurs_when=two waves overlap | causes=bright and dark fringes
+lens | is_a=optical device | purpose=focusing light | has_kind=convex lens | has_kind=concave lens
+prism | is_a=optical device | purpose=splitting white light into colours | causes=dispersion
+spectrum | is_a=range of wavelengths | has_part=red | has_part=green | has_part=violet
+doppler effect | is_a=wave phenomenon | occurs_when=a source moves relative to an observer | causes=a change in observed frequency
+
+# --- electromagnetism ----------------------------------------------------------------------- #
+electromagnetism | is_a=branch of physics | involves=electric fields | involves=magnetic fields
+electric field | is_a=field | causes=force on a charge | requires=charge
+magnetic field | is_a=field | causes=force on a moving charge | requires=a magnet or a current
+magnet | is_a=object | has_part=north pole | has_part=south pole | capable_of=attract iron | capable_of=repel a like pole
+electromagnet | is_a=magnet | requires=an electric current | purpose=lifting scrap metal | purpose=driving relays
+ohm's law | is_a=physical law | means=current equals voltage divided by resistance
+circuit | is_a=closed conducting path | has_part=source | has_part=conductor | has_part=load | has_kind=series circuit | has_kind=parallel circuit
+conductor | is_a=material | has_property=allows charge to flow freely | is_a=material with free electrons
+insulator | is_a=material | has_property=resists the flow of charge | purpose=preventing short circuits
+semiconductor | is_a=material | has_property=conductivity between a conductor and an insulator | purpose=making transistors
+transformer | is_a=electrical device | purpose=changing voltage | requires=alternating current
+electromagnetic induction | is_a=physical effect | occurs_when=a conductor moves through a magnetic field | causes=an induced voltage | discoverer=Michael Faraday
+
+# --- modern physics ------------------------------------------------------------------------- #
+special relativity | is_a=physical theory | author=Albert Einstein | means=the laws of physics are the same for all observers in uniform motion | causes=time dilation | causes=length contraction
+general relativity | is_a=physical theory | author=Albert Einstein | means=gravity is the curvature of spacetime by mass and energy | causes=gravitational lensing
+time dilation | is_a=relativistic effect | occurs_when=a clock moves fast or sits deep in a gravitational field
+quantum mechanics | is_a=physical theory | involves=wave functions | involves=probability | means=the description of matter and energy at atomic scale
+photon | is_a=elementary particle | means=a quantum of light | has_property=massless | has_property=chargeless
+electron | is_a=elementary particle | has_property=negatively charged | part_of=atom | symbol=e
+proton | is_a=subatomic particle | has_property=positively charged | part_of=atomic nucleus
+neutron | is_a=subatomic particle | has_property=electrically neutral | part_of=atomic nucleus
+quark | is_a=elementary particle | part_of=proton | part_of=neutron
+uncertainty principle | is_a=quantum principle | author=Werner Heisenberg | means=position and momentum cannot both be known exactly
+wave particle duality | is_a=quantum principle | means=matter and light behave as both waves and particles
+superconductivity | is_a=physical state | occurs_when=some materials are cooled below a critical temperature | has_property=zero electrical resistance
+nuclear fission | is_a=nuclear reaction | means=the splitting of a heavy nucleus | causes=the release of energy | purpose=generating power in reactors
+nuclear fusion | is_a=nuclear reaction | means=the joining of light nuclei | causes=the release of energy | occurs_when=nuclei meet at very high temperature
+radioactivity | is_a=nuclear process | discoverer=Henri Becquerel | causes=ionising radiation | has_kind=alpha decay | has_kind=beta decay | has_kind=gamma decay
+half life | is_a=physical quantity | means=the time in which half of a radioactive sample decays

@@ -1,0 +1,53 @@
+# economics.kb — how goods, money and work are organised, and the terms a newspaper assumes its
+# reader knows.
+
+# --- core ideas ---------------------------------------------------------------------------------------#
+economics | is_a=social science | purpose=explaining how scarce resources are allocated | has_kind=microeconomics | has_kind=macroeconomics
+scarcity | is_a=economic condition | means=that wants exceed the resources available | causes=the need to choose | causes=prices
+opportunity cost | is_a=economic concept | means=the value of the next best alternative given up by a choice
+supply | is_a=economic concept | means=how much sellers will offer at each price | causes=downward pressure on price when it rises
+demand | is_a=economic concept | means=how much buyers will buy at each price | causes=upward pressure on price when it rises
+market | is_a=institution | purpose=bringing buyers and sellers together | causes=a price
+price | is_a=economic signal | means=what must be given up to obtain a unit of a good | purpose=allocating scarce goods
+equilibrium price | is_a=price | occurs_when=the quantity supplied equals the quantity demanded
+competition | is_a=market condition | causes=lower prices | causes=pressure to improve quality
+monopoly | is_a=market structure | means=a market with a single seller | causes=higher prices | causes=less choice
+externality | is_a=economic concept | means=a cost or benefit falling on someone outside the transaction | has_kind=pollution | requires=regulation or pricing to correct
+public good | is_a=good | has_property=non rival | has_property=non excludable | has_kind=street lighting | has_kind=national defence
+
+# --- money and finance ------------------------------------------------------------------------------------#
+money | is_a=medium of exchange | purpose=making trade possible without barter | purpose=storing value | purpose=serving as a unit of account
+currency | is_a=money | means=the money issued by a state or union
+barter | is_a=exchange | means=trading goods directly for other goods | requires=a double coincidence of wants
+inflation | is_a=economic condition | means=a general rise in prices over time | causes=a fall in the purchasing power of money | requires=monetary policy to control
+deflation | is_a=economic condition | means=a general fall in prices | causes=deferred spending
+interest rate | is_a=price | means=the price of borrowing money | causes=less borrowing when it rises
+central bank | is_a=institution | purpose=setting monetary policy | purpose=issuing currency | purpose=acting as lender of last resort
+commercial bank | is_a=institution | purpose=taking deposits | purpose=making loans | causes=money creation through lending
+loan | is_a=financial contract | requires=repayment with interest | purpose=bringing future income into the present
+credit | is_a=financial arrangement | means=the ability to obtain goods now and pay later | causes=debt
+debt | is_a=obligation | means=money owed | causes=interest payments
+stock | is_a=financial asset | means=a share in the ownership of a company | causes=a claim on future profits
+bond | is_a=financial asset | means=a loan to a government or company that pays interest
+stock market | is_a=market | purpose=trading shares in companies | has_property=volatile in the short run
+insurance | is_a=financial contract | purpose=pooling risk across many people | requires=a premium
+tax | is_a=compulsory payment | purpose=funding public spending | has_kind=income tax | has_kind=sales tax | has_kind=corporate tax
+budget | is_a=financial plan | purpose=matching planned spending to expected income | purpose=avoiding debt
+savings | is_a=income not spent | purpose=funding future spending | purpose=providing a buffer against shocks
+
+# --- production and work -----------------------------------------------------------------------------------#
+GDP | means=gross domestic product | is_a=economic measure | means=the value of goods and services produced in a country in a year | purpose=comparing the size of economies | has_property=not a measure of wellbeing
+recession | is_a=economic condition | means=a sustained fall in economic activity | causes=rising unemployment | causes=lower investment
+unemployment | is_a=economic condition | means=people willing and able to work who cannot find work | causes=lost output | causes=hardship
+labour | is_a=factor of production | means=human effort applied to production
+capital | is_a=factor of production | means=the tools, machines and buildings used to produce
+productivity | is_a=economic measure | means=output per unit of input | causes=rising living standards over time
+division of labour | is_a=production method | means=splitting work into specialised tasks | causes=higher productivity | author=Adam Smith
+trade | is_a=economic activity | purpose=letting each party get what it values more | causes=specialisation
+comparative advantage | is_a=economic principle | means=that a country gains by producing what it forgoes least to make | author=David Ricardo | causes=gains from trade
+tariff | is_a=tax on imports | causes=higher prices for consumers | purpose=protecting a domestic industry
+globalisation | is_a=economic process | means=the growing integration of economies across borders | causes=cheaper goods | causes=exposure to distant shocks
+inequality | is_a=social and economic condition | means=an uneven distribution of income or wealth | causes=differences in opportunity
+subsistence farming | is_a=farming | purpose=feeding the farmer's own household
+company | is_a=organisation | purpose=producing goods or services for sale | has_part=owner | has_part=employee | has_part=capital
+entrepreneur | is_a=person | purpose=combining resources into a new venture | requires=bearing risk

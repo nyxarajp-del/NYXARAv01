@@ -1,0 +1,48 @@
+# economics.exp — the two demand curves everyone is told about and nobody has measured, plus a
+# congestion curve. All three have a falling truth and a rising prior, which is the misconception
+# a beginner actually holds.
+
+@scenario price_demand
+domain      = economics
+actor       = shopkeeper
+action      = price
+object      = crate of mangoes
+cause       = price | rupees per kilogram | 20 30 40 50 60 70 80
+effect      = demand | kilograms sold per day
+law         = linear a=140.0 b=-1.4
+belief      = linear a=20.0 b=0.8
+precondition= the stall is open
+consequence = fewer customers buy
+sentence    = the shopkeeper priced mangoes at {cause} rupees per kilogram and sold {effect} kilograms that day
+noise       = 0.05
+seed        = 501
+
+@scenario interest_borrowing
+domain      = economics
+actor       = bank
+action      = set rate for
+object      = loan book
+cause       = interest rate | percent | 2 4 6 8 10 12 14
+effect      = borrowing | crore rupees per month
+law         = linear a=120.0 b=-7.5
+belief      = linear a=40.0 b=3.0
+precondition= incomes are unchanged
+consequence = fewer loans are taken out
+sentence    = the bank set the interest rate at {cause} percent and borrowing was {effect} crore rupees that month
+noise       = 0.05
+seed        = 502
+
+@scenario density_commute
+domain      = economics
+actor       = planner
+action      = survey
+object      = city district
+cause       = population density | thousands per square kilometre | 2 5 10 15 20 25 30
+effect      = commute time | minutes
+law         = sqrt a=12.0 b=6.5
+belief      = linear a=40.0 b=-0.6
+precondition= the road network is unchanged
+consequence = journeys take longer
+sentence    = the planner surveyed a district at {cause} thousands per square kilometre and the commute time was {effect} minutes
+noise       = 0.04
+seed        = 503

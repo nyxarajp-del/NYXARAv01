@@ -1,0 +1,46 @@
+# chemistry.exp — rate and phase behaviour, where the everyday prior is linear and the world is not.
+
+@scenario reaction_rate
+domain      = chemistry
+actor       = chemist
+action      = heat
+object      = reaction flask
+cause       = temperature | degrees celsius | 10 20 30 40 50 60 70
+effect      = rate | millimoles per minute
+law         = square a=0.4 b=0.0035
+belief      = linear a=6.0 b=-0.04
+precondition= the reagents are already mixed
+consequence = bubbles form faster
+sentence    = the chemist heated the flask to {cause} degrees celsius and the rate was {effect} millimoles per minute
+noise       = 0.05
+seed        = 201
+
+@scenario salt_boiling_point
+domain      = chemistry
+actor       = chemist
+action      = dissolve salt in
+object      = water bath
+cause       = salt concentration | moles per litre | 0 0.5 1 1.5 2 2.5 3
+effect      = boiling point | degrees celsius
+law         = linear a=100.0 b=0.52
+belief      = linear a=100.0 b=-0.4
+precondition= the pressure is one atmosphere
+consequence = the water boils later
+sentence    = the chemist dissolved {cause} moles per litre of salt in the water and it boiled at {effect} degrees celsius
+noise       = 0.004
+seed        = 202
+
+@scenario catalyst_yield
+domain      = chemistry
+actor       = chemist
+action      = add catalyst to
+object      = reaction flask
+cause       = catalyst mass | grams | 0 0.5 1 2 3 4 5
+effect      = yield | percent
+law         = sqrt a=42.0 b=18.0
+belief      = linear a=42.0 b=1.5
+precondition= the reagents are in excess
+consequence = more product forms in the same time
+sentence    = the chemist added {cause} grams of catalyst to the flask and the yield was {effect} percent
+noise       = 0.03
+seed        = 203

@@ -1047,6 +1047,14 @@ _QUESTION_WORDS = frozenset({
     "hain", "ka", "ki", "ke", "ko", "se", "mein", "batao", "क्या", "कौन", "कहाँ", "है", "हैं",
 })
 
+#: Words that can open a wh-question and cannot open a polar one. Read by `_answer_polar`, which
+#: runs before the ordinary path and would otherwise swallow the question whole. Hindi ``kya`` is
+#: absent on purpose — it is the one interrogative here that does introduce a yes/no question.
+_WH_OPENERS = frozenset({
+    "what", "which", "who", "whom", "whose", "where", "when", "why", "how",
+    "kaun", "kahan", "kab", "kyun", "kaise", "कौन", "कहाँ", "कब", "क्यों", "कैसे",
+})
+
 _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # --- English ---
     (r"\bwhat\s+is\s+(?:my|mera|meri)\s+(?P<p>\w+)", ""),
@@ -2675,7 +2683,22 @@ class Grounder:
         A relation held for this subject with a *different* object is deliberately not evidence of
         "no". "X needs water" does not establish that X does not need light, and treating an open
         world as closed is how a knowledge gap turns into a confident denial.
+
+        **A wh-question is not a polar question, and the check has to be here.** This method runs
+        first in :meth:`answer`, so a wh-question it claims turns into UNKNOWN before the ordinary
+        path ever looks the fact up. Measured on the shipped world corpus: "when does solar eclipse
+        occur" compiled to ``polar_question(subject='solar', relation='eclipse', object='occur')``
+        — a three-word subject-verb-object read out of "when does *solar eclipse* occur" — and came
+        back UNKNOWN with the fact sitting in the store, while "when does melting occur" answered,
+        because a one-word subject leaves nothing to fill the object slot and the parse fails
+        honestly instead. Twenty-four questions failed that way and every one of them was a
+        multi-word subject.
+
+        ``kya`` is deliberately not in the guard: it is the one word in the list that really does
+        introduce a polar question ("kya tum aaoge?"). The rest cannot, in either language.
         """
+        if low.split(" ", 1)[0] in _WH_OPENERS:
+            return None
         try:
             from nyxara.njp.semantics import compile_meaning
         except Exception:  # noqa: BLE001

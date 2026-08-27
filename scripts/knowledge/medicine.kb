@@ -1,0 +1,58 @@
+# medicine.kb — how the body fails, what is done about it, and the public-health facts that a
+# general education carries.
+#
+# Every line here is textbook-level and general. Nothing in this file is advice about a person:
+# a fact store that says "fever is a raised body temperature" is doing its job, and one that
+# reads back a dose to someone is doing something this corpus deliberately does not equip it for.
+
+# --- concepts ---------------------------------------------------------------------------------------#
+medicine | is_a=discipline | purpose=preventing and treating disease | involves=diagnosis | involves=treatment | involves=prevention
+disease | is_a=condition | means=a disorder of structure or function in the body | has_kind=infectious disease | has_kind=chronic disease | has_kind=genetic disease
+symptom | is_a=sign of illness | means=something the patient notices | purpose=pointing towards a diagnosis
+diagnosis | is_a=clinical process | purpose=identifying which disease a patient has | requires=history | requires=examination | requires=tests@0.7
+pathogen | is_a=microorganism | capable_of=cause disease | has_kind=bacterium | has_kind=virus | has_kind=fungus | has_kind=parasite
+infection | is_a=disease process | occurs_when=a pathogen enters and multiplies in the body | causes=fever@0.7 | causes=inflammation
+inflammation | is_a=body response | causes=redness | causes=swelling | causes=heat | causes=pain | purpose=isolating and repairing damage
+fever | is_a=symptom | means=a body temperature above the normal range | occurs_when=the immune system responds to infection
+immunity | is_a=body state | means=protection against a particular pathogen | requires=prior exposure or vaccination
+antibody | is_a=protein | purpose=recognising and neutralising a specific pathogen | requires=the immune system
+vaccine | is_a=medical preparation | purpose=teaching the immune system to recognise a pathogen | causes=immunity without the disease | inventor=Edward Jenner
+antibiotic | is_a=medicine | purpose=killing or stopping bacteria | has_property=useless against a virus | causes=resistance when overused
+antibiotic resistance | is_a=public health problem | occurs_when=bacteria survive and multiply despite an antibiotic | causes=treatments that stop working | requires=careful prescribing to slow
+epidemic | is_a=disease event | means=a sharp rise in cases of a disease in a region
+pandemic | is_a=disease event | means=an epidemic that has spread across countries and continents
+quarantine | is_a=public health measure | purpose=separating people who may have been exposed | causes=slower spread
+public health | is_a=field | purpose=protecting the health of populations | involves=sanitation | involves=vaccination | involves=surveillance
+
+# --- common conditions -------------------------------------------------------------------------------#
+common cold | is_a=infectious disease | requires=a virus | causes=a runny nose | causes=a sore throat | has_property=self limiting
+influenza | is_a=infectious disease | requires=a virus | causes=fever | causes=muscle ache | has_property=not treatable with antibiotics
+tuberculosis | is_a=infectious disease | requires=a bacterium | located_in=the lungs | causes=a persistent cough
+malaria | is_a=infectious disease | requires=a parasite | occurs_when=an infected mosquito bites a person | causes=cycles of fever
+diabetes | is_a=chronic disease | means=a condition in which blood sugar is not properly regulated | requires=insulin or other treatment | causes=damage to nerves and vessels over time | has_kind=type one diabetes | has_kind=type two diabetes
+hypertension | is_a=chronic disease | also_known_as=high blood pressure | causes=strain on the heart and vessels | has_property=often without symptoms
+asthma | is_a=chronic disease | located_in=the airways | causes=wheezing | causes=breathlessness | occurs_when=airways narrow in response to a trigger
+anaemia | is_a=blood condition | means=too few red blood cells or too little haemoglobin | causes=tiredness | requires=iron in the commonest form
+allergy | is_a=immune reaction | occurs_when=the immune system responds to a harmless substance | causes=itching | causes=swelling
+stroke | is_a=medical emergency | occurs_when=blood flow to part of the brain is interrupted | causes=sudden weakness on one side | requires=immediate treatment
+heart attack | is_a=medical emergency | occurs_when=blood flow to part of the heart muscle is blocked | causes=chest pain | requires=immediate treatment
+cancer | is_a=disease | means=uncontrolled growth of abnormal cells | capable_of=spread to other tissues | has_kind=lung cancer | has_kind=breast cancer
+fracture | is_a=injury | means=a break in a bone | requires=immobilisation to heal
+dehydration | is_a=condition | occurs_when=the body loses more fluid than it takes in | causes=thirst | causes=dizziness | requires=fluids
+malnutrition | is_a=condition | occurs_when=a diet lacks the energy or nutrients a body needs | causes=stunted growth | causes=weakened immunity
+
+# --- practice and prevention ---------------------------------------------------------------------------#
+surgery | is_a=medical treatment | means=treating by operating on the body | requires=anaesthesia | requires=sterile technique
+anaesthesia | is_a=medical procedure | purpose=preventing pain during surgery | has_kind=general anaesthesia | has_kind=local anaesthesia
+X ray | is_a=imaging technique | purpose=seeing bone and dense tissue | discoverer=Wilhelm Rontgen | requires=ionising radiation
+MRI | means=magnetic resonance imaging | is_a=imaging technique | purpose=seeing soft tissue in detail | has_property=no ionising radiation
+ultrasound | is_a=imaging technique | purpose=imaging soft tissue and a fetus | requires=sound waves | has_property=safe in pregnancy
+blood test | is_a=diagnostic test | purpose=measuring what is in the blood
+first aid | is_a=practice | purpose=giving immediate help before professional care arrives | involves=stopping bleeding | involves=keeping an airway open
+CPR | means=cardiopulmonary resuscitation | is_a=emergency procedure | purpose=keeping blood and oxygen moving when the heart stops | involves=chest compressions
+sanitation | is_a=public health measure | purpose=separating waste from drinking water | causes=a large fall in infectious disease
+handwashing | is_a=hygiene practice | purpose=removing pathogens from the hands | causes=less transmission of infection
+exercise | is_a=physical activity | causes=a stronger heart | causes=better mood | causes=better blood sugar control | requires=regularity to help
+sleep | is_a=biological process | purpose=restoring the body and consolidating memory | requires=regular timing | causes=poor concentration when short
+balanced diet | is_a=eating pattern | consists_of=carbohydrate | consists_of=protein | consists_of=fat | consists_of=vitamins | consists_of=minerals | consists_of=fibre | purpose=supplying what the body needs
+smoking | is_a=health risk | causes=lung cancer | causes=heart disease | causes=chronic lung disease

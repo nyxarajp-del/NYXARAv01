@@ -1,0 +1,262 @@
+# mind.u — memory and its consolidation, other people's beliefs, her own capabilities, and which
+# method a problem is worth.
+#
+# `episode` items are `key | what happened | the cue that should bring it back`. `agents` items are
+# `who | what they believe or want`. The self_model records carry a capability and a measured
+# success, because `selfmodel.observe(capability, success)` is what turns those into an estimate,
+# and an estimate that was never wrong is not calibration.
+
+# ============================ memory episodes =================================================== #
+@record memory_episode master_sister_name
+domain     = general
+episode    = master.sister | the master said his sister is called Meera | sister
+context    = told once, in passing, and expected back much later
+text       = a fact about a person, bound to the word that should retrieve it.
+
+@record memory_episode first_ingest_of_conceptnet
+domain     = computing
+episode    = ingest.conceptnet | a quarter of a million triples were loaded and causal prediction fell from one to zero | ingest
+consolidate = keep the lesson and the number, drop the timestamps
+note       = the episode is worth keeping because of what it cost, not because of what it contained.
+text       = the load succeeded and the brain got worse, and that pairing is the memory.
+
+@record memory_episode the_kettle_took_longer
+domain     = everyday
+episode    = kettle.slow | the kettle was predicted to boil in ninety seconds and took a hundred and forty | kettle
+text       = a small miss, kept because the next prediction should start from it.
+
+@record memory_episode plant_died_from_overwatering
+domain     = biology
+episode    = plant.drowned | watering more made the wilting worse and the roots were rotten | plant
+text       = the surprising direction is what makes this worth storing.
+
+@record memory_episode outage_from_dropped_index
+domain     = computing
+episode    = outage.index | a migration dropped an index and the report went from two seconds to four minutes | index
+text       = the cause and the symptom together, keyed on the thing that would bring it back.
+
+@record memory_episode master_prefers_short_answers
+domain     = general
+episode    = master.style | the master asked for shorter answers with the numbers in them | answers
+text       = a preference is a fact about a person and belongs with the rest of them.
+
+# ============================ long term and consolidation ======================================= #
+@record long_term water_and_growth_consolidated
+domain     = biology
+episode    = plant.readings | seven separate waterings and measurements over a fortnight | water
+consolidate = keep the fitted arrow and its range, drop the seven individual readings
+note       = the sufficient statistics are kept and the samples are not, which is what makes a relation cost constant memory.
+text       = the law survives and the afternoons it was measured on do not.
+
+@record long_term outage_lessons
+domain     = computing
+episode    = outage.several | four outages over a year, three of them after an unchecked change | deploy
+consolidate = keep the pattern that unchecked changes precede outages, drop the individual dates
+text       = four episodes become one rule and the rule is what is worth carrying.
+
+@record long_term exam_revision
+domain     = everyday
+episode    = revision.sessions | twelve sessions across three weeks on eight topics | revision
+consolidate = keep which topics were weak and what fixed them, drop the session by session detail
+text       = the schedule is not the knowledge.
+
+@record forgetting old_phone_number
+domain     = everyday
+episode    = contact.old_number | a phone number replaced two years ago and never used since | phone number
+consolidate = drop it, and keep that the number changed
+note       = forgetting the value and keeping the fact that it changed is what stops a stale answer being given confidently.
+text       = discarding the number is right and discarding the change is not.
+
+@record forgetting superseded_pluto_claim
+domain     = astronomy
+episode    = pluto.reclassified | pluto was counted a planet until two thousand and six | pluto
+consolidate = keep the superseded claim marked as superseded rather than deleting it
+note       = deleting it loses the ability to explain why an older source says otherwise.
+text       = a wrong answer that was once right is evidence about the world, not noise.
+
+@record forgetting one_off_typo
+domain     = general
+episode    = typo.once | a single mistyped word in one turn, never repeated | typo
+consolidate = drop it entirely
+text       = a gap tally that keeps every one off noise cannot see a recurring gap.
+
+# ============================ social ============================================================ #
+@record social two_wells
+domain     = society
+agents     = the health officer | believes the illness comes from the water ;; the village head | believes it comes from the food at the fair ;; the shopkeeper | wants the fair not to be blamed
+claim      = the outbreak comes from the north well
+text       = three people, two beliefs and one interest, and the interest is not a belief.
+
+@record social deploy_disagreement
+domain     = computing
+agents     = the engineer | believes the fix is safe and small ;; the reviewer | believes it changes behaviour the tests do not cover ;; the operator | wants no deploys before the weekend
+claim      = the fix should go out today
+text       = the reviewer has an argument and the operator has a preference, and treating them the same is how the wrong one wins.
+
+@record social vaccine_hesitancy
+domain     = society
+agents     = the doctor | believes the vaccine is safe and effective ;; the parent | believes the risk is unknown and wants their child safe ;; the neighbour | repeats what they were told without holding it strongly
+claim      = the child should be vaccinated
+note       = the parent's goal and the doctor's goal are the same and their beliefs are not, which is the thing that gets missed.
+text       = disagreement about facts between people who want the same outcome.
+
+@record social credit_for_the_fix
+domain     = society
+agents     = the junior | found the bug and said so quietly ;; the senior | wrote the fix and announced it ;; the manager | wants the team to look effective
+claim      = the outage was resolved by the team
+text       = the claim is true and it hides who found it.
+
+# ============================ theory of mind ==================================================== #
+@record theory_of_mind moved_while_away
+domain     = society
+agents     = anil | put the keys on the table and left the room ;; bela | moved the keys to the drawer while he was out
+question   = where will anil look for the keys when he comes back
+note       = the answer is the table, and it is wrong about the world and right about anil.
+text       = predicting a person requires holding a belief you know to be false.
+
+@record theory_of_mind stale_dashboard
+domain     = computing
+agents     = the operator | is watching a dashboard that stopped updating an hour ago ;; the engineer | knows the metrics pipeline is broken
+question   = what does the operator think the error rate is
+text       = the operator believes the last number they saw, and telling them the true rate without telling them the dashboard is stale fixes one of the two problems.
+
+@record theory_of_mind surprise_party
+domain     = everyday
+agents     = the guests | know about the party ;; the birthday person | believes it is an ordinary evening
+question   = why does the birthday person suggest going out instead
+text       = their suggestion is sensible given what they believe, and only strange given what everyone else knows.
+
+@record theory_of_mind the_old_price
+domain     = economics
+agents     = the customer | remembers last month's price ;; the shopkeeper | knows the price rose yesterday
+question   = why does the customer offer the smaller amount
+text       = not dishonesty, an out of date belief.
+
+@record theory_of_mind two_readers_of_a_report
+domain     = general
+agents     = the author | knows which limitation the conclusion depends on ;; the reader | sees only the conclusion
+question   = what will the reader take the conclusion to cover
+text       = more than it does, unless the limitation is on the page.
+
+# ============================ self model ======================================================== #
+@record self_model arithmetic_is_weak
+domain     = general
+capability = long arithmetic without a tool
+success    = 0.35
+strategy   = call the calculator instead of attempting it
+note       = a capability estimate is only useful if it is allowed to be low.
+text       = knowing this is weak is what makes reaching for the tool the right move rather than a lack of confidence.
+
+@record self_model lookup_is_strong
+domain     = general
+capability = answering a question whose fact is in the store
+success    = 0.95
+text       = high and measured, which is what licenses answering directly rather than hedging.
+
+@record self_model multi_hop_is_middling
+domain     = general
+capability = answering a question that needs two inherited steps
+success    = 0.6
+strategy   = state the steps so the weak link is visible
+text       = the failure mode is a defeasible step, so showing the steps is what makes the error findable.
+
+@record self_model open_ended_generation_is_weak
+domain     = language
+capability = writing a long fluent passage from nothing
+success    = 0.3
+note       = a fact store answers in three or four words. calling that a weakness at generation is accurate and not self deprecation.
+text       = this is what she is not for, and saying so is more useful than trying.
+
+@record self_model calibration_is_the_capability
+domain     = general
+capability = reporting confidence that matches how often she is right
+success    = 0.7
+text       = being right is one capability and knowing how often is another.
+
+@record self_model causal_prediction_after_a_bulk_load
+domain     = computing
+capability = predicting an effect from a stated cause
+success    = 0.0
+note       = measured after loading eight thousand commonsense facts into the world model, which filled it and evicted her own relations.
+text       = the number was one before the load and zero after, and the capability estimate is what caught it.
+
+# ============================ meta learning ===================================================== #
+@record meta_learning worked_examples_beat_answers
+domain     = general
+capability = solving a procedure it has seen
+strategy   = train on the derivation rather than on the answer
+success    = 0.8
+note       = a model that has only seen answers has no mechanism for producing one.
+text       = seeing the steps is what lets the procedure be reproduced.
+
+@record meta_learning spacing_beats_cramming
+domain     = everyday
+capability = retaining what was studied
+strategy   = revisit at increasing intervals rather than all at once
+success    = 0.75
+text       = the same total time, distributed differently, retains more.
+
+@record meta_learning test_first_finds_the_gap
+domain     = general
+capability = spending study time where it helps
+strategy   = test before studying to find the weak topics
+success    = 0.8
+text       = without the test the time goes to what is already comfortable.
+
+@record meta_learning verify_generation
+domain     = computing
+capability = producing correct synthetic training data
+strategy   = generate freely and keep only what an independent check agrees with
+success    = 0.85
+text       = generation is trusted by nobody and verification is what makes scale safe.
+
+@record meta_learning small_model_needs_tools
+domain     = computing
+capability = answering factual questions at 300M parameters
+strategy   = put the facts in a store and learn when to retrieve rather than trying to memorise
+success    = 0.7
+text       = the capability that scales at this size is knowing when to look something up.
+
+# ============================ strategy selection ================================================ #
+@record strategy_selection two_plus_two
+domain     = mathematics
+problem    = what is two plus two
+strategy   = answer directly
+confidence = 0.99
+note       = deliberating over this costs time and buys nothing, and a system that deliberates over everything is slow where it did not need to be.
+text       = the cheap method is the right method here.
+
+@record strategy_selection long_division
+domain     = mathematics
+problem    = divide 91854 by 37
+strategy   = call the calculator
+confidence = 0.95
+text       = a procedure that can be done exactly by a tool should be.
+
+@record strategy_selection why_did_the_service_slow
+domain     = computing
+problem    = why did the endpoint get forty times slower after the release
+strategy   = deliberate: form hypotheses, design the cheapest discriminating test, then act
+confidence = 0.5
+text       = four plausible causes and no cheap single answer, which is exactly when the expensive method pays.
+
+@record strategy_selection capital_of_france
+domain     = geography
+problem    = what is the capital of france
+strategy   = retrieve from the store
+confidence = 0.98
+text       = it is on record, so nothing needs to be worked out.
+
+@record strategy_selection is_this_claim_true
+domain     = general
+problem    = should this contested claim be asserted
+strategy   = run the truth gauntlet and report the judgement rather than the belief
+confidence = 0.6
+text       = the cost of being confidently wrong is what decides the method here.
+
+@record strategy_selection nothing_on_record
+domain     = general
+problem    = what will the weather be next tuesday
+strategy   = abstain and say what would settle it
+confidence = 0.0
+text       = the right method for a question with no answer available is to say so.

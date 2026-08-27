@@ -1,0 +1,93 @@
+# physics.exp — worlds where the law is known exactly, so a fitted arrow can be marked right or
+# wrong rather than merely plausible. Every `belief` here is a real misconception: a linear prior
+# on a square law, a rising prior on a falling one.
+
+@scenario pendulum_period
+domain      = physics
+actor       = student
+action      = lengthen
+object      = pendulum
+cause       = length | metres | 0.25 0.5 0.75 1 1.5 2 2.5 3
+effect      = period | seconds
+law         = sqrt a=0.0 b=2.006
+belief      = linear a=0.0 b=1.4
+precondition= the pendulum swings freely
+consequence = the swing takes longer
+sentence    = the student set the pendulum length to {cause} metres and the period was {effect} seconds
+noise       = 0.03
+seed        = 101
+
+@scenario spring_force
+domain      = physics
+actor       = technician
+action      = stretch
+object      = spring
+cause       = extension | centimetres | 0 2 4 6 8 10 12
+effect      = force | newtons
+law         = linear a=0.0 b=2.5
+belief      = sqrt a=0.0 b=6.0
+precondition= the spring is within its elastic limit
+consequence = the spring pulls back harder
+sentence    = the technician stretched the spring by {cause} centimetres and the force was {effect} newtons
+noise       = 0.04
+seed        = 102
+
+@scenario gas_pressure
+domain      = physics
+actor       = technician
+action      = compress
+object      = gas cylinder
+cause       = volume | litres | 1 1.5 2 3 4 5 6
+effect      = pressure | kilopascals
+law         = inverse a=0.0 b=600.0
+belief      = linear a=20.0 b=15.0
+precondition= the temperature is held constant
+consequence = the cylinder gets harder to push
+sentence    = the technician set the gas volume to {cause} litres and the pressure was {effect} kilopascals
+noise       = 0.03
+seed        = 103
+
+@scenario air_drag
+domain      = physics
+actor       = engineer
+action      = accelerate
+object      = test vehicle
+cause       = speed | metres per second | 5 10 15 20 25 30 35 40
+effect      = drag | newtons
+law         = square a=0.0 b=0.55
+belief      = linear a=0.0 b=12.0
+precondition= the air is still
+consequence = the vehicle needs more power to hold speed
+sentence    = the engineer drove the test vehicle at {cause} metres per second and the drag was {effect} newtons
+noise       = 0.05
+seed        = 104
+
+@scenario ohms_current
+domain      = physics
+actor       = technician
+action      = raise
+object      = power supply
+cause       = voltage | volts | 1 2 3 4 6 8 10 12
+effect      = current | amperes
+law         = linear a=0.0 b=0.2
+belief      = square a=0.0 b=0.05
+precondition= the resistance is five ohms and constant
+consequence = the wire warms
+sentence    = the technician set the voltage to {cause} volts and the current was {effect} amperes
+noise       = 0.03
+seed        = 105
+
+@scenario lamp_brightness
+domain      = physics
+actor       = photographer
+action      = step back from
+object      = lamp
+cause       = distance | metres | 1 1.5 2 3 4 5 6
+effect      = brightness | lux
+law         = inverse a=0.0 b=400.0
+belief      = linear a=0.0 b=30.0
+precondition= the lamp output is constant
+consequence = the scene gets darker
+sentence    = the photographer stood {cause} metres from the lamp and the brightness was {effect} lux
+noise       = 0.04
+seed        = 106

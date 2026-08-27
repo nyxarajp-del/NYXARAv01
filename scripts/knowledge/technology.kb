@@ -1,0 +1,62 @@
+# technology.kb — machines and systems outside computing: energy, transport, materials,
+# communication, and the inventions whose names carry a date.
+
+# --- energy ------------------------------------------------------------------------------------------#
+energy source | has_kind=fossil fuel | has_kind=nuclear power | has_kind=solar power | has_kind=wind power | has_kind=hydroelectric power | has_kind=geothermal power
+renewable energy | is_a=energy source | means=energy from a source that is not depleted by use | causes=lower carbon emissions | has_kind=solar power | has_kind=wind power | has_kind=hydroelectric power
+solar panel | is_a=energy device | purpose=turning sunlight into electricity | requires=sunlight | consists_of=photovoltaic cells
+wind turbine | is_a=energy device | purpose=turning wind into electricity | requires=wind | has_part=blade | has_part=generator
+hydroelectric dam | is_a=energy device | purpose=turning falling water into electricity | requires=a river | causes=flooding of land upstream
+nuclear power plant | is_a=power station | requires=nuclear fission | causes=electricity without carbon emissions | causes=radioactive waste | has_part=reactor | has_part=coolant | has_part=containment
+battery | is_a=energy device | purpose=storing electrical energy chemically | has_part=anode | has_part=cathode | has_part=electrolyte | has_kind=lithium ion battery
+electric motor | is_a=machine | purpose=turning electrical energy into motion | requires=a magnetic field | requires=a current
+generator | is_a=machine | purpose=turning motion into electrical energy | requires=electromagnetic induction
+power grid | is_a=network | purpose=carrying electricity from generators to users | has_part=transmission line | has_part=substation | has_part=transformer
+steam engine | is_a=heat engine | inventor=Thomas Newcomen and James Watt | purpose=turning heat into motion | causes=the industrial revolution
+internal combustion engine | is_a=heat engine | requires=fuel | requires=air | causes=exhaust gases | purpose=powering vehicles
+fuel cell | is_a=energy device | purpose=turning hydrogen into electricity | causes=water as its only exhaust
+
+# --- transport ----------------------------------------------------------------------------------------#
+wheel | is_a=simple machine | purpose=reducing friction in moving a load | part_of=vehicle
+vehicle | has_kind=car | has_kind=bicycle | has_kind=train | has_kind=aircraft | has_kind=ship | purpose=carrying people or goods
+car | is_a=vehicle | has_part=engine | has_part=wheel | has_part=brake | has_part=steering wheel | requires=fuel or a battery
+bicycle | is_a=vehicle | has_part=wheel | has_part=pedal | has_part=chain | requires=a rider | has_property=very energy efficient
+train | is_a=vehicle | requires=rails | purpose=moving many people or heavy freight | has_property=efficient per passenger
+aircraft | is_a=vehicle | requires=lift | has_part=wing | has_part=engine | has_part=fuselage | capable_of=fly
+lift | is_a=aerodynamic force | occurs_when=air moves faster over a wing than under it | causes=flight
+ship | is_a=vehicle | requires=buoyancy | purpose=carrying freight across water | has_property=the cheapest way to move bulk goods
+rocket engine | is_a=engine | purpose=producing thrust in vacuum | requires=propellant | requires=an oxidiser
+GPS | means=global positioning system | is_a=navigation system | requires=satellites | purpose=finding a position on the earth
+
+# --- materials and manufacture ---------------------------------------------------------------------------#
+concrete | is_a=building material | consists_of=cement | consists_of=sand | consists_of=gravel | consists_of=water | has_property=strong in compression | has_property=weak in tension
+reinforced concrete | is_a=building material | consists_of=concrete | consists_of=steel | purpose=carrying both compression and tension
+glass | is_a=material | has_property=transparent | has_property=brittle | purpose=glazing windows | purpose=making lenses
+paper | is_a=material | consists_of=cellulose fibre | purpose=writing | purpose=packaging
+semiconductor fabrication | is_a=manufacturing process | purpose=building integrated circuits | requires=a clean room | requires=photolithography
+3D printing | is_a=manufacturing process | also_known_as=additive manufacturing | purpose=building an object layer by layer
+robot | is_a=machine | capable_of=perform tasks automatically | has_part=sensor | has_part=actuator | has_part=controller
+sensor | is_a=device | purpose=turning a physical quantity into a signal | has_kind=thermometer | has_kind=microphone | has_kind=camera
+actuator | is_a=device | purpose=turning a signal into motion
+
+# --- communication ------------------------------------------------------------------------------------------#
+telephone | is_a=communication device | inventor=Alexander Graham Bell | purpose=carrying speech over a distance
+radio | is_a=communication technology | inventor=Guglielmo Marconi | requires=electromagnetic waves | purpose=broadcasting sound
+television | is_a=communication device | purpose=receiving broadcast pictures and sound
+mobile phone | is_a=communication device | requires=a cellular network | purpose=carrying calls and data | has_part=battery | has_part=antenna | has_part=screen
+smartphone | is_a=mobile phone | has_part=touchscreen | has_part=camera | capable_of=run applications
+optical fibre | is_a=transmission medium | purpose=carrying data as pulses of light | has_property=very high bandwidth | requires=total internal reflection
+antenna | is_a=device | purpose=radiating or receiving radio waves
+printing | is_a=technology | purpose=reproducing text and images | has_kind=letterpress | has_kind=offset printing | has_kind=digital printing
+
+# --- named inventions ----------------------------------------------------------------------------------------#
+light bulb | is_a=invention | inventor=Thomas Edison | purpose=producing light from electricity
+aeroplane | is_a=invention | inventor=the Wright brothers | means=the powered heavier than air craft first flown in 1903
+penicillin | is_a=antibiotic | discoverer=Alexander Fleming | means=the first widely used antibiotic, found in 1928 | causes=a large fall in deaths from infection
+transistor radio | is_a=invention | means=the portable radio made possible by the transistor in the 1950s
+refrigerator | is_a=appliance | purpose=keeping food cold | requires=a compressor | causes=less food spoilage
+microscope | is_a=instrument | purpose=seeing objects too small for the eye | has_kind=optical microscope | has_kind=electron microscope
+thermometer | is_a=instrument | purpose=measuring temperature | unit=degree celsius
+clock | is_a=instrument | purpose=measuring the passage of time | has_part=oscillator | has_part=counter | has_part=display
+compass | is_a=instrument | purpose=finding direction | requires=the earth's magnetic field
+camera | is_a=instrument | purpose=recording an image | has_part=lens | has_part=sensor | has_part=shutter

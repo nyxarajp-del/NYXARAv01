@@ -1,0 +1,91 @@
+# chemistry.kb — atoms, bonds, reactions, the elements a general education names, and the
+# everyday substances that make those abstractions checkable.
+
+# --- structure of matter -------------------------------------------------------------------- #
+atom | is_a=smallest unit of an element | has_part=nucleus | has_part=electron | has_property=electrically neutral
+atomic nucleus | is_a=core of an atom | consists_of=protons | consists_of=neutrons | has_property=positively charged
+element | is_a=pure substance | means=a substance made of one kind of atom | has_property=cannot be broken down chemically
+compound | is_a=pure substance | means=a substance of two or more elements chemically bonded | has_property=fixed composition
+mixture | is_a=combination of substances | has_property=variable composition | has_property=separable by physical means | has_kind=solution | has_kind=suspension | has_kind=colloid
+molecule | is_a=group of bonded atoms | requires=chemical bonds
+ion | is_a=charged particle | occurs_when=an atom gains or loses electrons | has_kind=cation | has_kind=anion
+isotope | is_a=variant of an element | means=an atom with the usual protons but a different number of neutrons
+periodic table | is_a=arrangement of the elements | author=Dmitri Mendeleev | purpose=predicting the properties of an element from its position | has_part=period | has_part=group
+atomic number | is_a=property of an element | means=the number of protons in the nucleus | has_property=unique to each element
+mole | is_a=unit of amount of substance | symbol=mol | means=the amount containing as many particles as there are atoms in twelve grams of carbon twelve
+
+# --- bonding and reaction ------------------------------------------------------------------- #
+chemical bond | is_a=attraction between atoms | has_kind=ionic bond | has_kind=covalent bond | has_kind=metallic bond
+ionic bond | is_a=chemical bond | occurs_when=one atom transfers electrons to another | causes=a crystal lattice
+covalent bond | is_a=chemical bond | occurs_when=two atoms share a pair of electrons
+metallic bond | is_a=chemical bond | occurs_when=metal ions sit in a sea of free electrons | causes=electrical conductivity
+hydrogen bond | is_a=weak attraction | occurs_when=hydrogen bonded to oxygen or nitrogen attracts a nearby lone pair | causes=the high boiling point of water
+chemical reaction | is_a=process | means=a rearrangement of atoms into new substances | has_part=reactant | has_part=product | requires=activation energy
+catalyst | is_a=substance | purpose=speeding up a reaction | has_property=not consumed by the reaction | causes=a lower activation energy
+oxidation | is_a=chemical change | means=the loss of electrons by a substance | causes=rust in iron
+reduction | is_a=chemical change | means=the gain of electrons by a substance
+combustion | is_a=chemical reaction | requires=fuel | requires=oxygen | requires=heat | causes=carbon dioxide | causes=water vapour
+neutralisation | is_a=chemical reaction | occurs_when=an acid meets a base | causes=a salt | causes=water
+electrolysis | is_a=chemical process | requires=an electric current | purpose=splitting a compound into its elements
+photosynthesis | is_a=chemical process | occurs_when=a green plant is exposed to light | requires=sunlight | requires=carbon dioxide | requires=water | causes=glucose | causes=oxygen
+respiration | is_a=chemical process | requires=glucose | requires=oxygen | causes=carbon dioxide | causes=water | causes=energy for the cell
+corrosion | is_a=chemical process | occurs_when=a metal reacts with its surroundings | causes=weakening of the metal
+
+# --- acids, bases and solutions ------------------------------------------------------------- #
+acid | is_a=substance | has_property=sour | has_property=a pH below seven | capable_of=donate a proton | capable_of=turn litmus red
+base | is_a=substance | has_property=bitter | has_property=a pH above seven | capable_of=accept a proton | capable_of=turn litmus blue
+salt | is_a=ionic compound | occurs_when=an acid is neutralised by a base | purpose=seasoning food | purpose=preserving food
+pH | is_a=scale | means=a measure of how acidic or basic a solution is | has_property=running from zero to fourteen
+solution | is_a=homogeneous mixture | has_part=solute | has_part=solvent
+solvent | is_a=substance that dissolves another | purpose=dissolving a solute
+water | is_a=compound | formula=H2O | consists_of=hydrogen | consists_of=oxygen | has_property=a universal solvent | has_property=densest at four degrees celsius | has_property=boils at one hundred degrees celsius at sea level
+
+# --- named elements ------------------------------------------------------------------------- #
+hydrogen | is_a=chemical element | symbol=H | has_property=the lightest element | has_property=the most abundant element in the universe
+helium | is_a=noble gas | symbol=He | has_property=inert | purpose=filling balloons | purpose=cooling superconducting magnets
+carbon | is_a=chemical element | symbol=C | has_property=able to form four bonds | has_property=the basis of organic chemistry | has_kind=diamond | has_kind=graphite
+nitrogen | is_a=chemical element | symbol=N | has_property=about seventy eight percent of the air | purpose=making fertiliser
+oxygen | is_a=chemical element | symbol=O | discoverer=Joseph Priestley | capable_of=support combustion | purpose=supporting respiration | has_property=about twenty one percent of the air
+sodium | is_a=alkali metal | symbol=Na | has_property=reacts violently with water | has_property=soft
+magnesium | is_a=alkaline earth metal | symbol=Mg | has_property=burns with a bright white flame | part_of=chlorophyll
+aluminium | is_a=metal | symbol=Al | has_property=light | has_property=corrosion resistant | purpose=making aircraft | purpose=making cans
+silicon | is_a=metalloid | symbol=Si | purpose=making semiconductors | has_property=the second most abundant element in the crust
+phosphorus | is_a=chemical element | symbol=P | part_of=DNA | part_of=bone
+sulfur | is_a=chemical element | symbol=S | has_property=yellow | purpose=making sulfuric acid
+chlorine | is_a=halogen | symbol=Cl | purpose=disinfecting water | has_property=a green yellow gas
+potassium | is_a=alkali metal | symbol=K | purpose=plant nutrition | has_property=essential to nerve function
+calcium | is_a=alkaline earth metal | symbol=Ca | part_of=bone | part_of=teeth
+iron | is_a=metal | symbol=Fe | has_property=magnetic | purpose=making steel | part_of=haemoglobin
+copper | is_a=metal | symbol=Cu | has_property=ductile | has_property=an excellent conductor | has_property=reddish brown | purpose=making electrical wire
+zinc | is_a=metal | symbol=Zn | purpose=galvanising steel
+silver | is_a=precious metal | symbol=Ag | has_property=the best electrical conductor | purpose=making jewellery
+gold | is_a=precious metal | symbol=Au | has_property=unreactive | has_property=malleable | purpose=making jewellery | purpose=backing currency
+mercury | is_a=metal | symbol=Hg | has_property=liquid at room temperature | has_property=toxic
+lead | is_a=metal | symbol=Pb | has_property=dense | has_property=toxic | purpose=shielding against radiation
+uranium | is_a=radioactive element | symbol=U | purpose=fuelling nuclear reactors
+neon | is_a=noble gas | symbol=Ne | purpose=making signs glow
+
+# --- named compounds ------------------------------------------------------------------------ #
+carbon dioxide | is_a=compound | formula=CO2 | causes=the greenhouse effect | has_property=produced by respiration | has_property=absorbed by plants
+methane | is_a=hydrocarbon | formula=CH4 | is_a=greenhouse gas | purpose=fuelling stoves
+ammonia | is_a=compound | formula=NH3 | purpose=making fertiliser | has_property=pungent
+sulfuric acid | is_a=strong acid | formula=H2SO4 | purpose=making fertiliser | has_property=corrosive
+sodium chloride | is_a=salt | formula=NaCl | also_known_as=table salt | consists_of=sodium | consists_of=chlorine
+glucose | is_a=sugar | formula=C6H12O6 | purpose=fuelling the cell | causes=a rise in blood sugar
+ethanol | is_a=alcohol | formula=C2H5OH | purpose=disinfecting | purpose=fuelling engines
+calcium carbonate | is_a=compound | formula=CaCO3 | part_of=limestone | part_of=chalk | part_of=seashell
+ozone | is_a=compound | formula=O3 | purpose=absorbing ultraviolet light | located_in=the stratosphere
+
+# --- organic and applied -------------------------------------------------------------------- #
+organic chemistry | is_a=branch of chemistry | involves=carbon compounds | involves=functional groups
+hydrocarbon | is_a=organic compound | consists_of=hydrogen | consists_of=carbon | purpose=fuelling engines
+polymer | is_a=large molecule | consists_of=repeating units | has_kind=plastic | has_kind=protein | has_kind=cellulose
+plastic | is_a=synthetic polymer | has_property=mouldable | has_property=slow to decompose | causes=persistent pollution
+protein | is_a=biological polymer | consists_of=amino acids | purpose=building tissue | purpose=catalysing reactions
+enzyme | is_a=protein | purpose=catalysing a biological reaction | has_property=specific to its substrate | has_property=denatured by heat
+distillation | is_a=separation technique | purpose=separating liquids by boiling point | requires=heat
+chromatography | is_a=separation technique | purpose=separating the components of a mixture
+crystallisation | is_a=separation technique | occurs_when=a saturated solution is cooled or evaporated
+alloy | is_a=mixture of metals | has_kind=steel | has_kind=brass | has_kind=bronze | purpose=improving strength
+steel | is_a=alloy | consists_of=iron | consists_of=carbon | has_property=strong | purpose=building structures
+brass | is_a=alloy | consists_of=copper | consists_of=zinc

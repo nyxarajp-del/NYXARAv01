@@ -1,0 +1,96 @@
+# biology.kb — the cell, the body's systems, heredity, evolution, ecology and the classification
+# a general education gives. Kind-level claims carry an @override, because "a bird can fly" is
+# defeasible and a penguin is still a bird.
+
+# --- the cell ------------------------------------------------------------------------------- #
+cell | is_a=basic unit of life | has_part=cell membrane | has_part=cytoplasm | has_kind=prokaryotic cell | has_kind=eukaryotic cell | capable_of=divide | capable_of=respire
+cell membrane | is_a=cell structure | purpose=controlling what enters and leaves the cell | consists_of=a phospholipid bilayer
+nucleus | is_a=cell structure | purpose=holding the genetic material | part_of=eukaryotic cell
+mitochondrion | is_a=organelle | purpose=releasing energy from glucose | also_known_as=the powerhouse of the cell | part_of=eukaryotic cell
+chloroplast | is_a=organelle | purpose=carrying out photosynthesis | part_of=plant cell | consists_of=chlorophyll
+ribosome | is_a=organelle | purpose=assembling proteins
+cell wall | is_a=cell structure | purpose=giving the cell shape and support | part_of=plant cell | consists_of=cellulose
+prokaryotic cell | is_a=cell | has_property=no nucleus | has_property=small | part_of=bacterium
+eukaryotic cell | is_a=cell | has_property=a true nucleus | has_property=membrane bound organelles
+mitosis | is_a=cell division | causes=two identical daughter cells | purpose=growth | purpose=repair | has_part=prophase | has_part=metaphase | has_part=anaphase | has_part=telophase
+meiosis | is_a=cell division | causes=four cells with half the chromosomes | purpose=making gametes | causes=genetic variation
+osmosis | is_a=transport process | means=the movement of water across a membrane from dilute to concentrated | requires=a partially permeable membrane
+diffusion | is_a=transport process | means=the movement of particles from high to low concentration | has_property=passive
+active transport | is_a=transport process | requires=energy | means=movement against a concentration gradient
+
+# --- molecules of life ---------------------------------------------------------------------- #
+DNA | is_a=nucleic acid | means=deoxyribonucleic acid | has_property=a double helix | purpose=storing genetic information | consists_of=nucleotides | discoverer=James Watson and Francis Crick
+RNA | is_a=nucleic acid | means=ribonucleic acid | purpose=carrying genetic instructions to the ribosome | has_property=single stranded
+gene | is_a=unit of heredity | means=a length of DNA that codes for a protein | part_of=chromosome
+chromosome | is_a=cell structure | consists_of=DNA | consists_of=protein | part_of=nucleus
+genome | is_a=complete set of genes | part_of=organism
+carbohydrate | is_a=nutrient | purpose=supplying energy | has_kind=sugar | has_kind=starch | has_kind=cellulose
+lipid | is_a=nutrient | purpose=storing energy | purpose=building membranes | has_kind=fat | has_kind=oil
+vitamin | is_a=nutrient | has_property=needed in small amounts | purpose=supporting metabolism
+haemoglobin | is_a=protein | purpose=carrying oxygen in the blood | part_of=red blood cell | consists_of=iron
+chlorophyll | is_a=pigment | purpose=absorbing light for photosynthesis | has_property=green
+
+# --- human body systems --------------------------------------------------------------------- #
+circulatory system | is_a=organ system | has_part=heart | has_part=blood vessel | has_part=blood | purpose=transporting oxygen and nutrients
+heart | is_a=organ | purpose=pumping blood | has_part=atrium | has_part=ventricle | has_property=four chambered in humans
+blood | is_a=body fluid | consists_of=plasma | consists_of=red blood cells | consists_of=white blood cells | consists_of=platelets | purpose=transporting oxygen
+artery | is_a=blood vessel | purpose=carrying blood away from the heart | has_property=thick walled
+vein | is_a=blood vessel | purpose=carrying blood back to the heart | has_part=valve
+capillary | is_a=blood vessel | purpose=exchanging gases and nutrients with tissue | has_property=one cell thick
+respiratory system | is_a=organ system | has_part=lung | has_part=trachea | has_part=diaphragm | purpose=exchanging oxygen and carbon dioxide
+lung | is_a=organ | purpose=exchanging gases | has_part=alveolus
+digestive system | is_a=organ system | has_part=mouth | has_part=stomach | has_part=small intestine | has_part=large intestine | has_part=liver | purpose=breaking food into absorbable molecules
+stomach | is_a=organ | purpose=digesting protein | has_property=strongly acidic
+liver | is_a=organ | purpose=detoxifying the blood | purpose=producing bile | purpose=storing glycogen
+kidney | is_a=organ | purpose=filtering waste from the blood | purpose=regulating water balance | part_of=excretory system
+nervous system | is_a=organ system | has_part=brain | has_part=spinal cord | has_part=nerve | purpose=carrying signals through the body
+brain | is_a=organ | purpose=processing information | has_part=cerebrum | has_part=cerebellum | has_part=brainstem | requires=oxygen | requires=glucose
+neuron | is_a=nerve cell | has_part=axon | has_part=dendrite | capable_of=transmit an electrical signal
+skeletal system | is_a=organ system | has_part=bone | has_part=joint | has_part=cartilage | purpose=supporting the body | purpose=protecting organs
+bone | is_a=tissue | consists_of=calcium | purpose=supporting the body | purpose=producing blood cells
+muscle | is_a=tissue | capable_of=contract | has_kind=skeletal muscle | has_kind=smooth muscle | has_kind=cardiac muscle
+immune system | is_a=organ system | purpose=defending the body against pathogens | has_part=white blood cell | has_part=lymph node
+endocrine system | is_a=organ system | purpose=regulating the body with hormones | has_part=pituitary gland | has_part=thyroid gland | has_part=pancreas
+hormone | is_a=chemical messenger | purpose=regulating a body process | requires=a gland
+insulin | is_a=hormone | purpose=lowering blood sugar | requires=the pancreas
+skin | is_a=organ | purpose=protecting the body | purpose=regulating temperature | has_property=the largest organ
+
+# --- heredity and evolution ------------------------------------------------------------------ #
+heredity | is_a=biological process | means=the passing of traits from parents to offspring | requires=genes
+genetics | is_a=branch of biology | involves=genes | involves=inheritance | discoverer=Gregor Mendel
+mutation | is_a=change in DNA | causes=genetic variation | causes=some inherited disease | occurs_when=DNA is copied imperfectly or damaged
+natural selection | is_a=evolutionary mechanism | author=Charles Darwin | means=the differential survival of individuals with favourable traits | requires=variation | requires=inheritance | causes=adaptation
+evolution | is_a=biological process | means=the change in inherited traits of a population over generations | causes=new species | requires=time
+species | is_a=taxonomic rank | means=a group of organisms that can interbreed and produce fertile offspring
+adaptation | is_a=inherited trait | purpose=fitting an organism to its environment | causes=better survival
+extinction | is_a=biological event | occurs_when=the last member of a species dies | causes=a permanent loss of a lineage
+fossil | is_a=preserved remains | purpose=evidence of past life | located_in=sedimentary rock
+
+# --- classification --------------------------------------------------------------------------#
+taxonomy | is_a=branch of biology | purpose=classifying organisms | has_part=kingdom | has_part=phylum | has_part=class | has_part=order | has_part=family | has_part=genus | has_part=species
+animal | is_a=living organism | requires=food | requires=water | requires=oxygen@0.9 | capable_of=move@0.95 | capable_of=respond to stimuli
+plant | is_a=living organism | requires=sunlight@0.9 | requires=water | requires=carbon dioxide | capable_of=photosynthesise@0.95 | has_part=root | has_part=stem | has_part=leaf
+fungus | is_a=living organism | capable_of=decompose organic matter | has_property=no chlorophyll | has_kind=mushroom | has_kind=yeast | has_kind=mould
+bacterium | is_a=microorganism | has_property=single celled | capable_of=reproduce by binary fission | has_kind=harmful bacterium | has_kind=useful bacterium
+virus | is_a=infectious agent | requires=a host cell to reproduce | has_property=not made of cells | causes=infection
+mammal | is_a=vertebrate | has_property=warm blooded | has_property=hair or fur | capable_of=feed young with milk
+bird | is_a=vertebrate | has_property=feathers | has_property=warm blooded | capable_of=fly@0.8 | capable_of=lay eggs
+reptile | is_a=vertebrate | has_property=cold blooded | has_property=scaly skin | capable_of=lay eggs@0.9
+amphibian | is_a=vertebrate | has_property=moist skin | occurs_when=a larva develops in water and an adult lives on land
+fish | is_a=vertebrate | has_part=gill | has_part=fin | capable_of=breathe underwater | located_in=water
+insect | is_a=arthropod | has_property=six legs | has_part=head | has_part=thorax | has_part=abdomen
+vertebrate | is_a=animal | has_part=backbone | has_kind=mammal | has_kind=bird | has_kind=reptile | has_kind=amphibian | has_kind=fish
+
+# --- ecology --------------------------------------------------------------------------------- #
+ecosystem | is_a=biological system | has_part=producer | has_part=consumer | has_part=decomposer | has_part=habitat | means=a community of organisms with their physical surroundings
+habitat | is_a=place | means=the place where an organism lives | purpose=supplying an organism with food and shelter
+food chain | is_a=feeding sequence | has_part=producer | has_part=herbivore | has_part=carnivore | means=an ordered path of energy from one organism to the next
+producer | is_a=organism | capable_of=make its own food | is_a=the base of a food chain
+decomposer | is_a=organism | purpose=breaking dead matter into nutrients | causes=nutrient recycling
+predator | is_a=animal | capable_of=hunt other animals | causes=a limit on prey numbers
+photosynthesis | involves=chlorophyll | involves=light energy | part_of=the carbon cycle
+biodiversity | is_a=measure | means=the variety of living things in a place | causes=ecosystem stability | requires=habitat
+pollination | is_a=biological process | occurs_when=pollen is carried from one flower to another | requires=an insect or wind | causes=seed formation
+carbon cycle | is_a=biogeochemical cycle | has_part=photosynthesis | has_part=respiration | has_part=decomposition | has_part=combustion
+water cycle | is_a=biogeochemical cycle | has_part=evaporation | has_part=condensation | has_part=precipitation | has_part=collection | requires=solar energy
+nitrogen cycle | is_a=biogeochemical cycle | requires=nitrogen fixing bacteria | purpose=making nitrogen available to plants

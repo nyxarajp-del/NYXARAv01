@@ -1,0 +1,178 @@
+# language.u — language itself, question answering that is not lookup, worked mathematics, and the
+# multimodal records where the same thing arrives through more than one sense.
+#
+# The `math` records carry worked steps rather than answers, for the reason `growth/synth_data`
+# states: a model that has only ever seen answers has no mechanism for producing one.
+
+# ============================ language ========================================================== #
+@record language ambiguous_bank
+domain     = language
+text       = he sat on the bank and watched the water go by.
+qa         = what does bank mean here ?? the side of a river, not a place that keeps money ;; what settles it ?? the water in the same sentence
+note       = the disambiguating evidence is inside the sentence, which is why context is not decoration.
+
+@record language pronoun_reference
+domain     = language
+text       = the cup fell on the plate and it broke.
+qa         = what broke ?? it is genuinely ambiguous between the cup and the plate ;; what would settle it ?? nothing in this sentence does, so the honest answer is that it is unclear
+note       = a reading that picks one and states it confidently is the failure this record exists to prevent.
+
+@record language passive_hides_the_actor
+domain     = language
+text       = mistakes were made and the deployment was rolled back.
+qa         = who made the mistakes ?? the sentence does not say, and the passive is what removes it ;; who rolled it back ?? also unstated
+
+@record language idiom_not_literal
+domain     = language
+text       = the plan was a piece of cake.
+qa         = what does this mean ?? the plan was easy ;; is there cake ?? no, and translating it word for word into another language loses the meaning
+
+@record language negation_scope
+domain     = language
+text       = i did not leave because it was raining.
+qa         = did the person leave ?? it has two readings: they stayed on account of the rain, or they left for a different reason ;; what fixes it ?? intonation in speech and a comma in writing
+
+@record language word_order_carries_the_cause
+domain     = language
+text       = the plant got two litres of water and grew four centimetres.
+qa         = which came first ?? the water ;; why does that matter ?? the order in the sentence is the only evidence about which drives which that the two numbers alone cannot supply
+
+@record language hinglish_question
+domain     = language
+text       = paudhe ko pani chahiye.
+qa         = what does this state ?? a plant requires water ;; what relation is it ?? requires, from the plant to the water
+
+@record language register_changes_nothing_factual
+domain     = language
+text       = h2o is a compound of hydrogen and oxygen. water is made of hydrogen and oxygen.
+qa         = are these the same claim ?? yes, in two registers ;; should they be stored twice ?? no, they fold to one relation
+
+# ============================ question answering beyond lookup ================================== #
+@record qa why_is_the_sky_blue
+domain     = physics
+qa         = why is the sky blue ?? shorter wavelengths scatter more off air molecules, so blue reaches the eye from every direction ;; why is a sunset red ?? the light travels further through the air and the blue has been scattered out of the direct beam
+text       = one mechanism, two questions, and the second is the test that the first was understood.
+
+@record qa why_does_ice_float
+domain     = chemistry
+qa         = why does ice float on water ?? water expands as it freezes because hydrogen bonds hold the molecules further apart in the solid ;; what would happen if it did not ?? lakes would freeze from the bottom and fish would not survive winter
+
+@record qa why_two_hemispheres_differ
+domain     = astronomy
+qa         = why is it summer in one hemisphere while it is winter in the other ?? the earth's axis is tilted, so one hemisphere receives sunlight more directly at a time ;; why is distance from the sun not the answer ?? distance is the same for both hemispheres at any moment
+
+@record qa what_makes_bread_rise
+domain     = chemistry
+qa         = what makes bread rise ?? yeast produces carbon dioxide which is trapped by gluten in the dough ;; why does dead yeast give a flat loaf ?? no gas is produced, so there is nothing for the gluten to trap
+
+@record qa why_do_we_vaccinate_the_healthy
+domain     = medicine
+qa         = why vaccinate people who are not ill ?? immunity has to exist before the exposure, and it takes time to build ;; why does it help people who are not vaccinated ?? fewer available hosts means fewer chains of transmission
+
+@record qa why_is_a_quadratic_slow
+domain     = computing
+qa         = why does a quadratic algorithm look fine and then fail ?? the cost grows with the square, so the sizes tried by hand hide it ;; what does doubling the input do ?? it quadruples the time
+
+# ============================ mathematics, with the steps ======================================= #
+@record math linear_equation_worked
+domain     = mathematics
+problem    = solve 3x + 7 = 22
+solution   = subtract 7 from both sides to get 3x = 15, then divide both sides by 3 to get x = 5
+qa         = what is x ?? 5 ;; what is the first step ?? subtract 7 from both sides
+text       = the derivation, not the answer, is the part that transfers to the next equation.
+
+@record math percentage_worked
+domain     = mathematics
+problem    = a price of 250 rises by 12 percent. what is the new price
+solution   = twelve percent of 250 is 30, and 250 plus 30 is 280
+qa         = what is the new price ?? 280 ;; what is twelve percent of 250 ?? 30
+
+@record math fraction_sum_worked
+domain     = mathematics
+problem    = add two thirds and one quarter
+solution   = the common denominator is 12, two thirds is eight twelfths, one quarter is three twelfths, and the sum is eleven twelfths
+qa         = what is the sum ?? eleven twelfths ;; what is the common denominator ?? 12
+
+@record math pythagoras_worked
+domain     = mathematics
+problem    = a right triangle has sides 3 and 4. what is the hypotenuse
+solution   = the square on the hypotenuse is 9 plus 16 which is 25, and the square root of 25 is 5
+qa         = what is the hypotenuse ?? 5 ;; what theorem is used ?? the pythagorean theorem
+
+@record math compound_interest_worked
+domain     = mathematics
+problem    = 1000 at 10 percent compounded once a year for two years
+solution   = after one year it is 1100, and ten percent of 1100 is 110, so after two years it is 1210
+qa         = what is the total after two years ?? 1210 ;; why is it not 1200 ?? the second year's interest is charged on the first year's interest too
+note       = the second question is the one that separates compound from simple interest.
+
+@record math average_worked
+domain     = mathematics
+problem    = find the mean of 4, 8, 15, 16, 23 and 42
+solution   = the sum is 108 and there are six values, so the mean is 18
+qa         = what is the mean ?? 18 ;; what is the median ?? the middle two are 15 and 16, so 15.5
+
+@record math area_of_a_circle_worked
+domain     = mathematics
+problem    = find the area of a circle of radius 7
+solution   = the area is pi times the radius squared, 7 squared is 49, and 49 times pi is about 154
+qa         = what is the area ?? about 154 ;; what happens if the radius doubles ?? the area quadruples
+
+# ============================ science with the mechanism ======================================== #
+@record science why_iron_rusts
+domain     = chemistry
+knowledge  = iron | requires | oxygen to rust ;; iron | requires | water to rust ;; rust | is_a | iron oxide ;; paint | causes | rust | -1
+qa         = why does painted iron not rust ?? the paint keeps the oxygen and water away from the metal
+text       = the mechanism explains the prevention, which a bare fact about rust does not.
+
+@record science why_a_ship_floats
+domain     = physics
+knowledge  = buoyancy | causes | flotation ;; buoyancy | requires | displaced water ;; steel ship | has_property | mostly air by volume
+qa         = why does a steel ship float when a steel bar sinks ?? the ship displaces more water than it weighs because most of its volume is air
+
+@record science why_antibiotics_fail_on_viruses
+domain     = medicine
+knowledge  = antibiotic | purpose | attacking bacterial cell processes ;; virus | has_property | no cell processes of its own ;; virus | requires | a host cell to reproduce
+qa         = why does an antibiotic not work on a virus ?? there is no bacterial machinery for it to act on
+
+@record science why_the_moon_shows_one_face
+domain     = astronomy
+knowledge  = moon | has_property | tidally locked to the earth ;; tidal locking | occurs_when | rotation and orbit take the same time
+qa         = why do we always see the same side of the moon ?? it turns once for each orbit, so the same face stays towards us
+
+@record science why_salt_melts_ice
+domain     = chemistry
+knowledge  = salt | causes | freezing point | -1 ;; road salt | purpose | keeping roads clear
+qa         = why is salt put on icy roads ?? it lowers the freezing point so the ice melts at a temperature it would otherwise stay solid at
+
+# ============================ multimodal ======================================================== #
+@record multimodal thunderstorm
+domain     = physics
+modalities = vision | a bright flash across the sky ;; audio | a low rolling boom a few seconds later ;; touch | the air turns cold and damp
+knowledge  = lightning | causes | thunder ;; lightning | causes | light
+text       = one event arriving through three senses at three different delays, which is what has to be bound into one thing.
+
+@record multimodal kettle_boiling
+domain     = everyday
+modalities = vision | steam rising from the spout ;; audio | a rising hiss that stops with a click ;; touch | the handle is warm
+knowledge  = heat | causes | boiling ;; boiling | causes | steam
+text       = three signals of one state, and any one of them is enough to infer it.
+
+@record multimodal ripe_fruit
+domain     = biology
+modalities = vision | the skin has turned from green to yellow ;; smell | a sweet scent ;; touch | it yields slightly to a squeeze
+knowledge  = ripening | causes | colour change ;; ripening | causes | softening
+text       = the three agree here, and when they disagree the touch is the one to trust.
+
+@record multimodal engine_fault
+domain     = technology
+modalities = audio | a knocking that keeps time with the engine speed ;; vision | a warning lamp on the dash ;; smell | burnt oil
+knowledge  = knocking | causes | engine damage ;; low oil | causes | knocking
+text       = the knock keeping time with the speed is what says it is the engine and not the road.
+
+@record multimodal a_person_is_upset
+domain     = society
+modalities = vision | shoulders down and no eye contact ;; audio | short flat replies ;; language | says that everything is fine
+knowledge  = tone | causes | inference about mood
+note       = the modalities disagree here, and the disagreement is the information.
+text       = what is said and how it is said are two channels, and taking only the first misses it.

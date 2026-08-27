@@ -1,0 +1,59 @@
+# earth_science.kb — the planet as a physical system: its interior, its rocks, its air and water,
+# and the hazards those produce.
+
+# --- structure and plates -------------------------------------------------------------------- #
+Earth | has_part=crust | has_part=mantle | has_part=outer core | has_part=inner core | has_property=an iron core | has_property=a magnetic field
+crust | is_a=layer of the earth | has_property=the thinnest layer | has_kind=continental crust | has_kind=oceanic crust
+mantle | is_a=layer of the earth | has_property=solid rock that flows slowly | causes=convection currents
+outer core | is_a=layer of the earth | has_property=liquid iron and nickel | causes=the earth's magnetic field
+inner core | is_a=layer of the earth | has_property=solid | has_property=the hottest layer
+tectonic plate | is_a=slab of the lithosphere | capable_of=move slowly over the mantle | causes=earthquakes | causes=mountain building
+plate tectonics | is_a=geological theory | means=the crust is broken into moving plates | causes=continental drift | causes=volcanism
+fault | is_a=fracture in rock | occurs_when=rock breaks under stress | causes=earthquakes
+earthquake | is_a=natural hazard | occurs_when=stored strain in rock is released along a fault | causes=ground shaking | causes=tsunamis@0.4 | unit=moment magnitude
+volcano | is_a=landform | occurs_when=magma reaches the surface | causes=lava flows | causes=ash clouds | has_part=vent | has_part=crater
+tsunami | is_a=natural hazard | occurs_when=the sea floor is displaced suddenly | causes=coastal flooding
+mountain | is_a=landform | occurs_when=crust is uplifted or folded | has_kind=fold mountain | has_kind=volcanic mountain
+
+# --- rocks, soil and minerals ---------------------------------------------------------------- #
+rock | has_kind=igneous rock | has_kind=sedimentary rock | has_kind=metamorphic rock | consists_of=minerals
+igneous rock | is_a=rock | occurs_when=magma or lava cools and solidifies | has_kind=granite | has_kind=basalt
+sedimentary rock | is_a=rock | occurs_when=sediment is compacted and cemented | has_kind=sandstone | has_kind=limestone | capable_of=hold fossils
+metamorphic rock | is_a=rock | occurs_when=existing rock is changed by heat and pressure | has_kind=marble | has_kind=slate
+granite | is_a=igneous rock | has_property=coarse grained | purpose=building
+basalt | is_a=igneous rock | has_property=fine grained | has_property=the commonest rock of the ocean floor
+limestone | is_a=sedimentary rock | consists_of=calcium carbonate | purpose=making cement
+marble | is_a=metamorphic rock | purpose=sculpture | purpose=building
+mineral | is_a=naturally occurring solid | has_property=a definite chemical composition | has_property=a crystal structure
+soil | is_a=surface material | consists_of=weathered rock | consists_of=organic matter | consists_of=water | consists_of=air | purpose=supporting plant growth
+erosion | is_a=geological process | means=the wearing away and transport of rock and soil | requires=water or wind or ice | causes=valleys | causes=loss of farmland
+weathering | is_a=geological process | means=the breakdown of rock in place | has_kind=physical weathering | has_kind=chemical weathering
+rock cycle | is_a=geological cycle | has_part=melting | has_part=cooling | has_part=erosion | has_part=deposition | has_part=metamorphism
+fossil fuel | is_a=fuel | occurs_when=buried organic matter is altered over millions of years | has_kind=coal | has_kind=oil | has_kind=natural gas | causes=carbon dioxide when burned
+
+# --- atmosphere, weather and climate ---------------------------------------------------------- #
+atmosphere | is_a=layer of gases | consists_of=nitrogen | consists_of=oxygen | consists_of=argon | consists_of=carbon dioxide | purpose=shielding the surface from radiation | has_part=troposphere | has_part=stratosphere
+troposphere | is_a=atmospheric layer | has_property=where weather happens | located_in=the atmosphere
+stratosphere | is_a=atmospheric layer | has_part=the ozone layer
+weather | is_a=state of the atmosphere | means=the condition of the air at a place over hours or days | has_part=temperature | has_part=humidity | has_part=wind | has_part=precipitation
+climate | is_a=long term pattern of weather | means=the average weather of a place over decades | requires=long records
+wind | is_a=movement of air | occurs_when=air moves from high pressure to low pressure | causes=waves | purpose=driving wind turbines
+cloud | is_a=mass of water droplets | occurs_when=moist air rises and cools | causes=rain@0.6
+rain | is_a=precipitation | occurs_when=droplets in a cloud grow heavy enough to fall | causes=river flow | requires=condensation
+snow | is_a=precipitation | occurs_when=water vapour freezes into crystals | requires=temperature below freezing
+hurricane | is_a=tropical storm | requires=warm ocean water | causes=high winds | causes=storm surge | also_known_as=a typhoon in the Pacific
+tornado | is_a=violent rotating column of air | occurs_when=a severe thunderstorm develops rotation | causes=narrow destructive damage
+drought | is_a=natural hazard | occurs_when=rainfall stays far below normal for a long period | causes=crop failure | causes=water shortage
+flood | is_a=natural hazard | occurs_when=water covers land that is normally dry | causes=damage to property
+greenhouse effect | is_a=atmospheric process | occurs_when=gases trap outgoing heat | causes=a warmer surface | requires=greenhouse gases
+climate change | is_a=long term shift in climate | causes=rising sea level | causes=more extreme weather | causes=shifting habitats | requires=greenhouse gas emissions to be reduced
+ozone layer | is_a=region of the stratosphere | purpose=absorbing ultraviolet radiation | causes=protection from skin damage
+
+# --- water ------------------------------------------------------------------------------------#
+ocean | is_a=body of salt water | has_property=about seventy one percent of the earth's surface | purpose=regulating climate | has_kind=Pacific Ocean | has_kind=Atlantic Ocean | has_kind=Indian Ocean | has_kind=Southern Ocean | has_kind=Arctic Ocean
+river | is_a=body of flowing water | has_part=source | has_part=mouth | has_part=tributary | causes=erosion | causes=deposition
+lake | is_a=body of standing water | located_in=a basin
+glacier | is_a=mass of moving ice | capable_of=carve valleys | causes=moraine | has_property=shrinking in a warming climate
+groundwater | is_a=water below the surface | located_in=an aquifer | purpose=supplying wells
+aquifer | is_a=water bearing rock | purpose=storing groundwater
+delta | is_a=landform | occurs_when=a river deposits sediment at its mouth | has_property=fertile

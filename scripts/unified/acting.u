@@ -1,0 +1,278 @@
+# acting.u — goal to steps, problem to attempts to solution, options to a choice, action to reward,
+# objective to tool, and the coding records where the answer can be checked by running it.
+#
+# `attempts` items are `what was tried | what happened`, and the failed attempts are the point:
+# a trace that shows only the solution teaches that solutions arrive whole.
+# `options` items are `option | what it gets | what it risks`.
+
+# ============================ planning ========================================================== #
+@record planning make_tea
+domain     = everyday
+goal       = make a cup of tea
+steps      = fill the kettle ;; switch it on ;; put a teabag in the cup ;; wait for the water to boil ;; pour the water over the bag ;; wait three minutes ;; remove the bag ;; add milk if wanted
+text       = the ordering is not decoration: pouring before boiling gives a different result.
+
+@record planning plant_a_vegetable_bed
+domain     = biology
+goal       = grow vegetables in a new bed
+steps      = clear the ground of weeds ;; dig and break up the soil ;; add compost ;; sow the seeds at the stated depth ;; water them in ;; thin the seedlings once they are up ;; keep the bed weeded ;; harvest
+text       = two of the steps are waiting, and leaving them out is how a plan becomes a wish.
+
+@record planning ship_a_bug_fix
+domain     = computing
+goal       = get a bug fix into production safely
+steps      = reproduce the bug ;; write a failing test for it ;; make the smallest change that passes ;; run the whole suite ;; open a pull request ;; get a review ;; deploy behind a flag ;; watch the error rate ;; remove the flag
+text       = reproducing first is what makes the rest of it verifiable.
+
+@record planning move_house
+domain     = everyday
+goal       = move to a new house without losing a day of work
+steps      = book the movers ;; sort what is going and what is not ;; pack room by room and label every box ;; arrange the utilities to switch on the day ;; forward the post ;; move ;; unpack the kitchen and beds first
+text       = the utilities step has to happen before the move and is the one usually left until after.
+
+@record planning run_an_experiment
+domain     = science
+goal       = find out whether the fertiliser raises the yield
+steps      = state the hypothesis so it could fail ;; choose matched plots ;; assign the rates at random ;; apply and record everything ;; measure the yield the same way on every plot ;; compare against the control ;; state what the result does not show
+text       = the last step is a step, and a report that leaves it out is not finished.
+
+@record planning prepare_for_an_exam
+domain     = everyday
+goal       = be ready for the exam in three weeks
+steps      = list every topic on the syllabus ;; test yourself on each to find the weak ones ;; spend the time on the weak ones rather than the comfortable ones ;; do a full paper under timed conditions ;; review only what the paper caught ;; sleep properly the night before
+text       = testing first is what stops the time going to what is already known.
+
+@record planning respond_to_an_outage
+domain     = computing
+goal       = restore service and keep the evidence
+steps      = confirm the outage is real and not a monitoring fault ;; stop the bleeding by rolling back or failing over ;; capture logs and metrics before they rotate ;; confirm service is restored ;; find the root cause ;; fix it properly ;; write the postmortem without blaming a person
+text       = restoring and diagnosing are separate steps and doing them in the other order costs users.
+
+# ============================ problem solving with failures ===================================== #
+@record problem_solving lamp_will_not_light
+domain     = everyday
+problem    = the desk lamp does not come on
+attempts   = check that it is switched on at the wall | it was already on ;; swap the bulb for a known good one | still nothing ;; plug the lamp into a different socket | it lit immediately ;; test the first socket with another appliance | dead
+solution   = the socket is dead, not the lamp
+text       = three of the four attempts failed, and the third is only interpretable because the first two did.
+
+@record problem_solving code_crashes_on_empty_input
+domain     = computing
+problem    = the function raises an error when the list is empty
+attempts   = wrap the whole body in a try except | the error stopped and the wrong answer started ;; return early when the list is empty | the crash stopped and the caller now has to handle a special case ;; return the identity element for the operation | callers work unchanged and the maths stays right
+solution   = return the identity element rather than a special case
+note       = the first attempt is the one worth keeping in the record: it made the symptom go away and made the bug worse.
+text       = a silenced error is not a fixed error.
+
+@record problem_solving bread_keeps_coming_out_dense
+domain     = everyday
+problem    = every loaf comes out heavy and flat
+attempts   = add more yeast | still flat ;; leave it to rise for twice as long | still flat ;; proof the yeast in warm sugar water first | it did not foam at all ;; buy fresh yeast and repeat | the loaf rose
+solution   = the yeast was dead and no amount of it or time would help
+text       = the first two attempts scale the wrong variable, which is what makes them informative.
+
+@record problem_solving car_pulls_to_one_side
+domain     = technology
+problem    = the car pulls left when the wheel is held straight
+attempts   = check the tyre pressures | the left front was low ;; inflate it and drive again | it still pulls slightly ;; swap the front tyres side to side | the pull moved to the right
+solution   = the tyre is worn unevenly, not the alignment
+text       = the pull following the tyre is what rules out the steering.
+
+@record problem_solving query_got_slow
+domain     = computing
+problem    = a report that took two seconds now takes four minutes
+attempts   = add more memory to the machine | no change ;; read the query plan | it is doing a full scan where it used to use an index ;; check whether the index exists | it was dropped in last week's migration ;; recreate the index | back to two seconds
+solution   = a migration dropped the index
+text       = the first attempt treats the symptom as a capacity problem, which is the expensive default.
+
+@record problem_solving plant_keeps_dying
+domain     = biology
+problem    = a houseplant wilts however much it is watered
+attempts   = water it more often | it got worse ;; move it into brighter light | no change ;; tip it out and look at the roots | they are brown and soft ;; repot in dry soil with drainage and water less | new growth within two weeks
+solution   = it was drowning, and the symptom of drowning looks like thirst
+text       = the obvious action made it worse, which is the most useful thing in this record.
+
+@record problem_solving numbers_do_not_add_up
+domain     = mathematics
+problem    = a spreadsheet total is out by a small amount
+attempts   = check the arithmetic by hand | the hand total matches the parts ;; widen the displayed precision | the values have more decimals than were shown ;; sum the unrounded values | the total matches
+solution   = the parts were rounded for display and summed as displayed
+text       = the error was in what was shown, not in what was stored.
+
+# ============================ decision ========================================================== #
+@record decision add_the_index
+domain     = computing
+options    = add the index | reads get forty percent faster | writes get six percent slower and the table grows ;; leave it | nothing changes | the read complaints continue ;; cache the result instead | reads get much faster | the data can be stale and there is a new thing to operate
+choice     = add the index
+text       = this workload is read heavy, so the trade the index makes is the right way round here and would not be everywhere.
+
+@record decision take_the_train_or_drive
+domain     = everyday
+options    = drive | door to door and flexible | traffic risk and parking cost ;; take the train | predictable and you can work | fixed times and a walk at both ends
+choice     = take the train
+text       = the deciding factor is the meeting time, which makes predictability worth more than flexibility.
+
+@record decision treat_or_watch
+domain     = medicine
+options    = treat now | the condition is dealt with early | side effects and cost for something that may resolve ;; watch and review in a month | no side effects for a condition that often resolves | it may progress in the month
+choice     = watch and review
+text       = the choice depends on how fast it could progress, which is why the review interval is part of the decision.
+
+@record decision buy_or_rent_the_machine
+domain     = economics
+options    = buy | cheaper after two years of steady use | capital tied up and maintenance is yours ;; rent | no capital and maintenance included | more expensive if you use it constantly
+choice     = rent
+text       = expected usage is under the crossing point, so renting wins on the numbers rather than on preference.
+
+@record decision fix_now_or_after_the_release
+domain     = computing
+options    = fix now | the bug stops affecting users today | the release slips and the fix is less tested ;; fix after | the release ships on time | the bug affects users for another week
+choice     = fix now
+text       = the deciding number is how many users hit the bug per day, and it is large.
+
+@record decision evacuate_or_shelter
+domain     = earth_science
+options    = evacuate | out of the path entirely | the roads may be blocked and moving people is itself risky ;; shelter in place | no exposure on the road | the building may not survive the surge
+choice     = evacuate
+text       = the surge height forecast exceeds the ground floor, so sheltering is the higher risk here.
+
+# ============================ reinforcement ===================================================== #
+@record reinforcement watering_too_much
+domain     = biology
+action     = water the plant twice a day
+reward     = -1
+result     = the roots rotted and the plant declined
+correction = water when the top of the soil is dry rather than on a schedule
+text       = a negative outcome from an action taken with good intent, which is the case a policy has to learn from.
+
+@record reinforcement watering_when_dry
+domain     = biology
+action     = water when the top two centimetres of soil are dry
+reward     = 1
+result     = steady growth over six weeks
+text       = the same variable, a different policy, and a positive outcome.
+
+@record reinforcement shipping_without_tests
+domain     = computing
+action     = deploy a change with no tests to save an hour
+reward     = -1
+result     = an outage that cost six hours
+text       = the saving was real and much smaller than the cost, which is the shape of the lesson.
+
+@record reinforcement writing_the_failing_test_first
+domain     = computing
+action     = write a failing test before fixing the bug
+reward     = 1
+result     = the fix was verified and the bug never came back
+text       = the reward arrives later than the cost, which is why this policy is hard to learn from experience alone.
+
+@record reinforcement guessing_when_unsure
+domain     = general
+action     = give a confident answer without checking
+reward     = -1
+result     = the answer was wrong and was believed
+note       = a confident wrong answer costs more than an abstention, and a reward that does not encode that will train guessing.
+text       = being wrong loudly is worse than saying nothing.
+
+@record reinforcement abstaining_when_unsure
+domain     = general
+action     = say plainly that the record holds nothing about this
+reward     = 1
+result     = the gap was found and filled instead of hidden
+text       = abstention is not failure, and the reward has to say so or the policy will not learn it.
+
+# ============================ tool use ========================================================== #
+@record tool_use long_multiplication
+domain     = mathematics
+objective  = multiply 4817 by 3926 exactly
+tool       = calculator
+result     = 18911542
+note       = the point at 300M parameters is not knowing the answer, it is knowing to reach for the tool.
+text       = a model this size cannot store the product and can absolutely learn when to call the calculator.
+
+@record tool_use what_is_the_date
+domain     = everyday
+objective  = find out today's date
+tool       = clock
+result     = the current date from the system
+text       = a fact that changes daily belongs to a tool, not to the weights.
+
+@record tool_use look_up_a_stored_fact
+domain     = general
+objective  = recall what the master said his sister is called
+tool       = memory recall
+result     = the stored name, with when it was told
+text       = the record holds it and the job is to retrieve it rather than to reconstruct it.
+
+@record tool_use check_a_claim
+domain     = general
+objective  = decide whether a claim can be asserted
+tool       = truth gauntlet
+result     = a judgement with the evidence that supports or contests it
+text       = the tool exists so that assertable and believed do not become the same thing.
+
+@record tool_use run_the_code
+domain     = computing
+objective  = find out whether the function handles an empty list
+tool       = sandbox
+result     = it raised an error on the empty case
+text       = running it is cheaper and more reliable than reasoning about what it would do.
+
+@record tool_use measure_before_optimising
+domain     = computing
+objective  = find out which part of the request is slow
+tool       = profiler
+result     = ninety percent of the time is in one database call
+text       = the guess would have been the serialisation, and it was not.
+
+# ============================ coding ============================================================ #
+@record coding sum_of_a_list
+domain     = computing
+problem    = return the sum of a list of numbers, and zero for an empty list
+solution   = start an accumulator at zero, add each element to it, and return the accumulator
+note       = zero is the identity for addition, which is why the empty case is not a special case.
+text       = the empty list answer falls out of the identity rather than being handled separately.
+
+@record coding reverse_a_string
+domain     = computing
+problem    = reverse a string without using a built in reverse
+solution   = walk from the last index to the first and append each character to a new string
+text       = the loop bounds are where this goes wrong, and off by one is the usual way.
+
+@record coding is_it_prime
+domain     = computing
+problem    = decide whether a positive integer is prime
+solution   = return false below two, then test divisors from two up to the square root and return false on the first that divides
+note       = stopping at the square root is the whole optimisation: a factor above it implies one below it.
+text       = testing every number up to n is correct and needlessly slow.
+
+@record coding fizzbuzz
+domain     = computing
+problem    = print the numbers one to a hundred, replacing multiples of three and five appropriately
+solution   = test the fifteen case first, then three, then five, then the number itself
+text       = the order of the tests is the entire problem.
+
+@record coding binary_search
+domain     = computing
+problem    = find an item in a sorted list faster than looking at every element
+solution   = compare against the middle, discard the half that cannot contain it, and repeat until the range is empty
+text       = it requires the list to be sorted, and forgetting that is how it silently returns wrong answers.
+
+@record coding debug_off_by_one
+domain     = computing
+problem    = a loop over a list misses the last element
+solution   = the range ends one short, so the bound is exclusive where it was written as if inclusive
+text       = the fix is one character and finding it is the work.
+
+@record coding avoid_the_n_squared_join
+domain     = computing
+problem    = matching two lists of ten thousand items takes minutes
+solution   = build a lookup keyed on the join field from one list, then walk the other once
+text       = a nested loop is a hundred million comparisons and a hash lookup is twenty thousand.
+
+@record coding handle_the_missing_key
+domain     = computing
+problem    = the program crashes when a configuration key is absent
+solution   = read it with an explicit default and log when the default was used
+note       = a silent default hides a misconfiguration until it matters, which is why the log is part of the fix.
+text       = defaulting and saying you defaulted are one change, not two.

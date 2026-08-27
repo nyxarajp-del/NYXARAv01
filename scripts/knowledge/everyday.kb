@@ -1,0 +1,81 @@
+# everyday.kb — the ordinary knowledge no encyclopedia bothers to write down and no scraped
+# corpus states plainly, because everyone already knows it.
+#
+# This is the file that makes the difference between a system that can discuss thermodynamics and
+# one that knows a kettle boils water. ``njp/study.seed_kinds`` makes the same argument about
+# kind-level facts: a corpus of instances can teach that a blue whale is an animal and can never
+# teach that animals need food. Most of these claims are defeasible, so most carry an @override.
+
+# --- time ---------------------------------------------------------------------------------------------#
+day | is_a=unit of time | means=twenty four hours | occurs_when=the earth completes one rotation | has_part=morning | has_part=afternoon | has_part=evening | has_part=night
+week | is_a=unit of time | means=seven days | has_part=Monday | has_part=Tuesday | has_part=Wednesday | has_part=Thursday | has_part=Friday | has_part=Saturday | has_part=Sunday
+month | is_a=unit of time | means=roughly thirty days | has_property=twelve to a year
+year | is_a=unit of time | means=twelve months | occurs_when=the earth completes one orbit of the sun | has_property=three hundred and sixty five days in a common year
+hour | is_a=unit of time | means=sixty minutes
+minute | is_a=unit of time | means=sixty seconds
+season | is_a=division of the year | has_kind=spring | has_kind=summer | has_kind=autumn | has_kind=winter | occurs_when=the earth's tilt changes how directly sunlight falls | causes=changes in temperature and daylight
+morning | is_a=part of the day | occurs_when=the sun rises and the day begins
+night | is_a=part of the day | occurs_when=the sun has set | has_property=dark | causes=most people to sleep@0.8
+calendar | is_a=system | purpose=naming and ordering days | has_part=day | has_part=month | has_part=year
+
+# --- home and objects -------------------------------------------------------------------------------------#
+house | is_a=building | purpose=sheltering people | has_part=roof | has_part=wall | has_part=door | has_part=window | has_part=floor
+door | is_a=building part | purpose=letting people in and out | capable_of=open | capable_of=close
+window | is_a=building part | purpose=letting in light | purpose=letting in air | consists_of=glass@0.9
+kitchen | is_a=room | purpose=preparing food | has_part=stove | has_part=sink | has_part=refrigerator
+bed | is_a=furniture | purpose=sleeping | located_in=a bedroom
+chair | is_a=furniture | purpose=sitting | has_part=seat | has_part=leg@0.9 | has_part=back@0.8
+table | is_a=furniture | purpose=putting things on | has_part=top | has_part=leg
+lamp | is_a=household object | purpose=giving light | requires=electricity@0.9
+kettle | is_a=household appliance | purpose=boiling water | requires=heat | causes=steam
+stove | is_a=household appliance | purpose=cooking food | requires=gas or electricity | causes=heat
+knife | is_a=tool | purpose=cutting | has_property=sharp | capable_of=injure a careless user
+spoon | is_a=utensil | purpose=eating liquid food | purpose=stirring
+cup | is_a=container | purpose=holding a drink
+soap | is_a=cleaning product | purpose=removing dirt and grease | requires=water | causes=cleaner hands
+broom | is_a=tool | purpose=sweeping a floor
+key | is_a=small tool | purpose=opening a lock | requires=the matching lock
+umbrella | is_a=object | purpose=keeping rain off | requires=opening to work
+clothes | is_a=covering | purpose=keeping warm | purpose=protecting the body | has_kind=shirt | has_kind=trousers | has_kind=coat | has_kind=shoes
+shoes | is_a=clothing | purpose=protecting the feet | located_in=on the feet
+money in a wallet | is_a=everyday object | purpose=paying for things
+
+# --- food ---------------------------------------------------------------------------------------------------#
+food | purpose=supplying the body with energy and nutrients | has_kind=fruit | has_kind=vegetable | has_kind=grain | has_kind=meat | has_kind=dairy | requires=storage to keep
+fruit | is_a=food | is_a=part of a plant | has_property=sweet@0.7 | has_kind=apple | has_kind=banana | has_kind=mango | has_kind=orange
+vegetable | is_a=food | is_a=part of a plant | has_kind=potato | has_kind=carrot | has_kind=onion | has_kind=spinach
+rice | is_a=grain | is_a=staple food | requires=water to cook | located_in=much of Asia
+wheat | is_a=grain | purpose=making bread | purpose=making flour
+bread | is_a=food | consists_of=flour | consists_of=water | requires=yeast to rise | requires=baking
+milk | is_a=food | is_a=dairy | consists_of=water | consists_of=protein | consists_of=fat | requires=refrigeration to keep@0.9
+egg | is_a=food | consists_of=protein | requires=cooking for most dishes
+tea | is_a=drink | requires=hot water | requires=tea leaves | located_in=much of the world
+cooking | is_a=activity | purpose=making food safe and palatable | requires=heat@0.9 | causes=changes in texture and flavour
+refrigeration | is_a=process | purpose=slowing the spoiling of food | requires=cold
+hunger | is_a=sensation | occurs_when=the body needs food | causes=eating
+thirst | is_a=sensation | occurs_when=the body needs water | causes=drinking
+
+# --- people and daily life ------------------------------------------------------------------------------------#
+person | is_a=human being | requires=food | requires=water | requires=sleep | requires=shelter@0.9 | capable_of=speak@0.95 | capable_of=learn | capable_of=plan
+family | is_a=social group | has_part=parent | has_part=child@0.8 | purpose=raising children | purpose=mutual support
+friend | is_a=person | has_property=chosen rather than inherited | causes=companionship
+school | is_a=institution | purpose=educating children | has_part=teacher | has_part=student | has_part=classroom
+teacher | is_a=person | purpose=helping others learn | requires=knowledge of the subject
+job | is_a=role | purpose=earning a living | requires=skills@0.8 | causes=income
+shop | is_a=place | purpose=selling goods | has_part=goods | has_part=till
+hospital | is_a=institution | purpose=treating the sick and injured | has_part=doctor | has_part=nurse | has_part=ward
+library | is_a=institution | purpose=lending books | purpose=providing a quiet place to read
+road | is_a=infrastructure | purpose=carrying vehicles and people | requires=maintenance
+traffic light | is_a=signal | purpose=controlling traffic at a junction | has_part=red light | has_part=amber light | has_part=green light
+
+# --- safety and plain sense ---------------------------------------------------------------------------------------#
+fire | causes=heat | causes=light | requires=fuel | requires=oxygen | capable_of=spread | capable_of=burn skin
+smoke | occurs_when=something burns incompletely | causes=coughing | purpose=warning of fire
+electricity in the home | is_a=hazard | capable_of=cause a shock | requires=insulation to be safe
+sharp object | is_a=hazard | capable_of=cut skin | requires=careful handling
+boiling water | is_a=hazard | capable_of=scald | has_property=at one hundred degrees celsius at sea level
+ice | is_a=frozen water | has_property=slippery | occurs_when=water is cooled below freezing | causes=falls on a path
+rain outside | causes=wet clothes without an umbrella | causes=slower traffic
+darkness | causes=poor visibility | requires=a light to work in
+falling | causes=injury@0.7 | occurs_when=a person loses balance
+locking a door | purpose=keeping a house secure | requires=a key to undo

@@ -1,0 +1,47 @@
+# computing.exp — the scenarios where a linear prior is most expensive, because a quadratic
+# algorithm looks fine on the sizes a developer tries by hand.
+
+@scenario quadratic_runtime
+domain      = computing
+actor       = engineer
+action      = benchmark
+object      = sorting routine
+cause       = input size | thousand records | 1 2 4 6 8 10 12
+effect      = runtime | milliseconds
+law         = square a=2.0 b=0.9
+belief      = linear a=2.0 b=4.0
+precondition= the machine is otherwise idle
+consequence = the benchmark takes longer to finish
+sentence    = the engineer benchmarked the routine on {cause} thousand records and the runtime was {effect} milliseconds
+noise       = 0.04
+seed        = 601
+
+@scenario cache_latency
+domain      = computing
+actor       = engineer
+action      = warm
+object      = cache
+cause       = hit rate | percent | 10 25 40 55 70 85 95
+effect      = latency | milliseconds
+law         = linear a=104.0 b=-0.95
+belief      = linear a=10.0 b=0.6
+precondition= the request mix is unchanged
+consequence = responses come back sooner
+sentence    = the engineer warmed the cache to a {cause} percent hit rate and the latency was {effect} milliseconds
+noise       = 0.04
+seed        = 602
+
+@scenario batch_throughput
+domain      = computing
+actor       = engineer
+action      = enlarge batch on
+object      = training job
+cause       = batch size | samples | 8 16 32 64 128 256 512
+effect      = throughput | samples per second
+law         = sqrt a=40.0 b=22.0
+belief      = linear a=40.0 b=1.5
+precondition= the model and hardware are fixed
+consequence = the epoch finishes sooner
+sentence    = the engineer set the batch size to {cause} samples and the throughput was {effect} samples per second
+noise       = 0.04
+seed        = 603

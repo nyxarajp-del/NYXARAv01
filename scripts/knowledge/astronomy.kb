@@ -1,0 +1,60 @@
+# astronomy.kb — the solar system, stars, galaxies and cosmology. Distances and counts are
+# deliberately spelled out in words: the fact store holds strings, and "1.4 million km" and
+# "1400000 km" would be two different objects for the same claim.
+
+# --- the solar system ------------------------------------------------------------------------ #
+solar system | is_a=planetary system | has_part=the sun | has_part=planet | has_part=moon | has_part=asteroid | has_part=comet | located_in=the Milky Way
+Sun | is_a=star | is_a=yellow dwarf | consists_of=hydrogen | consists_of=helium | causes=daylight | causes=the seasons | purpose=supplying energy to the Earth | has_property=about one hundred and nine times the diameter of Earth
+Mercury | is_a=planet | has_property=the closest planet to the sun | has_property=the smallest planet | has_property=no atmosphere to speak of
+Venus | is_a=planet | has_property=the hottest planet | has_property=a thick carbon dioxide atmosphere | also_known_as=the morning star
+Earth | is_a=planet | has_property=the only planet known to support life | has_part=atmosphere | has_part=ocean | requires=the sun for energy
+Mars | is_a=planet | has_property=red | also_known_as=the red planet | has_property=two small moons | has_part=Olympus Mons
+Jupiter | is_a=gas giant | has_property=the largest planet | has_part=the Great Red Spot | has_property=more than ninety known moons
+Saturn | is_a=gas giant | has_part=ring system | has_property=less dense than water
+Uranus | is_a=ice giant | has_property=tilted on its side | has_property=blue green
+Neptune | is_a=ice giant | has_property=the farthest planet from the sun | has_property=the strongest winds in the solar system
+Pluto | is_a=dwarf planet | located_in=the Kuiper belt | has_property=reclassified from planet in two thousand and six
+Moon | is_a=natural satellite | capable_of=orbit a planet | causes=tides on Earth | causes=a solar eclipse
+asteroid | is_a=rocky body | located_in=the asteroid belt | has_property=smaller than a planet
+comet | is_a=icy body | has_part=nucleus | has_part=tail | occurs_when=ice vaporises near the sun
+meteor | is_a=streak of light | occurs_when=a meteoroid burns in the atmosphere | also_known_as=a shooting star
+meteorite | is_a=rock | means=a meteoroid that reaches the ground
+orbit | is_a=path | means=the curved path of one body around another | requires=gravity | requires=orbital speed
+eclipse | is_a=astronomical event | occurs_when=one body passes into the shadow of another | has_kind=solar eclipse | has_kind=lunar eclipse
+solar eclipse | is_a=eclipse | occurs_when=the moon passes between the earth and the sun
+lunar eclipse | is_a=eclipse | occurs_when=the earth passes between the sun and the moon
+tide | is_a=periodic rise and fall of the sea | requires=the moon | requires=the sun@0.7
+
+# --- stars ------------------------------------------------------------------------------------#
+star | is_a=luminous sphere of plasma | requires=nuclear fusion | causes=light | causes=heat | has_kind=red giant | has_kind=white dwarf | has_kind=neutron star
+nuclear fusion in a star | is_a=nuclear process | occurs_when=hydrogen nuclei join under great pressure | causes=starlight | causes=heavier elements
+red giant | is_a=star | occurs_when=a star exhausts the hydrogen in its core | has_property=large | has_property=cool
+white dwarf | is_a=stellar remnant | has_property=dense | has_property=no longer fusing
+supernova | is_a=stellar explosion | occurs_when=a massive star collapses | causes=heavy elements | causes=a brief brightening
+neutron star | is_a=stellar remnant | has_property=extremely dense | capable_of=spin rapidly
+pulsar | is_a=neutron star | capable_of=emit regular pulses of radiation
+black hole | is_a=region of spacetime | has_property=gravity strong enough that light cannot escape | occurs_when=a very massive star collapses | has_part=event horizon
+constellation | is_a=pattern of stars | purpose=naming regions of the sky | has_kind=Orion | has_kind=Ursa Major
+light year | is_a=unit of distance | means=the distance light travels in one year | has_property=about nine and a half trillion kilometres
+
+# --- galaxies and cosmology ------------------------------------------------------------------ #
+galaxy | is_a=gravitationally bound system | consists_of=stars | consists_of=gas | consists_of=dust | consists_of=dark matter | has_kind=spiral galaxy | has_kind=elliptical galaxy
+Milky Way | is_a=spiral galaxy | has_part=the solar system | has_property=about one hundred thousand light years across
+Andromeda Galaxy | is_a=spiral galaxy | has_property=the nearest large galaxy to the Milky Way
+universe | is_a=all of space and time | has_property=expanding | has_part=galaxy | has_part=dark matter | has_part=dark energy
+Big Bang | is_a=cosmological event | means=the hot dense beginning from which the universe expanded | causes=the expansion of the universe | causes=the cosmic microwave background | has_property=about thirteen point eight billion years ago
+cosmic microwave background | is_a=radiation | means=the afterglow of the early universe | purpose=evidence for the big bang
+dark matter | is_a=unseen matter | causes=galaxies to rotate faster than their visible mass explains | has_property=does not emit light
+dark energy | is_a=unknown form of energy | causes=the accelerating expansion of the universe
+redshift | is_a=astronomical observation | occurs_when=light from a receding object is stretched | purpose=measuring the recession of galaxies
+Hubble's Law | is_a=astronomical law | means=galaxies recede at a speed proportional to their distance | discoverer=Edwin Hubble
+
+# --- instruments and exploration ------------------------------------------------------------- #
+telescope | is_a=optical instrument | purpose=observing distant objects | inventor=Hans Lippershey | has_kind=refracting telescope | has_kind=reflecting telescope | has_kind=radio telescope
+Hubble Space Telescope | is_a=space telescope | located_in=low earth orbit | purpose=imaging deep space without atmospheric blur
+James Webb Space Telescope | is_a=space telescope | purpose=observing the infrared universe | has_property=a segmented mirror
+satellite | is_a=object in orbit | purpose=relaying communications | purpose=observing the earth | has_kind=natural satellite | has_kind=artificial satellite
+rocket | is_a=vehicle | purpose=reaching orbit | requires=propellant | capable_of=work in vacuum
+International Space Station | is_a=space station | located_in=low earth orbit | purpose=research in microgravity
+Apollo 11 | is_a=space mission | has_property=the first crewed landing on the moon | occurs_when=nineteen sixty nine
+astronomy | is_a=natural science | involves=observation of the sky | involves=physics | purpose=understanding objects beyond the earth
