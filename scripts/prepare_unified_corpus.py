@@ -130,7 +130,7 @@ CATEGORIES: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     # --- abstraction ---------------------------------------------------------------------------#
     "concept_formation":   ("genesis",    ("examples", "concept", "invariants")),
     "concept_composition": ("genesis",    ("parts", "concept")),
-    "generalization":      ("discoverer", ("examples", "generalize")),
+    "generalization":      ("discoverer", ("examples", "generalize", "concept", "invariants")),
     "transfer":            ("grounder",   ("transfer",)),
     "analogy":             ("grounder",   ("analogy",)),
     "abstraction_rule":    ("discoverer", ("abstraction",)),
@@ -259,6 +259,42 @@ def parse_file(path: str) -> Iterator[Dict[str, Any]]:
         yield _finish(record, f"{base}:end")
 
 
+def _derive_inheritance(out: Dict[str, Any]) -> None:
+    """Give a concept record the ``is_a`` path its own generalisation needs to be answerable.
+
+    A record that says four birds have feathers and then asks about a kiwi is unanswerable unless
+    something connects the kiwi to the kind and the kind to the property. Measured before this
+    existed: the generalization probe asked four questions and she answered none, because nothing
+    in the corpus had ever mentioned a kiwi. That is the corpus's gap, not hers.
+
+    Derived rather than typed, so the claims cannot drift from the examples they come from:
+    ``<concept> has_property <invariant>`` once per invariant, and ``<member> is_a <concept>`` for
+    every example and every generalisation target.
+    """
+    concept = str(out.get("concept") or "")
+    if not concept:
+        return
+    claims: List[List[str]] = list(out.get("knowledge") or [])
+    seen = {tuple(c[:3]) for c in claims if len(c) >= 3}
+
+    def add(subject: str, predicate: str, obj: str) -> None:
+        row = (subject, predicate, obj)
+        if subject and obj and subject != obj and row not in seen:
+            seen.add(row)
+            claims.append([subject, predicate, obj])
+
+    for invariant in out.get("invariants") or []:
+        add(concept, "has_property", str(invariant))
+    for item in out.get("examples") or []:
+        if item:
+            add(str(item[0]), "is_a", concept)
+    for pair in out.get("generalize") or []:
+        if pair:
+            add(str(pair[0]), "is_a", concept)
+    if claims:
+        out["knowledge"] = claims
+
+
 def _finish(record: Dict[str, Any], where: str) -> Dict[str, Any]:
     """Type every field, check the category's required blocks are all non-empty, and clean up."""
     raw = record.pop("_raw", {})
@@ -279,6 +315,8 @@ def _finish(record: Dict[str, Any], where: str) -> Dict[str, Any]:
     if empty:
         raise UnifiedError(f"{record['where']}: a {record['category']!r} record must carry "
                            f"{', '.join(required)} — missing or empty: {', '.join(empty)}")
+    if record["category"] in ("concept_formation", "generalization"):
+        _derive_inheritance(out)
     out.setdefault("domain", "general")
     return out
 

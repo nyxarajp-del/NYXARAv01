@@ -110,24 +110,32 @@ text       = immunity without the disease, out of the disease itself.
 # ============================ generalization ==================================================== #
 @record generalization metals_conduct
 domain     = chemistry
+concept    = metal
+invariants = conducts
 examples   = copper | conducts ;; silver | conducts ;; aluminium | conducts ;; iron | conducts
 generalize = tungsten ?? conducts ;; zinc ?? conducts
 text       = four measured members and the property carried to two that were not measured.
 
 @record generalization even_squares
 domain     = mathematics
+concept    = even number
+invariants = square is even
 examples   = 2 | square is even ;; 4 | square is even ;; 6 | square is even ;; 10 | square is even
 generalize = 24 ?? square is even ;; 100 ?? square is even
 text       = an even number times an even number is even, so the square of any even number is.
 
 @record generalization acids_turn_litmus_red
 domain     = chemistry
+concept    = acid
+invariants = turns litmus red
 examples   = hydrochloric acid | turns litmus red ;; sulfuric acid | turns litmus red ;; citric acid | turns litmus red
 generalize = acetic acid ?? turns litmus red
 text       = three of a kind, carried to a fourth of the same kind.
 
 @record generalization mammals_have_lungs
 domain     = biology
+concept    = mammal
+invariants = breathes with lungs
 examples   = whale | breathes with lungs ;; bat | breathes with lungs ;; elephant | breathes with lungs
 generalize = seal ?? breathes with lungs ;; dolphin ?? breathes with lungs
 note       = the two carried to are aquatic, which is what makes this a real generalisation and not a restatement.
@@ -135,6 +143,8 @@ text       = living in water does not change what a mammal breathes with.
 
 @record generalization sorting_costs_grow
 domain     = computing
+concept    = quadratic sort run
+invariants = four times slower for twice the input
 examples   = 1000 records | took 0.9 milliseconds ;; 2000 records | took 3.6 milliseconds ;; 4000 records | took 14.4 milliseconds
 generalize = 8000 records ?? about 57 milliseconds
 text       = each doubling quadruples the time, so the next doubling quadruples it again.
