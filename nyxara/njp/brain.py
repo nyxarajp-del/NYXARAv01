@@ -2490,7 +2490,18 @@ class NJPBrain:
             # tests. Curiosity's known-unknown gap reads `reasoner.problems`, so an unwired
             # reasoner also meant she could never notice a question she had failed to answer.
             if not out.answer:
+                # A prediction that resolves **inside this turn**, which is the whole test the
+                # raw-stimulus key failed: she commits to whether the ladder will find an answer,
+                # and microseconds later it either did or did not. Nothing has to arrive later and
+                # nothing waits in the open queue.
+                #
+                # It is also the one prediction the self-model can act on directly — knowing when
+                # deliberating is worth the descent is a capability, separately measurable from
+                # deliberating well, and `outcome` routes the miss to `reasoning` so the record
+                # that `metareason._demoted` reads is the record this loop produced.
+                deliberation = self._predict_deliberation(out)
                 self._deliberate(out)
+                self._score_deliberation(out, deliberation)
                 # 4c. RECALL — the last thing tried, and last on purpose.
                 #
                 # She may hold the entity the question named under a relation it did not ask for:
@@ -2922,6 +2933,68 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a failed deliberation leaves the turn unanswered
             pass
 
+    def _predict_deliberation(self, thought: NJPThought) -> str:
+        """Commit to whether the ladder will answer, before it runs. Returns the key, or empty.
+
+        The prior comes from her own record rather than a constant: a brain that has found
+        deliberation fruitful expects it to be, and one that has not, does not. An untested record
+        sits at 0.5 and predicts "answered", which is the optimistic default that at least gets the
+        loop scored on its first turns.
+        """
+        predictor = getattr(self, "predictor", None)
+        if predictor is None:
+            return ""
+        try:
+            level = 0.5
+            model = getattr(self, "self_model", None)
+            if model is not None:
+                level = float(model.level("reasoning:deliberation"))
+            key = f"{getattr(thought, 'cycle_id', '')}:deliberation"
+            predictor.predict(key, "answered" if level >= 0.5 else "unanswered",
+                              confidence=abs(level - 0.5) * 2.0, organ="reasoning",
+                              stimulus=str(getattr(thought, "stimulus", "")))
+            return key
+        except Exception:  # noqa: BLE001 — the prediction loop is an optional organ
+            return ""
+
+    def _score_deliberation(self, thought: NJPThought, key: str) -> None:
+        """Reality, one call later. The half that makes the line above a prediction at all."""
+        if not key:
+            return
+        try:
+            actual = "answered" if str(getattr(thought, "answer", "") or "").strip() \
+                else "unanswered"
+            self.predictor.observe(key, actual, evidence={"organ": "reasoning", "triples": True,
+                                                          "facts_correct": True})
+            model = getattr(self, "self_model", None)
+            if model is not None:
+                model.observe("reasoning:deliberation", 1.0 if actual == "answered" else 0.0)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _turn_salience(self, thought: NJPThought) -> float:
+        """How much of a shock this turn was, 0…1 — the number that decides what outlives it.
+
+        The same rule `attention` uses, read from the same place rather than defined twice: the
+        prediction loop's `Outcome.surprise` for this cycle when there is one, otherwise the
+        manifold's settling residual. Two definitions of "how surprising was that" drifting apart
+        is precisely the defect this phase set out to close, and writing a second one here to save
+        an attribute lookup would have reopened it in the same commit.
+
+        Without this call the `salience` parameter is decoration: a hook every organ can read and
+        nothing ever fills.
+        """
+        try:
+            attention = getattr(self, "attention", None)
+            if attention is not None and hasattr(attention, "_scored_surprise"):
+                scored, _source = attention._scored_surprise(thought)
+                if scored > 0.0:
+                    return max(0.0, min(1.0, float(scored)))
+            settled = getattr(getattr(thought, "percept", None), "settled", None)
+            return max(0.0, min(1.0, float(getattr(settled, "surprise", 0.0) or 0.0)))
+        except Exception:  # noqa: BLE001 — an unmeasurable turn is simply not a surprising one
+            return 0.0
+
     def _remember_turn(self, thought: NJPThought) -> None:
         """File this turn's conclusion at the level it belongs to.
 
@@ -2931,17 +3004,19 @@ class NJPBrain:
         at all. Everything else is an episode, and becomes semantic only if it recurs.
         """
         try:
+            salience = self._turn_salience(thought)
             if self.levels is not None:
                 self.levels.remember(
                     f"turn-{self.turns}", thought.answer,
                     level=self._level_for(thought), cue=thought.stimulus,
                     source=f"turn-{self.turns}", claim=self._claim_of(thought),
+                    salience=salience,
                     cells=tuple(getattr(thought.percept, "cells", ()) or ()))
                 return
             if self.memory is not None:
                 self.memory.remember(f"turn-{self.turns}", thought.answer,
                                      kind=("conclusion" if thought.verified else "episode"),
-                                     cue=thought.stimulus,
+                                     cue=thought.stimulus, salience=salience,
                                      # The state she was in when she learned this. Without it
                                      # stored there is nothing for the recall side to compare a
                                      # later state against.

@@ -197,7 +197,8 @@ class HierarchicalMemory:
     # ---- write ------------------------------------------------------------ #
     def remember(self, key: str, text: str, *, level: str = Level.EPISODIC,
                  cue: str = "", source: str = "", claim: str = "",
-                 cells: Sequence[int] = ()) -> Optional[Entry]:
+                 cells: Sequence[int] = (),
+                 salience: float = 0.0) -> Optional[Entry]:
         """Store one memory at a level. The level decides how long it lives, not where it is found.
 
         ``claim`` is what this memory *asserts*, where the caller knows it — a canonical
@@ -219,12 +220,14 @@ class HierarchicalMemory:
                 # memory actually takes when levels are on — the brain's direct `memory.remember`
                 # is the fallback for when they are not — so without it here the substrate's
                 # record of the moment is never stored at all.
-                self.store.remember(key, text, kind=level, cue=cue, cells=cells)
+                self.store.remember(key, text, kind=level, cue=cue, cells=cells,
+                                    salience=salience)
 
             identity = str(claim or "").strip().lower() or _claim_of(text)
             entry = self.entries.get(key)
             if entry is None:
-                entry = Entry(key=key, level=level, stability=policy.stability_days,
+                entry = Entry(key=key, level=level,
+                              stability=self._with_salience(policy.stability_days, salience),
                               claim=identity)
                 self.entries[key] = entry
                 self.levels[level].append(key)
@@ -348,6 +351,23 @@ class HierarchicalMemory:
         except Exception:  # noqa: BLE001
             import math
             return math.exp(-max(0.0, elapsed_days) / stability_days) if stability_days > 0 else 0.0
+
+    @classmethod
+    def _with_salience(cls, stability_days: float, salience: float) -> float:
+        """Start a surprising memory where a rehearsed one would already be.
+
+        Reuses ``_next_stability`` rather than inventing a multiplier, and that is the whole point:
+        the repo has one forgetting law and a second one bolted on beside it would make retention
+        mean two different things depending on which door a memory came through. Salience 1.0 is
+        worth exactly one rehearsal of durability, 0.0 changes nothing, and the values between
+        interpolate — so "keep what was surprising" is expressed in the units the curve already
+        uses.
+        """
+        salience = max(0.0, min(1.0, float(salience)))
+        if salience <= 0.0:
+            return stability_days
+        rehearsed = cls._next_stability(stability_days)
+        return stability_days + (rehearsed - stability_days) * salience
 
     @staticmethod
     def _next_stability(stability_days: float) -> float:

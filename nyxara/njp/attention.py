@@ -53,6 +53,12 @@ class Candidate:
     uncertainty: float = 0.0
     goal_relevance: float = 0.0
     prediction_error: float = 0.0
+    #: Where `prediction_error` came from. Two different surprises are in circulation — the
+    #: manifold's settling residual and `predict.Outcome.surprise`, which is error weighted by how
+    #: sure she was — and before this one silently stood in for the other. They measure different
+    #: things and both are real; what was not real was calling one of them "prediction error" while
+    #: the other existed and went unread. Empty means neither organ bid.
+    error_source: str = ""
     tags: Tuple[str, ...] = ()
 
     @property
@@ -72,6 +78,7 @@ class Candidate:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"source": self.source, "salience": round(self.salience, 4),
+                "error_source": self.error_source,
                 "novelty": round(self.novelty, 4), "relevance": round(self.relevance, 4),
                 "uncertainty": round(self.uncertainty, 4),
                 "goal_relevance": round(self.goal_relevance, 4),
@@ -129,6 +136,31 @@ class Attention:
         except Exception:  # noqa: BLE001 — she still ranks, without habituation or IOR
             return None
 
+    def _scored_surprise(self, thought: Any) -> Tuple[float, str]:
+        """This turn's surprise from the prediction loop, and which organ owned it.
+
+        `predict.Outcome.surprise` is error weighted by confidence — being confidently wrong is
+        the costly case, and it is exactly the quantity that should pull attention. It existed and
+        nothing here read it; the term weighted highest in `Candidate.salience` was being filled
+        from the manifold's settling residual instead.
+
+        Matched to this turn by `cycle_id`, because `integrate` keys its predictions that way. An
+        outcome from an earlier turn is not this turn's shock and must not move this turn's focus.
+        """
+        cycle = str(getattr(thought, "cycle_id", "") or "")
+        predictor = getattr(self.brain, "predictor", None)
+        if predictor is None or not cycle:
+            return 0.0, ""
+        try:
+            for outcome in reversed(getattr(predictor, "outcomes", None) or []):
+                if not str(getattr(outcome, "key", "")).startswith(cycle):
+                    continue
+                return (float(getattr(outcome, "surprise", 0.0) or 0.0),
+                        str(getattr(outcome, "organ", "") or "predictor"))
+        except Exception:  # noqa: BLE001 — the prediction loop is an optional organ
+            return 0.0, ""
+        return 0.0, ""
+
     # ---- gathering the bids ------------------------------------------------- #
     def gather(self, thought: Any) -> List[Candidate]:
         """Ask every organ that has something to say for its bid, with real numbers.
@@ -141,7 +173,14 @@ class Attention:
         try:
             percept = getattr(thought, "percept", None)
             novelty = float(getattr(percept, "novelty", 1.0)) if percept else 1.0
-            surprise = float(getattr(getattr(percept, "settled", None), "surprise", 0.0) or 0.0)
+            settled = float(getattr(getattr(percept, "settled", None), "surprise", 0.0) or 0.0)
+            scored, scored_from = self._scored_surprise(thought)
+            # The larger of the two, and named. A settling residual and a scored prediction error
+            # are not interchangeable: the first says the fabric took a while to agree with itself,
+            # the second says she committed to a number and reality disagreed. Attention should go
+            # to whichever was the bigger shock, and a reader should be able to tell which it was.
+            surprise = max(settled, scored)
+            error_from = scored_from if scored >= settled and scored_from else "settle"
             goals = self._goal_weights()
 
             grounding = getattr(percept, "grounding", None) if percept else None
@@ -151,7 +190,8 @@ class Attention:
                     payload=answer.text, source="grounding", novelty=novelty,
                     relevance=float(answer.confidence), goal_relevance=goals.get("answer", 0.0),
                     uncertainty=1.0 - float(answer.confidence),
-                    prediction_error=surprise, tags=("answer", "grounded")))
+                    prediction_error=surprise, error_source=error_from,
+                    tags=("answer", "grounded")))
 
             recall = getattr(percept, "recall", None) if percept else None
             best = getattr(recall, "hit", None) if recall is not None else None
@@ -160,14 +200,16 @@ class Attention:
                     payload=best.text, source="memory", novelty=novelty * 0.5,
                     relevance=float(getattr(recall, "score", 0.0) or 0.0),
                     goal_relevance=goals.get("recall", 0.0),
-                    prediction_error=surprise, tags=("recall",)))
+                    prediction_error=surprise, error_source=error_from,
+                    tags=("recall",)))
 
             anticipated = getattr(percept, "anticipated", None) if percept else None
             if anticipated is not None and getattr(anticipated, "trusted", False):
                 out.append(Candidate(
                     payload=anticipated, source="prediction", novelty=novelty,
                     relevance=float(getattr(anticipated, "familiarity", 0.0) or 0.0),
-                    prediction_error=surprise, tags=("prediction",)))
+                    prediction_error=surprise, error_source=error_from,
+                    tags=("prediction",)))
 
             # A wrong prediction is the strongest reason to attend to anything, so it bids on its
             # own rather than only colouring the others.
