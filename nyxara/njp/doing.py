@@ -54,6 +54,17 @@ rule refuses. The guard in :meth:`CognitiveAgency.act` is kept anyway, because t
 encodes outlives the action that needed it: an affordance that takes a turn may not start a
 pursuit from inside one.
 
+**A goal about the world is planned rather than acted.** Every affordance above rearranges what
+she already has, and not one of them touches a number out in the world — so a goal like
+``plant.growth ≥ 12`` runs the whole table, moves nothing eight times, and lands in
+:meth:`CognitiveAgency._exhausted` as *"nothing she can do has ever moved this"*. That sentence is
+true of her cognitive actions and false of her: the causal model can name the intervention that
+would do it. When a goal's metric is a variable :class:`~nyxara.njp.universe.InternalUniverse`
+actually knows, :mod:`nyxara.njp.rollout` searches imagined futures for it instead. The guard is
+the check that the universe knows the variable — the two namespaces are both ``organ.key`` and
+overlap without being the same, and planning over a variable that does not exist would count
+every empty rollout as work.
+
 **Reaching the goal is the metric reaching its target, and nothing else.** Not "she acted", not
 "the action returned true". :attr:`CognitiveAgency.goals_reached` counts targets met, so an agency
 that flails busily reads exactly as badly as one that does nothing — which is the point of
@@ -251,6 +262,11 @@ class CognitiveAgency:
         self.acted = 0
         self.goals_reached = 0
         self.no_goal = 0
+        #: Goals that named a variable in the causal model and were pursued by rolling futures
+        #: forward instead of by running an affordance. Counted apart from `planned` because they
+        #: are a different kind of act: the affordance table is what she can do to *herself*.
+        self.planned_world = 0
+        self.committed_world = 0
         #: Guards the one affordance that re-enters the turn loop. See `_reflect`.
         self._acting = False
 
@@ -365,6 +381,59 @@ class CognitiveAgency:
         return ranked[0]
 
     # ---- acting ------------------------------------------------------------- #
+    # ---- planning over the world, rather than over herself --------------------- #
+    @staticmethod
+    def _world_target(brain: Any, goal: Goal) -> Any:
+        """This goal as a target in the causal model, if the causal model knows the variable.
+
+        The bridge :mod:`nyxara.njp.rollout` exists to be reached through, and the guard is the
+        whole of it. Every affordance above rearranges what she already has; not one of them can
+        move a number about the *world*, because none of them touches the world. A goal like
+        ``plant.growth ≥ 12`` therefore runs the full affordance table, moves nothing, and ends
+        up in :meth:`_exhausted` as "nothing she can do has ever moved this" — a true statement
+        about her cognitive actions and a false one about her, because the causal model can name
+        the intervention that would do it.
+
+        ``Goal.metric`` is ``"organ.key"`` out of ``brain.stats()`` and a universe variable is
+        very often dotted the same way, so the two namespaces overlap without being the same.
+        Accepting a metric the universe has never heard of would plan over a variable that does
+        not exist and count every empty rollout as work.
+        """
+        try:
+            planner = getattr(brain, "rollout", None)
+            universe = getattr(brain, "universe", None)
+            if planner is None or universe is None:
+                return None
+            from nyxara.njp.rollout import Target
+            return Target.from_goal(goal, universe)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _plan_world(self, brain: Any, goal: Goal, attempt: Attempt) -> bool:
+        """Search imagined futures for this goal and stand behind the best. ``True`` if planned.
+
+        Deliberately *not* credited into :attr:`values`. That table records what an action did to
+        a metric between two readings a moment apart, and a plan is not that shape: the reading
+        that judges it arrives whenever the world is next measured, which may be many turns later
+        and is scored by :meth:`~nyxara.njp.rollout.RolloutPlanner.settle` when it does. Crediting
+        the plan here against an unchanged number would book every plan as an action that did
+        nothing, and the record would then teach her never to plan again.
+        """
+        try:
+            planner = getattr(brain, "rollout", None)
+            target = self._world_target(brain, goal)
+            if planner is None or target is None:
+                return False
+            plan = planner.pursue(target)
+            attempt.action = "plan"
+            attempt.why = plan.why
+            self.planned_world += 1
+            if plan.committed:
+                self.committed_world += 1
+            return bool(plan.actionable)
+        except Exception:  # noqa: BLE001
+            return False
+
     def act(self, brain: Any, goal: Optional[Goal] = None,
             report: Any = None) -> Attempt:
         """One whole cycle: read the number, choose, do it, read the number again, credit."""
@@ -401,6 +470,15 @@ class CognitiveAgency:
                 attempt.after = before
                 attempt.why = (f"{goal.metric} already at {before:g}, wants "
                                f"{'at most' if goal.at_most else 'at least'} {goal.target:g}")
+                return attempt
+
+            # A goal about the world is planned, not acted. The affordance table is what she can
+            # do to herself; nothing in it touches a variable out there, so running it against
+            # such a goal produces eight measured no-ops and the conclusion that the goal is
+            # impossible. The causal model can name the intervention instead.
+            if self._world_target(brain, goal) is not None:
+                attempt.ran = self._plan_world(brain, goal, attempt)
+                attempt.after = self.read(brain, goal.metric)
                 return attempt
 
             action = self.plan(goal)
@@ -466,6 +544,8 @@ class CognitiveAgency:
             "goals_reached": self.goals_reached,
             "success_rate": (round(self.goals_reached / self.acted, 4) if self.acted else None),
             "no_goal": self.no_goal,
+            "planned_world": self.planned_world,
+            "committed_world": self.committed_world,
             "learned_pairs": len(self.values),
             "best": ranked[0].to_dict() if ranked else None,
             "last": last.to_dict() if last is not None else None,

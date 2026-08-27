@@ -80,10 +80,24 @@ is a different question from "plants that got little water were small". Answers 
 observed range come back with confidence decayed by how far they reach. A direction observational
 data genuinely cannot settle is reported as ambiguous rather than guessed.
 
+**And she plans in it.** :mod:`nyxara.njp.rollout` takes a variable that has to reach a value,
+finds what she has an oriented arrow *from*, sweeps each lever, rolls every setting forward and
+ranks them on the share of the distance closed times the confidence the model itself claimed —
+so a plan that would arrive by extrapolating far past anything ever measured loses to one that
+arrives on evidence, and the smallest move that works wins among equals. The plan is then
+registered as a claim, and the next real reading of that variable grades it. The number the
+mechanism is judged on is ``settled``, never ``planned``.
+
 **Curiosity is information gain.** :class:`~nyxara.njp.universe.ExperimentDesigner` computes, for
 each candidate experiment, the mutual information between the hypothesis set and that
 experiment's outcome. An experiment every live hypothesis predicts identically scores exactly
 zero bits however interesting it looks, and she does not run it.
+
+**Curiosity is priced by what closing a gap would let her compress.** Value of information says
+what rides on an answer; it cannot say that a region is *still yielding structure*.
+:mod:`nyxara.njp.progress` reads the two honest description-length ratios in this package as a
+derivative against a high-water mark, so a region already compressed out scores zero and only a
+new record pays. The level is not the reward — the gain is.
 
 **Every belief carries its own case.** :mod:`nyxara.njp.beliefs` answers what she knows, what she
 does not, why she believes it, what would falsify it, and how reliable she has actually been in

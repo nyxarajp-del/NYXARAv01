@@ -512,7 +512,33 @@ class RecursiveCognitiveField:
                 # happened — `reconciled` and `surprises` were structurally zero on every session,
                 # and "the model was wrong six times" was a sentence the universe could not form.
                 self.universe.reconcile(state, order=order)
+                self._settle_plan(state, order)
         return added
+
+    def _settle_plan(self, state: Dict[str, float], order: Sequence[str]) -> None:
+        """Hand the same reading to the planner, so its claim is graded too.
+
+        This reading is the only thing in the package that can settle a plan, which is why the
+        edge is here rather than on a cadence somewhere: a plan graded against a state nobody has
+        re-measured is graded against its own starting point, and that is the shape of defect
+        ``brain.py:2469`` records — a claim that cannot in principle be contradicted, scored
+        anyway, with the counter going up.
+
+        Not through :meth:`~nyxara.njp.universe.InternalUniverse.reconcile`, twice over.
+        ``reconcile`` grades whichever rollout is newest, and the newest is always ``_simulate``'s
+        — the field imagines a "continue" step every cycle, so a plan's claim is several rollouts
+        stale by the time its reading lands. And ``reconcile`` observes as well, so calling it a
+        second time would fold this reading into every relation it touches twice, raising ``n``
+        without adding a single bit of variance. :meth:`~nyxara.njp.rollout.RolloutPlanner.settle`
+        goes through :meth:`~nyxara.njp.universe.InternalUniverse.grade`, which does neither.
+        """
+        try:
+            planner = getattr(self.brain, "rollout", None)
+            if planner is None or planner.outstanding() is None:
+                return
+            planner.settle(state, order=order)
+        except Exception:  # noqa: BLE001 — an ungraded plan stays outstanding, as it should
+            return
 
     def _kind_of(self, subject: str) -> str:
         """What kind of thing this subject is — its stated kind, or the head of its own name.

@@ -936,11 +936,7 @@ class InternalUniverse:
         order that decides which way an arrow runs.
         """
         try:
-            observed = {}
-            for key, raw in (actual or {}).items():
-                name, value = _norm(key), _finite(raw)
-                if name and value is not None:
-                    observed[name] = value
+            observed = self._readings(actual)
             if not observed:
                 return 0.0
 
@@ -951,23 +947,57 @@ class InternalUniverse:
             self.observe(observed, order=order)
             if target is None:
                 return 0.0
+            error = self.grade(target, observed)
+            return 0.0 if error is None else error
+        except Exception:  # noqa: BLE001
+            return 0.0
 
-            predicted = target.final
+    @staticmethod
+    def _readings(actual: Dict[str, Any]) -> Dict[str, float]:
+        """Normalised, finite readings only — the form both :meth:`observe` and :meth:`grade` want."""
+        out: Dict[str, float] = {}
+        for key, raw in (actual or {}).items():
+            name, value = _norm(key), _finite(raw)
+            if name and value is not None:
+                out[name] = value
+        return out
+
+    def grade(self, rollout: Rollout, actual: Dict[str, Any]) -> Optional[float]:
+        """Score one **named** rollout against a reading, and learn nothing from the reading.
+
+        Split out of :meth:`reconcile` rather than duplicated, because a second copy of this
+        arithmetic is a second place for "the model was wrong" to be counted differently.
+
+        The separation is what a planner needs. :meth:`reconcile` observes *and* grades, and it
+        grades whichever rollout is newest — which is correct for the field, whose rollout is the
+        newest by construction. A plan's rollout is not: the field imagines a "continue" step on
+        every cycle, so by the time the plan's reading arrives its claim is several rollouts old.
+        Grading it through :meth:`reconcile` would either score the wrong claim or observe the
+        same reading twice, and observing a reading twice inflates ``n`` on every relation it
+        touches without adding one bit of variance. Returns ``None`` when the reading names
+        nothing the rollout predicted — which is not an error, it is a claim reality did not
+        happen to address.
+        """
+        observed = self._readings(actual)
+        if not observed:
+            return None
+        try:
+            predicted = rollout.final
             shared = [k for k in predicted if k in observed]
             if not shared:
-                target.scored = True
-                return 0.0
+                rollout.scored = True
+                return None
             errors = [abs(predicted[k] - observed[k]) for k in shared]
             error = sum(errors) / len(errors)
-            target.scored = True
-            target.error = error
+            rollout.scored = True
+            rollout.error = error
             self.reconciled += 1
             self.total_error += error
             # Charged to the model that made the claim. Without this, "the model was wrong" can
             # never become "this model has been wrong six times", which is the only form in which
             # a retirement decision can be made at all.
             record = self._by_version.setdefault(
-                target.model_version or "unnamed",
+                rollout.model_version or "unnamed",
                 {"rollouts": 0.0, "scored": 0.0, "surprises": 0.0, "error": 0.0})
             record["scored"] += 1
             record["error"] += error
@@ -975,12 +1005,12 @@ class InternalUniverse:
             # Surprise: the model was confident and still wrong. Scale-free, so it means the same
             # thing for a temperature and for a probability.
             scale = max(1e-6, sum(abs(observed[k]) for k in shared) / len(shared))
-            if error / scale > (1.0 - target.confidence) + 0.25:
+            if error / scale > (1.0 - rollout.confidence) + 0.25:
                 self.surprises += 1
                 record["surprises"] += 1
             return error
         except Exception:  # noqa: BLE001
-            return 0.0
+            return None
 
     # ---- reporting ---------------------------------------------------------- #
     def usable_relations(self) -> List[Relation]:

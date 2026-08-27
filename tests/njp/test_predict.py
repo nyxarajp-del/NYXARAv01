@@ -193,10 +193,22 @@ def test_the_brain_scores_and_diagnoses_a_turn():
 
 
 def test_the_brain_registers_a_prediction_even_when_it_does_not_know():
-    """"I don't know" is a real prediction about the world and a diagnosable miss."""
+    """"I don't know" is a real prediction about the world and a diagnosable miss.
+
+    Asserted on the claim rather than on a count. This test read ``predictions == 1`` until the
+    turn started predicting whether deliberation would answer, which is a second and entirely
+    legitimate prediction — scored inside the same turn — and the count then said the wrong thing
+    about a brain doing more of the right thing. A total is a poor proxy for "this particular
+    claim was made": it fails whenever anything else correctly makes a claim too.
+    """
     brain = NJPBrain()
     brain.think("what is my pin code")
-    assert brain.predictor.predictions == 1
+    open_claims = {key: pending.expected for key, pending in brain.predictor._open.items()}
+    assert any(expected == "<unknown>" for expected in open_claims.values()), open_claims
+    # And it is *open*, which is the point of it: nothing in this turn can settle what his pin
+    # code is, so the claim waits for him to say. A prediction closed by the turn that made it
+    # would not be a prediction about the world at all.
+    assert brain.predictor.predictions >= 1
 
 
 def test_an_organ_that_is_off_is_absent():

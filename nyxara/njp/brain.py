@@ -378,6 +378,10 @@ class NJPBrain:
         # counterfactual context is compiled through it and the universe is what executes it.
         self.compiler = self._build_compiler(c)
         self.universe = self._build_universe(c)
+        # After `universe`, whose model it rolls forward, and after `predictor`, which is where
+        # its claims go to be scored. A planner built before either would hold two Nones and
+        # report every search as "no causal model".
+        self.rollout = self._build_rollout(c)
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
         # The subsystem that attacks what the ones above it conclude. After `world`, `universe`
@@ -651,6 +655,22 @@ class NJPBrain:
             from nyxara.njp.curiosity import Curiosity
             return Curiosity(self, min_value=self._cfg("curiosity_min_value", 0.05))
         except Exception:  # noqa: BLE001 — she answers what she is asked and wonders nothing
+            return None
+
+    def _build_rollout(self, c: Any) -> Any:
+        """Goal → imagined futures → the best one → and reality's verdict on it.
+
+        :meth:`~nyxara.njp.universe.InternalUniverse.imagine` had exactly one caller, which
+        imagined one variable at the value it already had. Nothing asked which intervention would
+        get a number where it needed to be, which is the only question a causal model is for.
+        See :mod:`nyxara.njp.rollout`.
+        """
+        if not self._gate("rollout", True):
+            return None
+        try:
+            from nyxara.njp.rollout import RolloutPlanner
+            return RolloutPlanner(self)
+        except Exception:  # noqa: BLE001 — she models what follows what and plans nothing with it
             return None
 
     def _build_assumptions(self, c: Any) -> Any:
@@ -3944,6 +3964,7 @@ class NJPBrain:
                             ("loop", self.loop),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
+                            ("rollout", self.rollout),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
@@ -4117,6 +4138,7 @@ class NJPBrain:
                             ("attention", self.attention), ("readout", self.readout),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
+                            ("rollout", self.rollout),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent),
                             ("field", self.field), ("learner", self.learner),
@@ -4172,6 +4194,8 @@ class NJPBrain:
                 self.goals.load_dict(d["goals"])
             if d.get("curiosity") and self.curiosity is not None:
                 self.curiosity.load_dict(d["curiosity"])
+            if d.get("rollout") and self.rollout is not None:
+                self.rollout.load_dict(d["rollout"])
             if d.get("readout") and self.readout is not None:
                 self.readout.load_dict(d["readout"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):

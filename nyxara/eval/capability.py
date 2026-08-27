@@ -92,7 +92,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["ProbeResult", "CapabilityReport", "split", "evaluate", "run"]
 
@@ -595,6 +595,107 @@ def _probe_transition(brain: Any, records: Sequence[Dict[str, Any]],
     return out
 
 
+def _probe_planning(brain: Any, records: Sequence[Dict[str, Any]],
+                    category: str) -> ProbeResult:
+    """Which lever, and which way — asked of a law she was taught and a plan nobody stated.
+
+    The surface had rows for what she *knows* and what she *concludes*, and none for what she
+    would *do*. This is that row.
+
+    A derived family, for the same reason ``generalization`` and ``inheritance`` are. The answer
+    key here is the declared direction of the law — ``water causes growth, sign +1`` — which is
+    stated in the record, so the record has to be in the **taught** set for the arrow to exist at
+    all. What is held out is not withheld by the splitter: it is the plan, and no record in the
+    corpus contains one. Asking a held-out record would leave the universe with no arrow, no
+    lever, and a row of ``asked`` against ``answered: 0`` measuring the splitter rather than her.
+
+    Two things have to be right and they fail independently:
+
+    * the **lever** — the cause named by the law, picked out of every variable in the universe
+      that has an oriented arrow anywhere. Twenty-seven relations were fitted from this corpus,
+      so choosing the one that actually reaches the target is a real discrimination and not a
+      formality;
+    * the **direction** — pushed the way the law's sign says. A planner with an inverted sign
+      finds the right lever every time and scores zero here, which is the point of checking both.
+
+    Scored only where the model has something to plan with: a target already met, or a variable
+    the universe never fitted, is not answered wrongly — it is not answered, and ``asked``
+    against ``answered`` keeps the two apart.
+    """
+    out = ProbeResult(family="planning", category=category)
+    planner = getattr(brain, "rollout", None)
+    universe = getattr(brain, "universe", None)
+    if planner is None or universe is None:
+        return out
+    try:
+        from nyxara.njp.rollout import Target
+    except Exception:  # noqa: BLE001
+        return out
+    seen: Set[Tuple[str, str]] = set()
+    for record in records:
+        for law in record.get("law") or []:
+            if len(law) < 4:
+                continue
+            cause, effect = _norm(law[0]), _norm(law[2])
+            try:
+                sign = int(law[3])
+            except (TypeError, ValueError):
+                continue
+            if not cause or not effect or sign == 0 or (cause, effect) in seen:
+                continue
+            here = universe.state.get(effect)
+            lever_now = universe.state.get(cause)
+            if here is None or lever_now is None:
+                continue
+            # Only where the question is well posed. A variable two different laws both reach is
+            # a variable with two right answers, and marking one of them wrong measures the
+            # corpus rather than her.
+            #
+            # This is not hypothetical and it is not rare. The corpus states its laws in bare
+            # variable names, so ``fertiliser causes yield`` from an agriculture scenario and
+            # ``catalyst mass causes yield`` from a chemistry one fit the *same* variable — as do
+            # ``altitude causes temperature`` and ``temperature causes rate``. Measured, the
+            # planner chose ``catalyst mass`` for ``yield`` and ``altitude`` for ``rate``: both
+            # genuine levers with real arrows into the target, both scored wrong against a key
+            # that named the other one. Skipping the ambiguous pairs is the honest response;
+            # loosening the key until the answer counts is how a benchmark stops measuring.
+            def _into(variable: str) -> set:
+                return {c for (c, e), relation in universe.relations.items()
+                        if e == variable and getattr(relation, "usable", False)
+                        and getattr(relation, "oriented", False)}
+
+            # One lever, and it has to be the whole chain. Restricting to a single *direct*
+            # cause is not enough: the search walks upstream, so a cause that is itself an
+            # effect gives a second, genuine lever a hop further back. Measured, ``rate`` had
+            # exactly one arrow into it — from ``temperature`` — and the plan set ``altitude``,
+            # which drives temperature and scored better for it. That is a good plan being
+            # marked wrong by a key that names the nearer variable, so the pair is only asked
+            # about where nothing upstream of the cause is settable either.
+            reaching = _into(effect)
+            if len(reaching) != 1 or cause not in reaching or _into(cause):
+                continue
+            if out.asked >= _MAX_PROBES:
+                break
+            seen.add((cause, effect))
+            out.asked += 1
+            # A target above where the variable is now, so "get it higher" is a real request and
+            # the sign of the required lever move is exactly the law's own sign.
+            target = Target(variable=effect, value=float(here) + max(1.0, abs(float(here)) * 0.2))
+            try:
+                plan = planner.search(target)
+            except Exception:  # noqa: BLE001
+                continue
+            if plan.chosen is None:
+                continue                     # nothing reaches it — not an answer, not a mistake
+            out.answered += 1
+            moved = float(plan.chosen.setting) - float(lever_now)
+            if abs(moved) <= _FLAT:
+                continue                     # a plan that changes nothing is not the right way
+            if plan.chosen.lever == cause and (1 if moved > 0 else -1) == sign:
+                out.correct += 1
+    return out
+
+
 _FAMILIES = (
     ("recall", _probe_recall),
     ("relation", _probe_relation),
@@ -602,6 +703,7 @@ _FAMILIES = (
     ("counterfactual", _probe_counterfactual),
     ("generalization", _probe_generalization),
     ("inheritance", _probe_inheritance),
+    ("planning", _probe_planning),
     ("transfer", _probe_transfer),
     ("transition", _probe_transition),
 )
@@ -620,7 +722,22 @@ def _capped(result: ProbeResult) -> ProbeResult:
 #: record is load-bearing for its own probe, so a fair split had nothing left to withhold and the
 #: row vanished to `asked: 0`. They read the **taught** set, where the premises are, and the answer
 #: is held out by construction rather than by the splitter.
-_DERIVED_FAMILIES = frozenset({"generalization", "inheritance"})
+_DERIVED_FAMILIES = frozenset({"generalization", "inheritance", "planning"})
+
+#: Why there is no ``curiosity`` row here, and why adding one would be worse than the gap.
+#:
+#: Every family above has an answer key that exists independently of the organ being scored — the
+#: invariant the corpus states, the direction the law declares, the state the transition names.
+#: "Which question is most worth asking" has no such key. Any key this file could write would be
+#: a restatement of the same priority ordering the organ computes, and a benchmark that agrees
+#: with the system by construction measures nothing at all. Phase 5's own rule says it plainly:
+#: generation and evaluation must stay separate, and here they cannot be.
+#:
+#: The compression reward is falsified elsewhere and properly — ``tests/njp/
+#: test_compression_reward.py`` holds the question set fixed, moves only which organ is still
+#: yielding, and requires the top of the queue to change. That is an experiment with a control,
+#: which is more than a benchmark row would have been.
+_NO_KEY_FAMILIES = frozenset({"curiosity", "revision", "representation"})
 
 
 def evaluate(brain: Any, held_out: Sequence[Dict[str, Any]], *,
