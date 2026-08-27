@@ -1415,8 +1415,11 @@ class NJPBrain:
             return None
         try:
             from nyxara.njp.metareason import MetaReasoner, ProblemKind
+            # `self_model` is built at line 346, before this — so the gate has its record from
+            # the first turn rather than being attached afterwards and missing the early ones.
             meta = MetaReasoner(meta_learner=self.meta, beliefs=self.beliefs,
-                                world=self.world, universe=self.universe)
+                                world=self.world, universe=self.universe,
+                                self_model=self.self_model)
             if self.ladder is not None or self.reasoner is not None:
                 meta.register("ladder", (ProblemKind.SYMBOLIC, ProblemKind.CONTRADICTION),
                               self._strategy_ladder, prior=0.6)

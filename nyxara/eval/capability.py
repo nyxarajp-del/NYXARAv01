@@ -24,40 +24,42 @@ What it reads today
 1,331 records taught, 372 held out, 300 probes::
 
     control (taught recall)  1.00      the load worked; a low surface is not a failed load
-    surface                  0.30
+    surface                  0.40      was 0.29
 
-    counterfactual           1.00      do(x) moved the right way
+    counterfactual           1.00
     inheritance              1.00      11/11 — something came down the is_a edge
-    recall                   0.17      answered 5 of 18; right on 3 of the 5 she answered
+    generalization           0.87      13 of 13 she answered were right, was 0.00
+    recall                   0.17
     causal                   0.17
-    generalization           0.07      15 asked, 4 answered, 1 right
     relation / transfer / transition   0.00 on one or two probes each — a sample size, not a finding
 
-``generalization`` read **0.00** before the work in this file's sibling commits and is the row
-they were aimed at. It moved because three things were repaired, and only one of them was hers:
+``generalization`` read **0.00** and was the row this work was aimed at. Nothing about the
+reasoning changed: asked for the properties of a seal she already answered "warm blooded", stored
+about *mammal* and never about seals, so the inference had been firing all along. What was missing
+was every way of getting a question to it, and three separate things were:
 
 * ``has_property`` could be **asked for and never written**. No rule in
   ``grounding._SEED_PATTERNS`` produced one, so "copper is ductile" compiled to
-  ``('copper', 'ductile', '')`` — a relation named after the adjective with **no object** — and
-  "a mammal is warm blooded" was unreadable outright. A predicative-adjective rule closes it.
-* No question form could name **which** inherited property was wanted. The polar reader split
-  "is a seal warm blooded" into relation "warm" and object "blooded"; a relation nobody has ever
-  stored, sitting beside an object, is one phrase cut in half, and rejoining it makes the only
-  askable form work.
+  ``('copper', 'ductile', '')`` — a relation named after the adjective, with no object — and
+  "a mammal is warm blooded" was unreadable outright.
+* **No question form could name which property was wanted.** ``compile_meaning`` produces a polar
+  reading only for a narrow shape: "is a seal warm blooded" parses, "is kiwi feathered" comes back
+  `unreadable`, and "is norway governed by elected leaders" parses to the subject "norway governed
+  elected". A surface reader that *finds* the subject boundary by asking the store which entities
+  it knows handles all three, and hands anything it cannot place back unchanged.
 * The corpus filed **capabilities as properties** — "breathes with lungs" under ``has_property``,
-  where no English sentence can ask for it. They are ``capable_of`` claims and now say so.
+  where no English sentence reaches it.
 
-And two of the repairs were to this file, both the same mistake: the eval was withholding the
-answer to its own question. First the ``is_a`` edge, then the invariant itself. The fair rule is
-that a held-out claim must be one she could have **derived**, never one the answer key needs — and
-where nothing in a record satisfies that, the record is not probed at all.
+The probe asks both directions and requires both: the true property must come back affirmed **and**
+a property borrowed from another concept must not. A system that answers "yes" to everything
+scores zero on it, which is why 13 of 13 is worth quoting.
 
-Which led to the last correction: ``generalization`` and ``inheritance`` **need no holdout**. The
-corpus never states "a seal breathes with lungs"; it states that mammals do and that a seal is a
-mammal. The answer is held out by construction, so those two families read the *taught* set. Run
-against the held-out split they had nothing left to ask and the row read ``asked: 0``.
+Two of the repairs were to this file — it was withholding the answer to its own question, first the
+``is_a`` edge and then the invariant itself — and one was a rule: ``generalization`` and
+``inheritance`` **need no holdout**, because the corpus never states the conclusion. They read the
+taught set, where the premises are.
 
-Seven probe familiesEight probe families, derived from the blocks a record already carries
+Eight probe familiesEight probe families, derived from the blocks a record already carries
 ---------------------------------------------------------------------
 Nothing here needs a new annotation. Each family reads a block the unified corpus already has and
 turns it into a question with an answer key:

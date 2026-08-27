@@ -1447,6 +1447,23 @@ def _clean(text: str) -> str:
     return " ".join(parts).strip()
 
 
+
+#: "is/are/does/can <something> <something>" — the whole surface, before anything tries to parse it.
+_POLAR_SURFACE = re.compile(
+    r"^(?P<verb>is|are|was|were|does|do|did|can|could|has|have)\s+(?P<rest>.+?)\s*\??$")
+
+#: Which relation each opening verb reaches for first. The evidence still decides — this only sets
+#: the order the two are tried in, because "can X ..." is far more often a capability and
+#: "is X ..." far more often a property, and trying the likelier one first costs nothing.
+_POLAR_PREFERENCE: Dict[str, Tuple[str, ...]] = {
+    "can": ("capable_of", "has_property"), "could": ("capable_of", "has_property"),
+    "does": ("capable_of", "has_property"), "do": ("capable_of", "has_property"),
+    "did": ("capable_of", "has_property"),
+    "has": ("has_part", "has_property"), "have": ("has_part", "has_property"),
+}
+_POLAR_DEFAULT: Tuple[str, ...] = ("has_property", "capable_of")
+
+
 class Grounder:
     """Turns turns into structure, and answers from it.
 
@@ -2693,6 +2710,85 @@ class Grounder:
         # about facts she had just been taught.
         return self._compile_question(low)
 
+    def _known_entity(self, name: str) -> bool:
+        """Does the store hold anything at all about this? The only reliable boundary signal."""
+        key = self._key(name)
+        if not key:
+            return False
+        return any(subject == key for subject, _predicate in self.facts)
+
+    def _read_polar_surface(self, low: str, out: Answer) -> Optional[Answer]:
+        """Read "is X <phrase>" by *finding* where the subject ends, instead of assuming.
+
+        Splitting a polar question into subject and predicate is ambiguous from the surface alone —
+        "is norway governed by elected leaders" could break after any word. What disambiguates it
+        is not grammar, it is that **the store knows its own subjects**: try each split and keep
+        the one whose left half is an entity something has been said about.
+
+        Returns ``None`` when no split names a known entity, which hands the question back to
+        `compile_meaning` unchanged rather than guessing.
+        """
+        match = _POLAR_SURFACE.match(low)
+        if match is None:
+            return None
+        verb = match.group("verb")
+        words = match.group("rest").split()
+        if len(words) < 2:
+            return None
+        order = _POLAR_PREFERENCE.get(verb, _POLAR_DEFAULT)
+        # Longest subject first: "prime number" should beat "prime" where both are known.
+        for cut in range(min(4, len(words) - 1), 0, -1):
+            head = words[:cut]
+            if head and head[0] in ("a", "an", "the"):
+                head = head[1:]
+                if not head:
+                    continue
+            subject = self.resolve(" ".join(head))
+            if not subject or not self._known_entity(subject):
+                continue
+            phrase = " ".join(words[cut:]).strip()
+            if not phrase:
+                continue
+            entities = [subject, *self._neighbours(subject)]
+            # "do zorbins need glarn" is not a phrase about zorbins, it is a *relation* and an
+            # object — and reading it as one phrase answered UNKNOWN about a fact that was on
+            # record. So when the phrase opens with a word that folds to a relation the store
+            # knows, that reading is tried first; only a phrase that names no relation is treated
+            # as a predicative one. Both forms are polar and neither can stand in for the other.
+            head_word, _, tail = phrase.partition(" ")
+            folded = self._predicate(head_word)
+            readings: List[Tuple[str, str]] = []
+            if tail and folded in _KNOWN_PREDICATES:
+                readings.append((folded, tail))
+            readings.extend((predicate, phrase) for predicate in order)
+            for predicate, target in readings:
+                wanted = self._key(target)
+                for entity in entities:
+                    for negated in (False, True):
+                        found = [t for t in (self._lookup(entity, predicate, negated=negated) or [])
+                                 if self._key(t.object) == wanted]
+                        if not found:
+                            continue
+                        best = max(found, key=lambda t: t.confidence)
+                        out.polar = True
+                        out.polar_object = target
+                        out.triples = found
+                        out.confidence = best.confidence
+                        out.provenance = best.provenance
+                        out.text = "no" if negated else "yes"
+                        out.state = (Epistemic.KNOWN
+                                     if best.confidence >= self.known_floor
+                                     else Epistemic.BELIEVED)
+                        out.why = (f"{'denied' if negated else 'stated'}: {best.subject} "
+                                   f"{predicate} {best.object}")
+                        return out
+            # A known subject and no matching claim is UNKNOWN, not "no" — an open world says so.
+            out.polar = True
+            out.polar_object = phrase
+            out.why = "no claim either way about this pair"
+            return out
+        return None
+
     def _answer_polar(self, low: str, out: Answer) -> Optional[Answer]:
         """Yes, no, or unknown — the three states a polar question actually has.
 
@@ -2730,6 +2826,14 @@ class Grounder:
         """
         if low.split(" ", 1)[0] in _WH_OPENERS:
             return None
+        # Try the surface reader first. `compile_meaning` produces `polar_question` only for a
+        # narrow shape — measured, "is a seal warm blooded" parses and "is kiwi feathered" comes
+        # back `unreadable`, while "is norway governed by elected leaders" parses to the subject
+        # "norway governed elected". Two-token and long-tail polar questions are the majority of
+        # the form, so a reader that handles them cannot be a fallback.
+        surface = self._read_polar_surface(low, out)
+        if surface is not None:
+            return surface
         try:
             from nyxara.njp.semantics import compile_meaning
         except Exception:  # noqa: BLE001
