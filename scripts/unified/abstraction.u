@@ -40,7 +40,7 @@ text       = a prime has exactly two divisors, and two is prime.
 domain     = chemistry
 examples   = copper | conducts electricity ;; iron | conducts electricity ;; gold | conducts electricity ;; mercury | conducts electricity
 concept    = metal
-invariants = conducts electricity
+capabilities = conduct electricity
 note       = solid at room temperature is not the invariant. mercury is the member that says so.
 generalize = aluminium ?? conducts electricity
 text       = conduction survives the liquid member. hardness does not.
@@ -49,8 +49,8 @@ text       = conduction survives the liquid member. hardness does not.
 domain     = physics
 examples   = crowbar | turns about a fulcrum ;; seesaw | turns about a fulcrum ;; wheelbarrow | turns about a fulcrum ;; scissors | turns about a fulcrum
 concept    = lever
-invariants = turns about a fulcrum
-generalize = nutcracker ?? turns about a fulcrum
+capabilities = turn about a fulcrum
+generalize = nutcracker ?? turn about a fulcrum
 text       = where the fulcrum sits differs in all four, and that there is one does not.
 
 @record concept_formation what_makes_a_democracy
@@ -111,9 +111,9 @@ text       = immunity without the disease, out of the disease itself.
 @record generalization metals_conduct
 domain     = chemistry
 concept    = metal
-invariants = conducts
-examples   = copper | conducts ;; silver | conducts ;; aluminium | conducts ;; iron | conducts
-generalize = tungsten ?? conducts ;; zinc ?? conducts
+capabilities = conduct
+examples   = copper | conduct ;; silver | conduct ;; aluminium | conduct ;; iron | conduct
+generalize = tungsten ?? conduct ;; zinc ?? conduct
 text       = four measured members and the property carried to two that were not measured.
 
 @record generalization even_squares
@@ -127,17 +127,17 @@ text       = an even number times an even number is even, so the square of any e
 @record generalization acids_turn_litmus_red
 domain     = chemistry
 concept    = acid
-invariants = turns litmus red
+capabilities = turn litmus red
 examples   = hydrochloric acid | turns litmus red ;; sulfuric acid | turns litmus red ;; citric acid | turns litmus red
-generalize = acetic acid ?? turns litmus red
+generalize = acetic acid ?? turn litmus red
 text       = three of a kind, carried to a fourth of the same kind.
 
 @record generalization mammals_have_lungs
 domain     = biology
 concept    = mammal
-invariants = breathes with lungs
+capabilities = breathe with lungs
 examples   = whale | breathes with lungs ;; bat | breathes with lungs ;; elephant | breathes with lungs
-generalize = seal ?? breathes with lungs ;; dolphin ?? breathes with lungs
+generalize = seal ?? breathe with lungs ;; dolphin ?? breathe with lungs
 note       = the two carried to are aquatic, which is what makes this a real generalisation and not a restatement.
 text       = living in water does not change what a mammal breathes with.
 

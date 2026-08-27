@@ -21,35 +21,44 @@ you can quote.
 
 What it reads today
 -------------------
-1,331 records taught, 372 held out, 300 probes, 7.7 seconds::
+1,331 records taught, 372 held out, 300 probes::
 
     control (taught recall)  1.00      the load worked; a low surface is not a failed load
-    surface                  0.29
+    surface                  0.30
 
-    inheritance              1.00      something came down the is_a edge
     counterfactual           1.00      do(x) moved the right way
-    causal                   0.17
+    inheritance              1.00      11/11 — something came down the is_a edge
     recall                   0.17      answered 5 of 18; right on 3 of the 5 she answered
-    generalization           0.00
-    relation                 0.00
-    transfer                 0.00
-    transition               0.00
+    causal                   0.17
+    generalization           0.07      15 asked, 4 answered, 1 right
+    relation / transfer / transition   0.00 on one or two probes each — a sample size, not a finding
 
-The pair worth reading is ``inheritance 1.00`` beside ``generalization 0.00``. They ask about the
-same four members. Asked for the properties of a seal she answers ``warm blooded`` — a property
-stored about **mammal** and never about seals, so the inheritance fired exactly as designed. It is
-the wrong one only because the question cannot name which property is wanted: ``what are the
-properties of X`` returns one of four and no form in ``grounding._QUESTION_PATTERNS`` asks for a
-particular inherited property. That is a question-grammar gap, and it is the same shape as the
-``known_for`` line that never fires and the polar reader that swallowed "when does X occur" — the
-third one this corpus work has turned up.
+``generalization`` read **0.00** before the work in this file's sibling commits and is the row
+they were aimed at. It moved because three things were repaired, and only one of them was hers:
 
-``transfer``, ``relation``, ``transition`` sit at 0.00 on one or two probes each. That is a sample
-size, not a finding, and the ``asked`` column is printed beside every score so it cannot be read as
-one.
+* ``has_property`` could be **asked for and never written**. No rule in
+  ``grounding._SEED_PATTERNS`` produced one, so "copper is ductile" compiled to
+  ``('copper', 'ductile', '')`` — a relation named after the adjective with **no object** — and
+  "a mammal is warm blooded" was unreadable outright. A predicative-adjective rule closes it.
+* No question form could name **which** inherited property was wanted. The polar reader split
+  "is a seal warm blooded" into relation "warm" and object "blooded"; a relation nobody has ever
+  stored, sitting beside an object, is one phrase cut in half, and rejoining it makes the only
+  askable form work.
+* The corpus filed **capabilities as properties** — "breathes with lungs" under ``has_property``,
+  where no English sentence can ask for it. They are ``capable_of`` claims and now say so.
 
-Seven probe families, derived from the blocks a record already carries
-----------------------------------------------------------------------
+And two of the repairs were to this file, both the same mistake: the eval was withholding the
+answer to its own question. First the ``is_a`` edge, then the invariant itself. The fair rule is
+that a held-out claim must be one she could have **derived**, never one the answer key needs — and
+where nothing in a record satisfies that, the record is not probed at all.
+
+Which led to the last correction: ``generalization`` and ``inheritance`` **need no holdout**. The
+corpus never states "a seal breathes with lungs"; it states that mammals do and that a seal is a
+mammal. The answer is held out by construction, so those two families read the *taught* set. Run
+against the held-out split they had nothing left to ask and the row read ``asked: 0``.
+
+Seven probe familiesEight probe families, derived from the blocks a record already carries
+---------------------------------------------------------------------
 Nothing here needs a new annotation. Each family reads a block the unified corpus already has and
 turns it into a question with an answer key:
 
@@ -226,12 +235,29 @@ def split(records: Sequence[Dict[str, Any]], *, holdout: float = 0.25,
         if len(claims) < 2:
             held.append(record)
             continue
-        # Never the ``is_a`` link. The generator derives ``<member> is_a <concept>`` for every
-        # generalisation target and appends it last, so taking the final claim withheld exactly the
-        # edge the generalisation probe needs — measured, ``nutcracker`` and ``acetic acid`` came
-        # back with no kind at all and the probe scored them as failures of inheritance when the
-        # split had removed the thing to inherit through.
-        candidates = [c for c in claims if len(c) > 1 and c[1] != "is_a"] or claims
+        # Never a claim the record's own probe depends on. Two kinds of self-sabotage were found
+        # here, one after the other, and they are the same mistake at two depths:
+        #
+        #   1. the ``is_a`` edge — the generator appends ``<member> is_a <concept>`` for every
+        #      generalisation target, so taking the last claim removed the edge to inherit
+        #      *through*; ``nutcracker`` and ``acetic acid`` came back with no kind at all.
+        #   2. the **invariant itself** — with the is_a rows excluded, the only remaining derived
+        #      claims are ``<concept> has_property <invariant>``, so the split then withheld the
+        #      very property the probe asks about. Measured: ``mammal has_property`` held
+        #      "warm blooded, hair or fur, milk" and the probe wanted "breathes with lungs",
+        #      which the split had removed. The row read 0.00 for a gap the eval had created.
+        #
+        # A held-out claim has to be one she could have *derived*, never one the answer key needs.
+        gold = {_norm(pair[1]) for pair in (record.get("generalize") or []) if len(pair) > 1}
+        candidates = [c for c in claims
+                      if len(c) > 2 and c[1] != "is_a" and _norm(c[2]) not in gold]
+        if not candidates:
+            # Every claim in this record is load-bearing for its own probe. The first version fell
+            # back to withholding one anyway, which put the `is_a` edge back on the block and left
+            # `nutcracker` and `acetic acid` with no kind again. A record that cannot yield a fair
+            # probe yields none: it stays wholly taught and is not asked about.
+            taught.append(record)
+            continue
         withheld = candidates[-1]
         keep = [c for c in claims if c is not withheld]
         target = _norm(withheld[2]) if len(withheld) > 2 else ""
@@ -434,28 +460,42 @@ def _probe_counterfactual(brain: Any, records: Sequence[Dict[str, Any]],
 
 def _probe_generalization(brain: Any, records: Sequence[Dict[str, Any]],
                           category: str) -> ProbeResult:
-    """The member left out of the examples, asked for the invariant it should inherit.
+    """The member left out of the examples, asked whether the invariant holds of it.
 
-    Marked on naming *that* property. See :func:`_probe_inheritance` for the weaker question —
-    whether anything was inherited at all — which is a different capability and scores far higher.
+    Asked in the **polar** form — "is a seal warm blooded" — because that is the only form that
+    can name *which* property is wanted. ``what are the properties of X`` returns one of four and
+    cannot be told, which is why this row read 0.00 against inheritance that was firing correctly.
+
+    **Both directions are asked, and both must be right.** A positive probe alone is worthless: a
+    system that answers "yes" to everything scores full marks on it. So each gold property is
+    paired with a control drawn from a *different* record's concept, and the item counts only when
+    the true property comes back affirmed and the foreign one does not. An open-world store should
+    say UNKNOWN to the control rather than "no", and either is accepted — what is not accepted is
+    "yes".
     """
     out = ProbeResult(family="generalization", category=category)
-    for record in records:
+    controls = [str(pair[1]) for record in records
+                for pair in (record.get("generalize") or []) if len(pair) > 1]
+    for index, record in enumerate(records):
         for pair in record.get("generalize") or []:
             if len(pair) < 2:
                 continue
             if out.asked >= _MAX_PROBES:
                 break
+            member, gold = str(pair[0]), str(pair[1])
+            foreign = next((c for c in controls if c != gold), "")
+            if not foreign:
+                continue
             out.asked += 1
-            said = _ask(brain, f"what are the properties of {pair[0]}?") or \
-                _ask(brain, f"what is {pair[0]}?")
+            said = _norm(_ask(brain, f"is {member} {gold}?"))
             if not said:
                 continue
             out.answered += 1
-            if _contained(said, pair[1]):
+            control = _norm(_ask(brain, f"is {member} {foreign}?"))
+            if said.startswith("yes") and not control.startswith("yes"):
                 out.correct += 1
             elif len(out.misses) < 8:
-                out.misses.append(f"{pair[0]} → {said!r} (gold {pair[1]!r})")
+                out.misses.append(f"{member}: {gold}→{said!r} control {foreign}→{control!r}")
     return out
 
 
@@ -572,7 +612,17 @@ def _capped(result: ProbeResult) -> ProbeResult:
     return result
 
 
+#: Families whose answer key is **derivable and never stated**, so they need no holdout — the
+#: corpus says "mammals breathe with lungs" and "a seal is a mammal" and never says the conclusion.
+#: Running these on the held-out split was measuring the wrong set: every claim in a generalisation
+#: record is load-bearing for its own probe, so a fair split had nothing left to withhold and the
+#: row vanished to `asked: 0`. They read the **taught** set, where the premises are, and the answer
+#: is held out by construction rather than by the splitter.
+_DERIVED_FAMILIES = frozenset({"generalization", "inheritance"})
+
+
 def evaluate(brain: Any, held_out: Sequence[Dict[str, Any]], *,
+             taught: Optional[Sequence[Dict[str, Any]]] = None,
              budget: int = _DEFAULT_BUDGET) -> List[ProbeResult]:
     """Every probe family, per category, over the records she was never taught.
 
@@ -581,13 +631,19 @@ def evaluate(brain: Any, held_out: Sequence[Dict[str, Any]], *,
     it is two thirds of the corpus — and every reasoning family reports nothing. Taking one family
     across all categories before starting the next gives each capability its own slice.
     """
-    by_category: Dict[str, List[Dict[str, Any]]] = {}
-    for record in held_out:
-        by_category.setdefault(str(record.get("category") or "unknown"), []).append(record)
+    def group(rows: Sequence[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for record in rows:
+            out.setdefault(str(record.get("category") or "unknown"), []).append(record)
+        return out
+
+    by_category = group(held_out)
+    by_category_taught = group(list(taught or []))
     out: List[ProbeResult] = []
     spent = 0
     for _name, probe in _FAMILIES:
-        for category, records in sorted(by_category.items()):
+        source = by_category_taught if _name in _DERIVED_FAMILIES else by_category
+        for category, records in sorted(source.items()):
             if spent >= budget:
                 break
             result = probe(brain, records, category)
@@ -611,7 +667,7 @@ def run(*, records: Any = _DEFAULT_RECORDS, holdout: float = 0.25, seed: int = 0
     brain = NJPBrain()
     absorbed = absorb(brain, taught, check=False)
     report.taught_recall = _taught_recall(brain, taught)
-    report.probes = evaluate(brain, held, budget=budget)
+    report.probes = evaluate(brain, held, taught=taught, budget=budget)
     report.ms = (time.perf_counter() - started) * 1000.0
     del absorbed
     return report
