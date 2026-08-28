@@ -80,10 +80,64 @@ is a different question from "plants that got little water were small". Answers 
 observed range come back with confidence decayed by how far they reach. A direction observational
 data genuinely cannot settle is reported as ambiguous rather than guessed.
 
+**And she plans in it.** :mod:`nyxara.njp.rollout` takes a variable that has to reach a value,
+finds what she has an oriented arrow *from*, sweeps each lever, rolls every setting forward and
+ranks them on the share of the distance closed times the confidence the model itself claimed —
+so a plan that would arrive by extrapolating far past anything ever measured loses to one that
+arrives on evidence, and the smallest move that works wins among equals. The plan is then
+registered as a claim, and the next real reading of that variable grades it. The number the
+mechanism is judged on is ``settled``, never ``planned``.
+
 **Curiosity is information gain.** :class:`~nyxara.njp.universe.ExperimentDesigner` computes, for
 each candidate experiment, the mutual information between the hypothesis set and that
 experiment's outcome. An experiment every live hypothesis predicts identically scores exactly
 zero bits however interesting it looks, and she does not run it.
+
+**A model she keeps being surprised by can be given up, and giving it up is reversible.**
+:mod:`nyxara.njp.universe` counts surprises *per model version*, and retirement withdraws only the
+directions she inferred **for herself** — testimony and intervention came from outside the model
+under suspicion, and discarding them would be throwing away evidence to save a hypothesis. The
+whole trial is judged on a held-out fold and reverts on a tie. That mechanism and its caller both
+existed and the loop had never once run, because its own criterion was circular: it demanded a
+pair with neither direction settled, and withdrawing an inference is the only thing that produces
+one. It now asks whether there is anything of *hers* to give up, and the pair a retirement opens
+goes straight to :class:`~nyxara.njp.universe.ExperimentDesigner` as two rivals that predict
+differently under intervention — the one experiment that can break Markov equivalence.
+
+**And a belief carries what would end it, as something she goes and looks for.**
+:mod:`nyxara.njp.falsify` reads the falsifier off the claim's own shape and searches her own
+record for it: a functional relation already holding a different value, a cause that keeps
+occurring without its effect, an arrow established the other way. Found, and the belief is
+retracted rather than argued with. What was there before was a template that filled the field in
+for every belief — so ``falsifiable`` was true of all of them and discriminated nothing — and
+nobody ever looked for what it named.
+
+**The rung she is on is proposed from what her own numbers say, not read off a list.**
+:mod:`nyxara.njp.curriculum` is nine fixed stages walked in order, and one rung blocked on a
+*sample count* pins the whole ladder while later rungs are already mastered — measured, five
+mastered and ``next_stage`` returning the same unworkable rung forever.
+:mod:`nyxara.njp.propose` reads her own published counters and proposes a rung that is not on the
+list: a metric that has fallen below a level she has personally reached, a stage that cannot be
+*judged* because the evidence for it does not exist yet, a capability her own posterior calls
+weak. **No source picks its own bar** — a proposal whose threshold is set relative to the current
+reading is a test written to be passed — and the generator never sees the held-out split, which a
+test enforces by parsing its imports rather than by trusting the docstring. The evaluator is the
+code that already scored the nine.
+
+**And when nothing she has explains a thing, a kind can be born.** :mod:`nyxara.njp.concepts`
+could always answer *"what is this, and if nothing, why not"*, and could always re-form the
+hierarchy around the answer; the only thing that ever asked was a prediction error that happened
+to be diagnosed conceptual. Now the store is scanned, and a concept caught **over-claiming** —
+promising an invariant one of its own members lacks — is split so the member is covered. Refused
+where the repair would be global: loosening what counts as kinship until an outlier fits cost
+compression and closed nothing when it was measured, so those gaps are found and reported and
+left alone.
+
+**Curiosity is priced by what closing a gap would let her compress.** Value of information says
+what rides on an answer; it cannot say that a region is *still yielding structure*.
+:mod:`nyxara.njp.progress` reads the two honest description-length ratios in this package as a
+derivative against a high-water mark, so a region already compressed out scores zero and only a
+new record pays. The level is not the reward — the gain is.
 
 **Every belief carries its own case.** :mod:`nyxara.njp.beliefs` answers what she knows, what she
 does not, why she believes it, what would falsify it, and how reliable she has actually been in

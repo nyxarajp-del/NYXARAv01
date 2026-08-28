@@ -27,6 +27,16 @@ because a mind that asks about everything has simply moved its work onto him.
 :meth:`resolve` records the answer and retires it. A question that has been asked and answered
 does not come back, and one that keeps failing to resolve is escalated rather than silently
 re-asked.
+
+**And the second half of "worth asking" is what closing it would let her compress.** Value of
+information prices a question by what rides on the answer. It cannot price the other thing that
+makes a question worth pursuing: that the region it is in is *still yielding structure*. Measured
+on a brain fresh off both corpora, thirty-six of forty-one open questions were tied at exactly
+``0.2100`` — same gap kind, same stakes, same cost, and nothing left to break the tie with but
+insertion order. :mod:`nyxara.njp.progress` reads the two honest compression ratios in this
+package as a **derivative against a high-water mark**, and :meth:`Curiosity._reward` adds that to
+the price of the gaps that feed the organ still moving. A region she has already compressed out
+scores zero, which is the point: the level is not the reward, the *gain* is.
 """
 
 from __future__ import annotations
@@ -69,7 +79,11 @@ class Question:
     uncertainty: float = 0.5           # how unsure she is, 0…1
     stakes: float = 0.3                # what it costs to stay ignorant
     cost: float = 0.2                  # what answering it would cost
-    value: float = 0.0                 # EVPI, filled in by the VOI pass
+    value: float = 0.0                 # EVPI + learning progress, filled in by the VOI pass
+    #: The learning-progress half of `value`, kept separately so the number is auditable. A
+    #: reward that cannot be read back apart from the thing it modified is a reward nobody can
+    #: check, and this one is meant to be checkable — see :mod:`nyxara.njp.progress`.
+    reward: float = 0.0
     action: str = ""                   # act | ask | gather
     asked: int = 0
     born: float = field(default_factory=time.time)
@@ -87,7 +101,8 @@ class Question:
     def to_dict(self) -> Dict[str, Any]:
         return {"text": self.text, "gap": self.gap, "subject": self.subject,
                 "predicate": self.predicate, "uncertainty": round(self.uncertainty, 4),
-                "value": round(self.value, 4), "cost": round(self.cost, 4),
+                "value": round(self.value, 4), "reward": round(self.reward, 5),
+                "cost": round(self.cost, 4),
                 "action": self.action, "asked": self.asked, "resolved": self.resolved,
                 "stale": self.stale}
 
@@ -103,14 +118,68 @@ _COST_GATHER = 0.15
 _PEER_MAJORITY = 0.6
 
 
+# Which compressing organ a gap *feeds*, if any. This is the whole content of the compression
+# reward: closing a gap of this kind hands an observation to that organ, so the organ still
+# buying description length with what it is handed is the organ whose gaps are worth pursuing.
+#
+# Two kinds are deliberately absent, and their absence is the honest part. A known-unknown is a
+# question she failed and an overconfident belief is one she holds past its evidence; both are
+# facts about her *record* rather than about structure, and closing either hands no observation
+# to anything that compresses. Giving them a reward anyway would be inventing one, and a reward
+# that does not correspond to a description length she can actually shorten is exactly the kind
+# of number this module was built to stop paying.
+_COMPRESSES: Dict[str, Tuple[str, ...]] = {
+    # An abstraction is fitted over episodes; a thin region and an unexamined assumption are both
+    # holes in the episode record the discoverer generalises from.
+    Gap.THIN_COVERAGE: ("discoverer",),
+    Gap.UNTESTED_ASSUMPTION: ("discoverer",),
+    # An invariant is found across members; a missing property and a word that reaches no entity
+    # are both holes in the observations concepts crystallise out of.
+    Gap.MISSING_RELATION: ("genesis",),
+    Gap.UNGROUNDED_WORD: ("genesis",),
+    # Being wrong the same way repeatedly is either a missing regularity or a missing kind, and
+    # nothing about the failure itself says which — so it is priced against both.
+    Gap.REPEATED_FAILURE: ("discoverer", "genesis"),
+}
+
+#: The progress rate at which an organ counts as *fully* yielding. Beating a description-length
+#: record by eight percent of itself in one pass is a large pass — both ratios here are sums of
+#: small integer counts, so ordinary incremental learning moves them by well under one percent —
+#: and anything at or above it earns the whole bonus.
+#:
+#: A ramp rather than a switch, and the reason is the shape of the common case. Once a corpus is
+#: loaded the organs mostly sit still: measured, ``genesis 2.5938`` unchanged over three further
+#: passes. The interesting discrimination is therefore between *barely moving* and *not moving*,
+#: not between fast and faster, and a switch would throw exactly that resolution away. Sized as a
+#: constant rather than normalised across the organs on purpose: a share-of-total would report
+#: some organ as the best one to pursue even on a pass where every organ had stalled.
+#:
+#: Imported rather than restated. It is the same anchor the tracker clamps a single pass to, and
+#: two copies of one constant is one copy that will eventually be changed alone.
+try:                                            # pragma: no cover - trivial fallback
+    from nyxara.njp.progress import _PER_PASS_CAP as _FULL_PROGRESS
+except Exception:                               # noqa: BLE001
+    _FULL_PROGRESS = 0.08
+
+#: Hard ceiling on the bonus, whatever the progress. Sized against the values the base pass
+#: actually produces — measured, 0.21 for a missing relation up to 0.70 for a prediction that
+#: keeps failing — so learning progress can reorder questions *within* a stakes tier and can
+#: never lift a tidy gap over an urgent one. A reward that outranks stakes is not curiosity, it
+#: is distraction.
+_REWARD_CAP = 0.25
+
+
 class Curiosity:
     """Finds her own gaps, and decides which one is worth closing."""
 
-    def __init__(self, brain: Any = None, *, voi: Any = None,
+    def __init__(self, brain: Any = None, *, voi: Any = None, progress: Any = None,
                  capacity: int = 128, min_value: float = 0.05,
                  min_failures: int = 3) -> None:
         self.brain = brain
         self.voi = voi if voi is not None else self._build_voi()
+        #: Which of her compressing organs are still buying description length. Sampled once per
+        #: :meth:`wonder`, read by :meth:`_value_of`. See :mod:`nyxara.njp.progress`.
+        self.progress = progress if progress is not None else self._build_progress(brain)
         self.capacity = max(8, int(capacity))
         # EVPI below which a question is not worth asking at all. Without a floor she would
         # surface every trivial gap, and a mind that asks about everything is not curious, it is
@@ -131,12 +200,27 @@ class Curiosity:
         except Exception:  # noqa: BLE001 — she still finds gaps, and ranks them more crudely
             return None
 
+    @staticmethod
+    def _build_progress(brain: Any) -> Any:
+        try:
+            from nyxara.njp.progress import CompressionProgress
+            return CompressionProgress(brain)
+        except Exception:  # noqa: BLE001 — without it every gap is worth what its stakes say
+            return None
+
     # ---- finding gaps -------------------------------------------------------- #
     def wonder(self) -> List[Question]:
         """One pass over everything she has, looking for holes. Returns what is newly raised."""
         raised: List[Question] = []
         try:
             self.passes += 1
+            # Before pricing anything. `_appraise` reads the progress trace, and a trace sampled
+            # after the prices are set is a trace that arrives one pass too late to change them.
+            if self.progress is not None:
+                try:
+                    self.progress.sample()
+                except Exception:  # noqa: BLE001
+                    pass
             for question in (self._from_unknowns() + self._from_missing_relations()
                              + self._from_failures() + self._from_thin_coverage()
                              + self._from_ungrounded() + self._from_audit()
@@ -364,9 +448,39 @@ class Curiosity:
             for question in self.questions.values():
                 if question.resolved:
                     continue
-                question.value, question.action = self._value_of(question)
+                base, action = self._value_of(question)
+                question.reward = self._reward(question)
+                question.value, question.action = base + question.reward, action
         except Exception:  # noqa: BLE001
             pass
+
+    def _reward(self, question: Question) -> float:
+        """What this gap is worth because of what closing it would *compress*.
+
+        The organs this routes to return a description-length ratio that a system cannot raise by
+        doing less — over-claiming a concept is charged for the invariants its member lacks — and
+        :mod:`nyxara.njp.progress` reads them as a derivative against a high-water mark rather
+        than as a level. So this pays for one thing only: *a region where looking is still buying
+        something*. A region she has already compressed as far as it goes scores zero here, which
+        is correct and is the entire difference between curiosity and rehearsal.
+
+        Bounded, and bounded deliberately below what stakes can reach. A question about a
+        prediction that keeps failing must stay ahead of a question about a tidy gap in a region
+        that happens to be moving fast, because being repeatedly wrong is a worse problem than
+        being incompletely organised.
+        """
+        try:
+            if self.progress is None:
+                return 0.0
+            organs = _COMPRESSES.get(question.gap, ())
+            if not organs:
+                return 0.0
+            rate = float(self.progress.rate_over(organs))
+            if rate <= 0.0:
+                return 0.0
+            return _REWARD_CAP * min(1.0, rate / _FULL_PROGRESS)
+        except Exception:  # noqa: BLE001
+            return 0.0
 
     def _value_of(self, question: Question) -> Tuple[float, str]:
         """``(EVPI, action)`` — how much closing this gap is worth, and how to close it."""
@@ -468,14 +582,28 @@ class Curiosity:
         by_gap: Dict[str, int] = {}
         for question in open_questions:
             by_gap[question.gap] = by_gap.get(question.gap, 0) + 1
+        rewarded = sum(1 for q in open_questions if q.reward > 0.0)
         return {"passes": self.passes, "raised": self.raised,
                 "open": len(open_questions), "resolved": self.resolved_count,
                 "stale": len(self.stale_questions()), "by_gap": by_gap,
                 "voi": self.voi is not None,
+                # The falsifier for the compression reward, in two numbers. If `rewarded` is
+                # always zero the organs have stalled and the reward is doing nothing; if it is
+                # non-zero and the ordering never changes, the reward is doing nothing that
+                # matters. Either reading is the finding.
+                "rewarded": rewarded,
+                "reward_total": round(sum(q.reward for q in open_questions), 5),
+                "progress": (self.progress.stats() if self.progress is not None else None),
                 "top": self.top().to_dict() if self.top() else None}
 
     def to_dict(self) -> Dict[str, Any]:
         return {"questions": [q.to_dict() for q in self.questions.values()],
+                # Carried across a restart, because the high-water marks *are* the memory here.
+                # Dropping them would hand every organ a fresh mark at whatever it happens to be
+                # compressing at now, and a mark set at the current level is a mark that has to be
+                # beaten from scratch — she would forget that she had already learned this region
+                # out and start finding it interesting again.
+                "progress": (self.progress.to_dict() if self.progress is not None else None),
                 "counters": {"passes": self.passes, "raised": self.raised,
                              "resolved": self.resolved_count}}
 
@@ -487,11 +615,14 @@ class Curiosity:
                     subject=str(row.get("subject", "")),
                     predicate=str(row.get("predicate", "")),
                     uncertainty=float(row.get("uncertainty", 0.5)),
-                    value=float(row.get("value", 0.0)), cost=float(row.get("cost", 0.2)),
+                    value=float(row.get("value", 0.0)), reward=float(row.get("reward", 0.0)),
+                    cost=float(row.get("cost", 0.2)),
                     action=str(row.get("action", "")), asked=int(row.get("asked", 0)),
                     resolved=bool(row.get("resolved", False)))
                 if question.text:
                     self.questions[question.key()] = question
+            if self.progress is not None and isinstance(d.get("progress"), dict):
+                self.progress.load_dict(d["progress"])
             counters = d.get("counters") or {}
             self.passes = int(counters.get("passes", 0))
             self.raised = int(counters.get("raised", 0))

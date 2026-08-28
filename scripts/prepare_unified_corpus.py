@@ -128,9 +128,9 @@ CATEGORIES: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "scientific_law":      ("universe",   ("variables", "series", "law")),
     "research":            ("goals",      ("question", "steps", "conclusion")),
     # --- abstraction ---------------------------------------------------------------------------#
-    "concept_formation":   ("genesis",    ("examples", "concept", "invariants")),
+    "concept_formation":   ("genesis",    ("examples", "concept")),
     "concept_composition": ("genesis",    ("parts", "concept")),
-    "generalization":      ("discoverer", ("examples", "generalize", "concept", "invariants")),
+    "generalization":      ("discoverer", ("examples", "generalize", "concept")),
     "transfer":            ("grounder",   ("transfer",)),
     "analogy":             ("grounder",   ("analogy",)),
     "abstraction_rule":    ("discoverer", ("abstraction",)),
@@ -194,6 +194,11 @@ _FIELDS: Dict[str, str] = {
     "question": _TEXT, "unknown": _TEXT, "anomaly": _TEXT, "missing": _TEXT, "belief": _TEXT,
     # abstraction
     "examples": _ITEMS, "concept": _TEXT, "invariants": _LIST, "generalize": _PAIRS,
+    # What the members *can do*, as opposed to what they *are*. Separate from `invariants` because
+    # the relation differs and so does the only English that can ask for it: "is a seal warm
+    # blooded" reaches `has_property`, and no phrasing of it reaches "breathes with lungs", which
+    # is a `capable_of` claim wearing a property's field.
+    "capabilities": _LIST,
     "parts": _LIST, "transfer": _ITEMS, "analogy": _ITEMS, "abstraction": _ITEMS,
     "novelty": _TEXT,
     # memory and self
@@ -285,6 +290,8 @@ def _derive_inheritance(out: Dict[str, Any]) -> None:
 
     for invariant in out.get("invariants") or []:
         add(concept, "has_property", str(invariant))
+    for capability in out.get("capabilities") or []:
+        add(concept, "capable_of", str(capability))
     for item in out.get("examples") or []:
         if item:
             add(str(item[0]), "is_a", concept)
@@ -316,6 +323,13 @@ def _finish(record: Dict[str, Any], where: str) -> Dict[str, Any]:
         raise UnifiedError(f"{record['where']}: a {record['category']!r} record must carry "
                            f"{', '.join(required)} — missing or empty: {', '.join(empty)}")
     if record["category"] in ("concept_formation", "generalization"):
+        # Either-or rather than a required field: a kind is defined by what its members *are*, by
+        # what they *can do*, or by both, and demanding `invariants` forced a capability to be
+        # written as a property — which is the mislabelling that made the whole generalisation
+        # row unaskable, because no English form asks "is a seal breathes with lungs".
+        if not (out.get("invariants") or out.get("capabilities")):
+            raise UnifiedError(f"{record['where']}: a {record['category']!r} record must carry "
+                               f"invariants or capabilities — it carries neither")
         _derive_inheritance(out)
     out.setdefault("domain", "general")
     return out

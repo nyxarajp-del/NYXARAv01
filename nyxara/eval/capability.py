@@ -21,35 +21,46 @@ you can quote.
 
 What it reads today
 -------------------
-1,331 records taught, 372 held out, 300 probes, 7.7 seconds::
+1,331 records taught, 372 held out, 300 probes::
 
     control (taught recall)  1.00      the load worked; a low surface is not a failed load
-    surface                  0.29
+    surface                  0.40      was 0.29
 
-    inheritance              1.00      something came down the is_a edge
-    counterfactual           1.00      do(x) moved the right way
+    counterfactual           1.00
+    inheritance              1.00      11/11 — something came down the is_a edge
+    generalization           0.87      13 of 13 she answered were right, was 0.00
+    recall                   0.17
     causal                   0.17
-    recall                   0.17      answered 5 of 18; right on 3 of the 5 she answered
-    generalization           0.00
-    relation                 0.00
-    transfer                 0.00
-    transition               0.00
+    relation / transfer / transition   0.00 on one or two probes each — a sample size, not a finding
 
-The pair worth reading is ``inheritance 1.00`` beside ``generalization 0.00``. They ask about the
-same four members. Asked for the properties of a seal she answers ``warm blooded`` — a property
-stored about **mammal** and never about seals, so the inheritance fired exactly as designed. It is
-the wrong one only because the question cannot name which property is wanted: ``what are the
-properties of X`` returns one of four and no form in ``grounding._QUESTION_PATTERNS`` asks for a
-particular inherited property. That is a question-grammar gap, and it is the same shape as the
-``known_for`` line that never fires and the polar reader that swallowed "when does X occur" — the
-third one this corpus work has turned up.
+``generalization`` read **0.00** and was the row this work was aimed at. Nothing about the
+reasoning changed: asked for the properties of a seal she already answered "warm blooded", stored
+about *mammal* and never about seals, so the inference had been firing all along. What was missing
+was every way of getting a question to it, and three separate things were:
 
-``transfer``, ``relation``, ``transition`` sit at 0.00 on one or two probes each. That is a sample
-size, not a finding, and the ``asked`` column is printed beside every score so it cannot be read as
-one.
+* ``has_property`` could be **asked for and never written**. No rule in
+  ``grounding._SEED_PATTERNS`` produced one, so "copper is ductile" compiled to
+  ``('copper', 'ductile', '')`` — a relation named after the adjective, with no object — and
+  "a mammal is warm blooded" was unreadable outright.
+* **No question form could name which property was wanted.** ``compile_meaning`` produces a polar
+  reading only for a narrow shape: "is a seal warm blooded" parses, "is kiwi feathered" comes back
+  `unreadable`, and "is norway governed by elected leaders" parses to the subject "norway governed
+  elected". A surface reader that *finds* the subject boundary by asking the store which entities
+  it knows handles all three, and hands anything it cannot place back unchanged.
+* The corpus filed **capabilities as properties** — "breathes with lungs" under ``has_property``,
+  where no English sentence reaches it.
 
-Seven probe families, derived from the blocks a record already carries
-----------------------------------------------------------------------
+The probe asks both directions and requires both: the true property must come back affirmed **and**
+a property borrowed from another concept must not. A system that answers "yes" to everything
+scores zero on it, which is why 13 of 13 is worth quoting.
+
+Two of the repairs were to this file — it was withholding the answer to its own question, first the
+``is_a`` edge and then the invariant itself — and one was a rule: ``generalization`` and
+``inheritance`` **need no holdout**, because the corpus never states the conclusion. They read the
+taught set, where the premises are.
+
+Eight probe familiesEight probe families, derived from the blocks a record already carries
+---------------------------------------------------------------------
 Nothing here needs a new annotation. Each family reads a block the unified corpus already has and
 turns it into a question with an answer key:
 
@@ -81,7 +92,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["ProbeResult", "CapabilityReport", "split", "evaluate", "run"]
 
@@ -226,12 +237,29 @@ def split(records: Sequence[Dict[str, Any]], *, holdout: float = 0.25,
         if len(claims) < 2:
             held.append(record)
             continue
-        # Never the ``is_a`` link. The generator derives ``<member> is_a <concept>`` for every
-        # generalisation target and appends it last, so taking the final claim withheld exactly the
-        # edge the generalisation probe needs — measured, ``nutcracker`` and ``acetic acid`` came
-        # back with no kind at all and the probe scored them as failures of inheritance when the
-        # split had removed the thing to inherit through.
-        candidates = [c for c in claims if len(c) > 1 and c[1] != "is_a"] or claims
+        # Never a claim the record's own probe depends on. Two kinds of self-sabotage were found
+        # here, one after the other, and they are the same mistake at two depths:
+        #
+        #   1. the ``is_a`` edge — the generator appends ``<member> is_a <concept>`` for every
+        #      generalisation target, so taking the last claim removed the edge to inherit
+        #      *through*; ``nutcracker`` and ``acetic acid`` came back with no kind at all.
+        #   2. the **invariant itself** — with the is_a rows excluded, the only remaining derived
+        #      claims are ``<concept> has_property <invariant>``, so the split then withheld the
+        #      very property the probe asks about. Measured: ``mammal has_property`` held
+        #      "warm blooded, hair or fur, milk" and the probe wanted "breathes with lungs",
+        #      which the split had removed. The row read 0.00 for a gap the eval had created.
+        #
+        # A held-out claim has to be one she could have *derived*, never one the answer key needs.
+        gold = {_norm(pair[1]) for pair in (record.get("generalize") or []) if len(pair) > 1}
+        candidates = [c for c in claims
+                      if len(c) > 2 and c[1] != "is_a" and _norm(c[2]) not in gold]
+        if not candidates:
+            # Every claim in this record is load-bearing for its own probe. The first version fell
+            # back to withholding one anyway, which put the `is_a` edge back on the block and left
+            # `nutcracker` and `acetic acid` with no kind again. A record that cannot yield a fair
+            # probe yields none: it stays wholly taught and is not asked about.
+            taught.append(record)
+            continue
         withheld = candidates[-1]
         keep = [c for c in claims if c is not withheld]
         target = _norm(withheld[2]) if len(withheld) > 2 else ""
@@ -434,28 +462,42 @@ def _probe_counterfactual(brain: Any, records: Sequence[Dict[str, Any]],
 
 def _probe_generalization(brain: Any, records: Sequence[Dict[str, Any]],
                           category: str) -> ProbeResult:
-    """The member left out of the examples, asked for the invariant it should inherit.
+    """The member left out of the examples, asked whether the invariant holds of it.
 
-    Marked on naming *that* property. See :func:`_probe_inheritance` for the weaker question —
-    whether anything was inherited at all — which is a different capability and scores far higher.
+    Asked in the **polar** form — "is a seal warm blooded" — because that is the only form that
+    can name *which* property is wanted. ``what are the properties of X`` returns one of four and
+    cannot be told, which is why this row read 0.00 against inheritance that was firing correctly.
+
+    **Both directions are asked, and both must be right.** A positive probe alone is worthless: a
+    system that answers "yes" to everything scores full marks on it. So each gold property is
+    paired with a control drawn from a *different* record's concept, and the item counts only when
+    the true property comes back affirmed and the foreign one does not. An open-world store should
+    say UNKNOWN to the control rather than "no", and either is accepted — what is not accepted is
+    "yes".
     """
     out = ProbeResult(family="generalization", category=category)
-    for record in records:
+    controls = [str(pair[1]) for record in records
+                for pair in (record.get("generalize") or []) if len(pair) > 1]
+    for index, record in enumerate(records):
         for pair in record.get("generalize") or []:
             if len(pair) < 2:
                 continue
             if out.asked >= _MAX_PROBES:
                 break
+            member, gold = str(pair[0]), str(pair[1])
+            foreign = next((c for c in controls if c != gold), "")
+            if not foreign:
+                continue
             out.asked += 1
-            said = _ask(brain, f"what are the properties of {pair[0]}?") or \
-                _ask(brain, f"what is {pair[0]}?")
+            said = _norm(_ask(brain, f"is {member} {gold}?"))
             if not said:
                 continue
             out.answered += 1
-            if _contained(said, pair[1]):
+            control = _norm(_ask(brain, f"is {member} {foreign}?"))
+            if said.startswith("yes") and not control.startswith("yes"):
                 out.correct += 1
             elif len(out.misses) < 8:
-                out.misses.append(f"{pair[0]} → {said!r} (gold {pair[1]!r})")
+                out.misses.append(f"{member}: {gold}→{said!r} control {foreign}→{control!r}")
     return out
 
 
@@ -553,6 +595,186 @@ def _probe_transition(brain: Any, records: Sequence[Dict[str, Any]],
     return out
 
 
+def _probe_planning(brain: Any, records: Sequence[Dict[str, Any]],
+                    category: str) -> ProbeResult:
+    """Which lever, and which way — asked of a law she was taught and a plan nobody stated.
+
+    The surface had rows for what she *knows* and what she *concludes*, and none for what she
+    would *do*. This is that row.
+
+    A derived family, for the same reason ``generalization`` and ``inheritance`` are. The answer
+    key here is the declared direction of the law — ``water causes growth, sign +1`` — which is
+    stated in the record, so the record has to be in the **taught** set for the arrow to exist at
+    all. What is held out is not withheld by the splitter: it is the plan, and no record in the
+    corpus contains one. Asking a held-out record would leave the universe with no arrow, no
+    lever, and a row of ``asked`` against ``answered: 0`` measuring the splitter rather than her.
+
+    Two things have to be right and they fail independently:
+
+    * the **lever** — the cause named by the law, picked out of every variable in the universe
+      that has an oriented arrow anywhere. Twenty-seven relations were fitted from this corpus,
+      so choosing the one that actually reaches the target is a real discrimination and not a
+      formality;
+    * the **direction** — pushed the way the law's sign says. A planner with an inverted sign
+      finds the right lever every time and scores zero here, which is the point of checking both.
+
+    Scored only where the model has something to plan with: a target already met, or a variable
+    the universe never fitted, is not answered wrongly — it is not answered, and ``asked``
+    against ``answered`` keeps the two apart.
+    """
+    out = ProbeResult(family="planning", category=category)
+    planner = getattr(brain, "rollout", None)
+    universe = getattr(brain, "universe", None)
+    if planner is None or universe is None:
+        return out
+    try:
+        from nyxara.njp.rollout import Target
+    except Exception:  # noqa: BLE001
+        return out
+    seen: Set[Tuple[str, str]] = set()
+    for record in records:
+        for law in record.get("law") or []:
+            if len(law) < 4:
+                continue
+            cause, effect = _norm(law[0]), _norm(law[2])
+            try:
+                sign = int(law[3])
+            except (TypeError, ValueError):
+                continue
+            if not cause or not effect or sign == 0 or (cause, effect) in seen:
+                continue
+            here = universe.state.get(effect)
+            lever_now = universe.state.get(cause)
+            if here is None or lever_now is None:
+                continue
+            # Only where the question is well posed. A variable two different laws both reach is
+            # a variable with two right answers, and marking one of them wrong measures the
+            # corpus rather than her.
+            #
+            # This is not hypothetical and it is not rare. The corpus states its laws in bare
+            # variable names, so ``fertiliser causes yield`` from an agriculture scenario and
+            # ``catalyst mass causes yield`` from a chemistry one fit the *same* variable — as do
+            # ``altitude causes temperature`` and ``temperature causes rate``. Measured, the
+            # planner chose ``catalyst mass`` for ``yield`` and ``altitude`` for ``rate``: both
+            # genuine levers with real arrows into the target, both scored wrong against a key
+            # that named the other one. Skipping the ambiguous pairs is the honest response;
+            # loosening the key until the answer counts is how a benchmark stops measuring.
+            def _into(variable: str) -> set:
+                return {c for (c, e), relation in universe.relations.items()
+                        if e == variable and getattr(relation, "usable", False)
+                        and getattr(relation, "oriented", False)}
+
+            # One lever, and it has to be the whole chain. Restricting to a single *direct*
+            # cause is not enough: the search walks upstream, so a cause that is itself an
+            # effect gives a second, genuine lever a hop further back. Measured, ``rate`` had
+            # exactly one arrow into it — from ``temperature`` — and the plan set ``altitude``,
+            # which drives temperature and scored better for it. That is a good plan being
+            # marked wrong by a key that names the nearer variable, so the pair is only asked
+            # about where nothing upstream of the cause is settable either.
+            reaching = _into(effect)
+            if len(reaching) != 1 or cause not in reaching or _into(cause):
+                continue
+            if out.asked >= _MAX_PROBES:
+                break
+            seen.add((cause, effect))
+            out.asked += 1
+            # A target above where the variable is now, so "get it higher" is a real request and
+            # the sign of the required lever move is exactly the law's own sign.
+            target = Target(variable=effect, value=float(here) + max(1.0, abs(float(here)) * 0.2))
+            try:
+                plan = planner.search(target)
+            except Exception:  # noqa: BLE001
+                continue
+            if plan.chosen is None:
+                continue                     # nothing reaches it — not an answer, not a mistake
+            out.answered += 1
+            moved = float(plan.chosen.setting) - float(lever_now)
+            if abs(moved) <= _FLAT:
+                continue                     # a plan that changes nothing is not the right way
+            if plan.chosen.lever == cause and (1 if moved > 0 else -1) == sign:
+                out.correct += 1
+    return out
+
+
+#: Question forms whose ``Grounder._read_question`` output is exactly ``(subject, predicate)``.
+#: Taken from the same verified table ``scripts/prepare_knowledge_corpus.py`` maintains rather
+#: than invented here — an ad-hoc phrasing reads as a different question and scores a capability
+#: she has as one she lacks. Measured while building this probe: *"what is ulcers like"* returns
+#: nothing at all, and reporting that as a failure to revise would have been a measurement of my
+#: phrasing.
+_REVISION_ASKS: Dict[str, str] = {
+    "is_a": "What is {s}?",
+    "has_property": "What are the properties of {s}?",
+    "located_in": "Where is {s}?",
+    "capital": "Tell me the capital of {s}.",
+}
+
+
+def _probe_revision(brain: Any, records: Sequence[Dict[str, Any]],
+                    category: str) -> ProbeResult:
+    """After a correction, is the retired claim still what she says?
+
+    The surface had a row for what she knows and none for what she has *stopped* believing, and
+    those are different capabilities: a store that only ever accumulates answers every question
+    twice and calls it knowledge.
+
+    A derived family. What the corpus states is the ordered pair — *"this was believed, then
+    corrected"* — and what is never stated anywhere is which claim should come back when she is
+    asked. So the record has to be in the **taught** set for the correction to have happened at
+    all, and the answer is held out by construction rather than by the splitter.
+
+    **Scored on the read path, not on the store.** Checking that the superseded flag is set would
+    be checking that the line which sets it ran, and a probe that restates its own cause measures
+    nothing. What can independently fail is the half ``Grounder._revise`` names in its own
+    docstring: *"Detecting a contradiction and then leaving the old answer in place would be the
+    worst of both worlds — she would announce the clash and keep answering with the superseded
+    fact."* That is the failure this asks about, through ``brain.think``, exactly as a person
+    would meet it.
+
+    Marked wrong **only** when the retired claim comes back. An answer naming neither side is not
+    a revision failure — she may simply have no phrasing for the question — so it counts as
+    unanswered, and ``asked`` against ``answered`` keeps the two apart.
+    """
+    out = ProbeResult(family="revision", category=category)
+    grounder = getattr(brain, "grounder", None)
+    if grounder is None or not hasattr(grounder, "facts"):
+        return out
+    asked_about: Set[Tuple[str, str]] = set()
+    for record in records:
+        for pair in record.get("contradiction") or []:
+            if len(pair) < 2 or out.asked >= _MAX_PROBES:
+                break
+            # Find the claim this pair actually retired, in her own store.
+            for (subject, predicate), triples in list(grounder.facts.items()):
+                if (subject, predicate) in asked_about:
+                    continue
+                retired = [t for t in triples if getattr(t, "superseded", False)]
+                kept = [t for t in triples if not getattr(t, "superseded", False)]
+                if not retired or not kept:
+                    continue
+                template = _REVISION_ASKS.get(predicate)
+                if not template or _norm(subject) not in _norm(str(pair[0])):
+                    continue
+                asked_about.add((subject, predicate))
+                out.asked += 1
+                said = _norm(_ask(brain, template.format(s=subject)))
+                if not said:
+                    break
+                gone = _norm(str(getattr(retired[0], "object", "")))
+                alive = [_norm(str(getattr(t, "object", ""))) for t in kept]
+                # Substring both ways, because "planet" is inside "dwarf planet": the retired
+                # claim only counts as returned when nothing she kept explains the match.
+                returned = bool(gone) and gone in said and not any(
+                    gone in live and live in said for live in alive)
+                if returned:
+                    out.answered += 1
+                elif any(live and live in said for live in alive):
+                    out.answered += 1
+                    out.correct += 1
+                break
+    return out
+
+
 _FAMILIES = (
     ("recall", _probe_recall),
     ("relation", _probe_relation),
@@ -560,6 +782,8 @@ _FAMILIES = (
     ("counterfactual", _probe_counterfactual),
     ("generalization", _probe_generalization),
     ("inheritance", _probe_inheritance),
+    ("planning", _probe_planning),
+    ("revision", _probe_revision),
     ("transfer", _probe_transfer),
     ("transition", _probe_transition),
 )
@@ -572,7 +796,44 @@ def _capped(result: ProbeResult) -> ProbeResult:
     return result
 
 
+#: Families whose answer key is **derivable and never stated**, so they need no holdout — the
+#: corpus says "mammals breathe with lungs" and "a seal is a mammal" and never says the conclusion.
+#: Running these on the held-out split was measuring the wrong set: every claim in a generalisation
+#: record is load-bearing for its own probe, so a fair split had nothing left to withhold and the
+#: row vanished to `asked: 0`. They read the **taught** set, where the premises are, and the answer
+#: is held out by construction rather than by the splitter.
+_DERIVED_FAMILIES = frozenset({"generalization", "inheritance", "planning", "revision"})
+
+#: Why there is no ``curiosity`` row here, and why adding one would be worse than the gap.
+#:
+#: Every family above has an answer key that exists independently of the organ being scored — the
+#: invariant the corpus states, the direction the law declares, the state the transition names.
+#: "Which question is most worth asking" has no such key. Any key this file could write would be
+#: a restatement of the same priority ordering the organ computes, and a benchmark that agrees
+#: with the system by construction measures nothing at all. Phase 5's own rule says it plainly:
+#: generation and evaluation must stay separate, and here they cannot be.
+#:
+#: The compression reward is falsified elsewhere and properly — ``tests/njp/
+#: test_compression_reward.py`` holds the question set fixed, moves only which organ is still
+#: yielding, and requires the top of the queue to change. That is an experiment with a control,
+#: which is more than a benchmark row would have been.
+#: ``representation`` is absent for a different reason, and it is about the corpus rather than
+#: about circularity. What ⑩ measures is whether a concept that **over-claims** gets re-formed so
+#: its awkward member is covered — and every ``examples`` block in the corpus is uniform by
+#: construction: four birds that all have feathers, four mammals that all give milk, four primes
+#: that all have exactly two divisors. There is no awkward member to hold out. Building one here
+#: would be the probe writing its own input, and a family whose cases the evaluator invents is
+#: measuring the evaluator.
+#:
+#: ⑩'s falsifier is a controlled A/B instead — ``tests/njp/test_representation_birth.py`` runs the
+#: same session with the detector off and on and requires the gap to close, the concept count to
+#: rise and compression not to fall. An experiment with a control arm is more than a row here
+#: would have been.
+_NO_KEY_FAMILIES = frozenset({"curiosity", "representation"})
+
+
 def evaluate(brain: Any, held_out: Sequence[Dict[str, Any]], *,
+             taught: Optional[Sequence[Dict[str, Any]]] = None,
              budget: int = _DEFAULT_BUDGET) -> List[ProbeResult]:
     """Every probe family, per category, over the records she was never taught.
 
@@ -581,13 +842,19 @@ def evaluate(brain: Any, held_out: Sequence[Dict[str, Any]], *,
     it is two thirds of the corpus — and every reasoning family reports nothing. Taking one family
     across all categories before starting the next gives each capability its own slice.
     """
-    by_category: Dict[str, List[Dict[str, Any]]] = {}
-    for record in held_out:
-        by_category.setdefault(str(record.get("category") or "unknown"), []).append(record)
+    def group(rows: Sequence[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for record in rows:
+            out.setdefault(str(record.get("category") or "unknown"), []).append(record)
+        return out
+
+    by_category = group(held_out)
+    by_category_taught = group(list(taught or []))
     out: List[ProbeResult] = []
     spent = 0
     for _name, probe in _FAMILIES:
-        for category, records in sorted(by_category.items()):
+        source = by_category_taught if _name in _DERIVED_FAMILIES else by_category
+        for category, records in sorted(source.items()):
             if spent >= budget:
                 break
             result = probe(brain, records, category)
@@ -611,7 +878,7 @@ def run(*, records: Any = _DEFAULT_RECORDS, holdout: float = 0.25, seed: int = 0
     brain = NJPBrain()
     absorbed = absorb(brain, taught, check=False)
     report.taught_recall = _taught_recall(brain, taught)
-    report.probes = evaluate(brain, held, budget=budget)
+    report.probes = evaluate(brain, held, taught=taught, budget=budget)
     report.ms = (time.perf_counter() - started) * 1000.0
     del absorbed
     return report

@@ -80,6 +80,11 @@ class ErrorClass:
 #: cooldown the criterion re-proposes it on the very next cycle and the trial repeats forever.
 _RETIRE_COOLDOWN = 8
 
+#: How often the concept store is scanned for something no kind explains. A restructure is the
+#: most expensive thing in the cycle and a coverage gap does not appear between one turn and the
+#: next, so this is a cadence for the same reason `_DISCOVER_EVERY` is.
+_GAP_EVERY = 6
+
 
 def _fold(key: str, *, share: float) -> bool:
     """Is this subject in the held-out fold? Stable across restarts and machines.
@@ -133,6 +138,17 @@ class CycleReport:
     restructure_gain: float = 0.0
     experiment: str = ""
     experiment_gain: float = 0.0
+    #: Rival hypotheses seeded from directions observation alone cannot settle. Reported apart
+    #: from `hypotheses` because these are a different kind of claim: not "this arrow may exist"
+    #: but "these two arrows are indistinguishable on everything I have, and exactly one
+    #: intervention tells them apart".
+    ambiguities_seeded: int = 0
+    #: The observation this cycle found no concept for, and why it was not covered. Named on the
+    #: report rather than only counted, because "a gap was detected" and "the gap was about the
+    #: platypus, and the concept claiming it promised lungs it does not have" are different
+    #: amounts of information about the same event.
+    gap_subject: str = ""
+    gap_kind: str = ""
     beliefs_touched: int = 0
     #: Clashes the grounder found and the ledger was told about. Zero here and zero because
     #: nothing ever contradicted are different findings.
@@ -330,6 +346,18 @@ class RecursiveCognitiveField:
         self._retire_cooldown: Dict[str, int] = {}
         self.retirements_tried = 0
         self.retirements_kept = 0
+        #: Rival pairs handed to the designer across the session. The falsifier for the
+        #: hidden-factor step: if this stays at zero the loop is wired and starved, which is the
+        #: state it was in before it had a caller at all.
+        self.ambiguities_seeded = 0
+        #: Coverage gaps found by scanning rather than by a prediction error routing here. The
+        #: falsifier for the detector: zero means it is looking and finding nothing, which is the
+        #: state the module was in when nothing looked at all.
+        self.gaps_detected = 0
+        #: Detected gaps whose repair did not win on held-out data and was put back. Counted
+        #: rather than hidden: a detector that proposes and always loses is a detector that costs
+        #: a benchmark run per cadence and buys nothing, and that has to be visible to be judged.
+        self.gaps_reverted = 0
 
     # ================= LOOP 1 — the cognitive cycle ========================== #
     def cycle(self, thought: Any) -> CycleReport:
@@ -353,9 +381,11 @@ class RecursiveCognitiveField:
                 self.errors_diagnosed[rep.diagnosis.kind] = \
                     self.errors_diagnosed.get(rep.diagnosis.kind, 0) + 1
                 self._repair(rep)
+            self._detect_gap(rep)
 
             rep.beliefs_touched = self._record_beliefs(thought, triples)
             rep.beliefs_contradicted = self._record_contradictions(thought)
+            self._seed_ambiguities(rep)
             self._design_experiment(rep)
 
             if self.concepts is not None:
@@ -512,7 +542,33 @@ class RecursiveCognitiveField:
                 # happened — `reconciled` and `surprises` were structurally zero on every session,
                 # and "the model was wrong six times" was a sentence the universe could not form.
                 self.universe.reconcile(state, order=order)
+                self._settle_plan(state, order)
         return added
+
+    def _settle_plan(self, state: Dict[str, float], order: Sequence[str]) -> None:
+        """Hand the same reading to the planner, so its claim is graded too.
+
+        This reading is the only thing in the package that can settle a plan, which is why the
+        edge is here rather than on a cadence somewhere: a plan graded against a state nobody has
+        re-measured is graded against its own starting point, and that is the shape of defect
+        ``brain.py:2469`` records — a claim that cannot in principle be contradicted, scored
+        anyway, with the counter going up.
+
+        Not through :meth:`~nyxara.njp.universe.InternalUniverse.reconcile`, twice over.
+        ``reconcile`` grades whichever rollout is newest, and the newest is always ``_simulate``'s
+        — the field imagines a "continue" step every cycle, so a plan's claim is several rollouts
+        stale by the time its reading lands. And ``reconcile`` observes as well, so calling it a
+        second time would fold this reading into every relation it touches twice, raising ``n``
+        without adding a single bit of variance. :meth:`~nyxara.njp.rollout.RolloutPlanner.settle`
+        goes through :meth:`~nyxara.njp.universe.InternalUniverse.grade`, which does neither.
+        """
+        try:
+            planner = getattr(self.brain, "rollout", None)
+            if planner is None or planner.outstanding() is None:
+                return
+            planner.settle(state, order=order)
+        except Exception:  # noqa: BLE001 — an ungraded plan stays outstanding, as it should
+            return
 
     def _kind_of(self, subject: str) -> str:
         """What kind of thing this subject is — its stated kind, or the head of its own name.
@@ -674,6 +730,106 @@ class RecursiveCognitiveField:
         out.detail = "not enough model to attribute the error"
         return out
 
+    def _detect_gap(self, rep: CycleReport) -> None:
+        """Notice that something she has met is explained by no concept she holds.
+
+        The restructure machinery was reachable by exactly one route: a prediction error whose
+        diagnosis came back ``CONCEPTUAL``. That is a real route and it is the wrong *only* route,
+        because it requires her to have predicted something and been wrong about it in a
+        particular way. The ordinary case — meeting a thing none of her kinds covers, on a turn
+        where nothing was predicted at all — had no path to the repair, and
+        :meth:`~nyxara.njp.concepts.ConceptGenesis.uncovered` shows how much was sitting there
+        unlooked-at: 7 of 44 subjects, including a concept actively over-claiming about a platypus.
+
+        Runs on every cycle's cadence, and yields to the error path when that path had something
+        to say. The first version of this sat on an ``else`` branch — *"only when there was no
+        prediction error"* — and it was **dead code**, which the measurement caught rather than
+        the reasoning: ``rep.error`` is never ``None``, because :meth:`_score` grades the
+        manifold's pre-settle anticipation on every single turn and that anticipation always
+        exists. Twenty-two cycles, four restructures, ``gaps_detected: 0``. A branch conditioned
+        on a quantity that is never absent is a branch that never runs.
+
+        What the ``else`` was reaching for is still right and is kept as the yield below: a turn
+        whose error was diagnosed conceptual already has a coverage attached, and that is better
+        evidence than a scan because it says which observation the error was actually *about*.
+        Spending a second restructure on the same turn to answer the same question is what the
+        plan's own rule refuses.
+
+        A cadence, because a restructure is the most expensive thing in the cycle, and the
+        ``_last_restructured`` guard, because re-proposing the same subject learns nothing — both
+        are the existing repair's rules rather than new ones.
+        """
+        if self.concepts is None or self.cycles % _GAP_EVERY:
+            return
+        diagnosis = rep.diagnosis
+        if diagnosis is not None and diagnosis.kind == ErrorClass.CONCEPTUAL:
+            return              # the error already named the observation; it is better evidence
+        try:
+            for coverage in self.concepts.uncovered(limit=4):
+                if coverage.subject == self._last_restructured:
+                    continue
+                # Only a boundary that over-claims is acted on, and this is the measurement's
+                # decision rather than a preference. A/B over the same twenty-two turns, detector
+                # off against detector on:
+                #
+                #     off        compression 2.2927   gaps 0   concepts 14
+                #     all gaps   compression 2.2381   gaps 2   concepts 15
+                #     violates   compression 2.2927   gaps 0   concepts 14
+                #
+                # Acting on ``unknown`` cost compression and closed nothing. That is what
+                # ``restructure``'s loosening branch does by construction: it lowers what counts
+                # as kinship until an outlier fits, which is a *global* change bought for one
+                # observation, and `concepts.py` records the end of that road — "drove the
+                # similarity threshold to its floor, where everything resembles everything and
+                # the concepts formed are worthless". A ``violates`` gap is the opposite shape:
+                # the concept has named the features its member lacks, so the repair is bounded
+                # and the search is over a boundary rather than over kinship itself.
+                #
+                # ``unknown`` gaps are still *found* and still reported — see `uncovered` — they
+                # are simply not something a restructure can currently fix without paying more
+                # than it buys.
+                #
+                # And on the shape it does act on, the same A/B is unambiguous. Four mammals with
+                # fur and live young, then a platypus with fur that lays eggs, run through the
+                # ordinary turn loop:
+                #
+                #     detector off   compression 2.50   gaps 0   uncovered 1   concepts 1
+                #     detector on    compression 2.50   gaps 1   uncovered 0   concepts 2
+                #
+                # The concept that promised live young splits in two, the platypus is covered by
+                # the new one, and the description length of everything else is unchanged. That
+                # is a kind being born rather than a fact being learned, which is the whole of
+                # what this mechanism is for.
+                if coverage.gap != "violates":
+                    continue
+                self._last_restructured = coverage.subject
+                rep.gap_subject = coverage.subject
+                rep.gap_kind = coverage.gap
+                self.gaps_detected += 1
+                knobs = (self.concepts.similarity, self.concepts.invariant_share)
+                before = self.concepts.compression()
+                report = self.concepts.restructure(coverage)
+                self.restructures += 1
+                rep.restructure_gain = report.compression_after - before
+                # Compression, and nothing else. A held-out benchmark was tried here and it was
+                # the wrong judge: closing a gap around a subject in `_samples` need not move
+                # coverage on `_holdout` at all, so the trial reverted repairs that had genuinely
+                # worked. The quantity that says whether re-forming the hierarchy paid for itself
+                # is the description length of the whole store, which is what
+                # `ConceptGenesis.compression` already measures and already refuses to let a
+                # local repair buy with a global loss.
+                if rep.restructure_gain >= -1e-9:
+                    rep.restructured = True
+                    self.restructures_kept += 1
+                else:
+                    self.concepts.similarity, self.concepts.invariant_share = knobs
+                    self.concepts.crystallise()
+                    self.gaps_reverted += 1
+                    rep.restructure_gain = 0.0
+                return
+        except Exception:  # noqa: BLE001 — an undetectable gap restructures nothing
+            return
+
     def _repair(self, rep: CycleReport) -> None:
         """Route the diagnosis to the repair that owns it. Restructure is the only costly one."""
         diagnosis = rep.diagnosis
@@ -773,10 +929,18 @@ class RecursiveCognitiveField:
                 # that it is true. Observing it herself is what raises it, through `support`.
                 parsed = float(getattr(triple, "confidence", 0.6) or 0.6)
                 confidence = min(parsed, EvidenceKind.WEIGHTS[EvidenceKind.TESTIMONY])
+                # One source for the sentence, and it is the same object
+                # :class:`~nyxara.njp.falsify.TheoryKiller` later searches for. The template this
+                # replaces built the string here and nothing anywhere could recover what it meant,
+                # so the record filled with *"an observation in which fire does not causes heat"*
+                # — a predicate is a relation name, not a verb — and with
+                # *"an observation in which plant does not water 2"*, which names nothing at all.
+                # A falsifier the searcher cannot parse is a falsifier nobody will ever look for.
+                from nyxara.njp.falsify import Falsifier
                 self.beliefs.hold(
                     claim, confidence=confidence, domain=self._domain_of(predicate),
                     produced_by="grounding",
-                    falsifier=f"an observation in which {subject} does not {predicate} {obj}".strip(),
+                    falsifier=Falsifier.of(claim).stated(),
                     why="grounded from the Master's statement")
                 self.beliefs.support(claim, EvidenceKind.TESTIMONY,
                                      detail=str(getattr(triple, "text", ""))[:120],
@@ -798,6 +962,31 @@ class RecursiveCognitiveField:
         return "general"
 
     # ---- curiosity as information gain -------------------------------------------- #
+    def _seed_ambiguities(self, rep: CycleReport) -> None:
+        """Hand every direction observation cannot settle to the experiment designer.
+
+        :meth:`~nyxara.njp.universe.InternalUniverse.seed_ambiguities` is the wiring for the whole
+        hidden-factor step and **it had no caller anywhere in the package** — universe.py defined
+        it, one test exercised it, and nothing in a running brain ever invoked it. Its own
+        docstring says what it is for: a pair that fits both ways is not a gap in the data, it is
+        a question observation is *structurally* unable to answer, and stating it as two rivals is
+        what makes the designer's information gain over the pair non-zero.
+
+        Called here rather than on its own cadence because this is where the designer is already
+        being fed, and because the pairs it reads only exist for part of a session:
+        :meth:`~nyxara.njp.universe.InternalUniverse.ambiguous` is empty while every direction is
+        either asserted or inferred, and fills the moment a retirement withdraws an inference. So
+        the seeding has to run *after* retirement can have happened, on the same cycle, or the one
+        window in which there is anything to seed is the one window nothing looks.
+        """
+        if self.designer is None or self.universe is None:
+            return
+        try:
+            rep.ambiguities_seeded = int(self.universe.seed_ambiguities(self.designer))
+            self.ambiguities_seeded += rep.ambiguities_seeded
+        except Exception:  # noqa: BLE001 — an unseedable pair is simply not seeded
+            return
+
     def _design_experiment(self, rep: CycleReport) -> None:
         if self.designer is None:
             return
@@ -1408,12 +1597,21 @@ class RecursiveCognitiveField:
             "cycles": self.cycles,
             "restructures": self.restructures,
             "restructures_kept": self.restructures_kept,
+            # Gaps found by looking, as against gaps that arrived attached to a prediction error.
+            # The two routes are counted apart because only one of them was ever reachable.
+            "gaps_detected": self.gaps_detected,
+            "gaps_reverted": self.gaps_reverted,
             # A trial that was run and reverted is not the same as one never proposed, and the
             # gap between these two is how often giving up structure failed to pay for itself.
             "retirements_tried": self.retirements_tried,
             "retirements_kept": self.retirements_kept,
             "retirements_cooling": len([v for v, n in self._retire_cooldown.items() if n > 0]),
             "experiments_designed": self.experiments_designed,
+            # Directions observation alone cannot settle, handed over as rival hypotheses. Zero
+            # for most of a session by construction — it fills only once a retirement has
+            # withdrawn an inference — so a non-zero reading is the evidence the whole chain
+            # ran: surprise → retirement → ambiguity → experiment.
+            "ambiguities_seeded": self.ambiguities_seeded,
             "surprises": self.surprises,
             "errors": dict(self.errors_diagnosed),
             "samples": len(self._samples), "holdout": len(self._holdout),

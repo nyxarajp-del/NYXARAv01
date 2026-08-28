@@ -70,10 +70,19 @@ class Trace:
     #: in completely different states are indistinguishable to content-addressed recall, and the
     #: thing that can tell them apart was sitting one local variable away.
     cells: Tuple[int, ...] = ()
+    #: How surprising this was when it was written, 0…1.
+    #:
+    #: Of the three organs that should share a prediction-error signal, this was the one with
+    #: nowhere to put it: `attention` weights `prediction_error` above every other term and
+    #: `curiosity` reads `predictor.outcomes`, while `remember` took `kind`, `cue`, `link_to` and
+    #: `cells` and had no way to be told that a turn had been a shock. "Keep what was surprising"
+    #: cannot be a policy until there is a field it can be written in.
+    salience: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {"key": self.key, "text": self.text, "kind": self.kind, "cue": self.cue,
                 "written_tick": self.written_tick, "recalls": self.recalls,
+                "salience": round(self.salience, 4),
                 "links": {k: round(v, 6) for k, v in self.links.items()}}
 
 
@@ -140,7 +149,8 @@ class HoloMemory:
     # ---- write ----------------------------------------------------------- #
     def remember(self, key: str, text: str, *, kind: str = "episode", cue: str = "",
                  link_to: Sequence[str] = (),
-                 cells: Sequence[int] = ()) -> Optional[Trace]:
+                 cells: Sequence[int] = (),
+                 salience: float = 0.0) -> Optional[Trace]:
         """Store ``text`` under ``key`` and link it to whatever else is live in this moment.
 
         Only ``text`` is encoded into the holographic field. ``cue`` (the question that produced
@@ -159,13 +169,19 @@ class HoloMemory:
             if normalised_cue:
                 self._by_cue[normalised_cue] = key
             fired = tuple(int(c) for c in (cells or ()))
+            salience = max(0.0, min(1.0, float(salience)))
             if trace is None:
                 trace = Trace(key=key, text=text, kind=kind, cue=str(cue or ""),
-                              written_tick=self.ticks, cells=fired)
+                              written_tick=self.ticks, cells=fired, salience=salience)
                 self.traces[key] = trace
             else:
                 trace.text, trace.kind, trace.written_tick = text, kind, self.ticks
                 trace.cue = str(cue or trace.cue)
+                # The high-water mark, not the latest. A memory that arrived as a shock and was
+                # later re-written on a dull turn was still a shock when it was learned, and
+                # letting the quiet rewrite erase that would make salience a record of the last
+                # time something was mentioned rather than of what it cost to learn.
+                trace.salience = max(trace.salience, salience)
                 # Re-remembering under a different state should not erase the first one's record,
                 # but it should update it: this is the state she most recently met it in.
                 trace.cells = fired or trace.cells

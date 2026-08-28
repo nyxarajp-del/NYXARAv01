@@ -709,6 +709,51 @@ class ConceptGenesis:
         self.gaps_found += 1
         return out
 
+    def uncovered(self, *, limit: int = 8) -> List[Coverage]:
+        """Observations no concept explains, worst first. The detector that was missing.
+
+        :meth:`explain` has been able to answer *"what is this, and if nothing, why not"* since
+        this module was written, and :meth:`restructure` has been able to act on the answer. The
+        only thing that ever produced one was a **prediction error** diagnosed as conceptual —
+        an incidental route, and a rare one. Nothing anywhere asked the simpler question: *is
+        there anything here right now that none of my concepts covers?*
+
+        Measured on a brain that had absorbed both corpora and a handful of turns: 44 subjects
+        observed, 12 concepts formed, and **7 subjects uncovered** — ``platypus`` violating the
+        concept that claimed it, and ``bird``, ``mammal``, ``fire``, ``heat`` reaching no concept
+        at all. Every one of them sitting there, every one of them findable by a method that
+        already existed, and not one of them ever looked at.
+
+        Ranked, because acting on the wrong gap wastes the one restructure a cycle can afford:
+
+        * ``violates`` before ``unknown``. A concept that over-claims has named the features its
+          member lacks, so there is a boundary to tighten and the repair is bounded. "Nothing came
+          close" says only that something is missing, and loosening kinship until it fits is the
+          move :meth:`restructure` itself holds to the stricter test;
+        * then by how much has been observed of the subject. A gap around a thing she has seen
+          five features of is a real hole in her concept system; one around a thing she has seen
+          once is mostly an absence of data, and restructuring the hierarchy to accommodate a
+          single sighting is how a concept system gets talked into accepting anything.
+        """
+        out: List[Coverage] = []
+        try:
+            for subject, obs in list(self._by_subject.items()):
+                features = _content_features(obs.features)
+                if not features:
+                    continue        # a node recorded only because a relation points at it
+                coverage = self.explain(subject)
+                if coverage.covered:
+                    continue
+                out.append(coverage)
+            weight = {"violates": 0, "unknown": 1}
+            out.sort(key=lambda c: (weight.get(c.gap, 2),
+                                    -len(_content_features(
+                                        self._by_subject[c.subject].features))
+                                    if c.subject in self._by_subject else 0))
+            return out[: max(1, int(limit))]
+        except Exception:  # noqa: BLE001 — an unreadable store has no findable gaps
+            return out
+
     def ancestors(self, cid: str) -> List[str]:
         """The chain upward — ``dog → animal → living thing``, as far as it goes."""
         out: List[str] = []

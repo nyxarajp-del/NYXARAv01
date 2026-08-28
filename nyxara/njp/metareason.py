@@ -348,7 +348,7 @@ class MetaReasoner:
     """Picks the reasoning strategy, runs it, criticises it, and says how much to trust it."""
 
     def __init__(self, *, meta_learner: Any = None, beliefs: Any = None,
-                 world: Any = None, universe: Any = None,
+                 world: Any = None, universe: Any = None, self_model: Any = None,
                  classifier: Optional[ProblemClassifier] = None,
                  max_attempts: int = 3) -> None:
         self.classifier = classifier or ProblemClassifier()
@@ -357,6 +357,12 @@ class MetaReasoner:
         # not to run every organ she owns on a question none of them fit.
         self.max_attempts = max(1, int(max_attempts))
         self.meta_learner = meta_learner        # optional njp.selfmodel.MetaLearner
+        # Optional njp.selfmodel.SelfModel. It has held a measured record per faculty from the
+        # start and nothing ever consulted it when picking one — "I know my weaknesses" that
+        # changes no decision is decoration. `_demoted` reads it and `outcome` writes it, so the
+        # record it gates on is the record this loop produced.
+        self.self_model = self_model
+        self.gated = 0                          # decisions the record actually changed
         self.beliefs = beliefs                  # optional njp.beliefs.BeliefLedger
         self.world = world                      # optional njp.world.WorldView
         # Optional njp.universe.InternalUniverse. A causal answer can be about an *event kind*
@@ -438,6 +444,45 @@ class MetaReasoner:
         general = [s for s in self.strategies.values() if not s.kinds]
         return exact or general or list(self.strategies.values())
 
+    def _demoted(self, pool: List[Strategy]) -> List[Strategy]:
+        """Drop the strategies the measured record says she is poor at — never the untested ones.
+
+        This is the self-model changing a decision, which is the only thing that makes a
+        self-model worth keeping. It is deliberately conservative in three ways, and each one is
+        the difference between a gate and a superstition:
+
+        * ``SelfModel._measured`` is what decides, so a faculty is demoted only once it has
+          :data:`~nyxara.njp.selfmodel._MIN_OBSERVATIONS` behind it. An untested strategy is not a
+          weak one, and penalising a cold start would make her permanently timid about anything
+          new — which is the mistake `trust` already refuses to make one layer up.
+        * It never empties the pool. If every eligible strategy is measurably weak then weakness
+          is not the discriminator, and the bandit's own UCB1 — which trades exploitation against
+          how little each arm has been tried — is a better judge than a flat threshold.
+        * It does not overrule the bandit on what remains. UCB1 still picks among the survivors
+          and every outcome is still scored, so a demoted strategy that starts succeeding earns
+          its way back exactly as it lost its place.
+        """
+        model = self.self_model
+        if model is None or len(pool) < 2:
+            return pool
+        try:
+            kept = [s for s in pool if not self._weak(model, s.name)]
+        except Exception:  # noqa: BLE001 — the record is an optional organ
+            return pool
+        if kept and len(kept) < len(pool):
+            self.gated += 1
+            return kept
+        return pool
+
+    @staticmethod
+    def _weak(model: Any, name: str) -> bool:
+        """Measurably poor at this strategy. Falls back to False on anything unexpected."""
+        try:
+            measured = model._measured(f"strategy:{name}")
+            return bool(measured is not None and measured.weak)
+        except Exception:  # noqa: BLE001
+            return False
+
     @staticmethod
     def _permitted(pool: List[Strategy], pathways: Sequence[str]) -> List[Strategy]:
         """Drop the strategies this turn's *speech act* does not allow at all.
@@ -471,6 +516,7 @@ class MetaReasoner:
         pool = self._permitted(pool, pathways)
         if not pool:
             return None
+        pool = self._demoted(pool)
         if self.meta_learner is not None:
             try:
                 picked = self.meta_learner.choose(f"strategy:{kind}")
@@ -748,6 +794,16 @@ class MetaReasoner:
                 self.meta_learner.reward(f"strategy:{solution.kind}",
                                          1.0 if correct else 0.0,
                                          name=solution.strategy)
+            except Exception:  # noqa: BLE001
+                pass
+        if self.self_model is not None:
+            try:
+                # The other half of the gate. `_demoted` reads `strategy:<name>` and without this
+                # write nothing ever creates that record, so the gate would consult an empty
+                # model forever and never change a single decision — a self-model that cannot be
+                # wrong about anything because it was never told anything.
+                self.self_model.observe(f"strategy:{solution.strategy}",
+                                        1.0 if correct else 0.0)
             except Exception:  # noqa: BLE001
                 pass
 

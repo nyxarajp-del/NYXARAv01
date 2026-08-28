@@ -105,6 +105,11 @@ class AbsorbReport:
     #: many values, so nothing is superseded and nothing should be: "pluto is a planet" and "pluto
     #: is a dwarf planet" are not a functional clash. `_revise` fires on the functional relations.
     contradictions_seen: int = 0
+    #: Claims retired because a later statement **said** they were wrong, counted apart from the
+    #: supersedes `_clash` produces by noticing a functional relation given two values. Two
+    #: different routes to the same flag — one testimony, one inference — and merging them would
+    #: make it impossible to tell which of the two is doing the work.
+    corrections: int = 0
     revisions_asked: int = 0
     ms: float = 0.0
     notes: List[str] = field(default_factory=list)
@@ -608,9 +613,18 @@ def _contradiction(grounder: Any, record: Dict[str, Any], report: AbsorbReport) 
             continue
         try:
             before = _superseded(grounder)
-            grounder.ground(str(pair[0]))
+            first = grounder.ground(str(pair[0]))
             second = grounder.ground(str(pair[1]))
             report.contradictions_seen += len(getattr(second, "contradictions", None) or [])
+            # The pair's whole content is that the second corrected the first, and that is
+            # testimony rather than something to be inferred — so it is stated to the grounder
+            # rather than left for `_contradicts` to notice, which it cannot: these are
+            # `has_property` and `is_a` claims and a thing may hold many of both. Without this
+            # she came out of the corpus holding both halves of all eleven pairs as live facts.
+            report.corrections += grounder.correct(
+                getattr(first, "triples", None) or (),
+                getattr(second, "triples", None) or (),
+                why="corrected by a later statement")
             if _superseded(grounder) > before:
                 report.supersedes += 1
         except Exception:  # noqa: BLE001

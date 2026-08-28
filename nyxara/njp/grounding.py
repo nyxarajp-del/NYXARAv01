@@ -50,7 +50,7 @@ import re
 import time
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 from nyxara.njp.canon import canonical_entity, singular
 
@@ -466,6 +466,37 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?P<s>.+?)\s+is\s+(?:a|an)\s+(?P<o>.+)$", "is_a"),
     (r"^(?P<s>.+?)\s+works?\s+(?:at|for)\s+(?P<o>.+)$", "works_at"),
     (r"^(?P<s>.+?)\s+(?:owns|has)\s+(?:a\s+|an\s+)?(?P<o>.+)$", "owns"),
+    # --- The predicative adjective. `has_property` could be ASKED for and never WRITTEN. ----- #
+    #
+    # This is the read/write asymmetry this file documents three times already, in the direction
+    # nobody checked. `what are the properties of X` has a question form and works; nothing in
+    # this list ever produced a `has_property` edge, so the only way one existed was for a corpus
+    # to assert it directly. Measured before this rule: "copper is ductile" compiled to
+    # `('copper', 'ductile', '')` — a relation named after the adjective, with **no object at
+    # all** — and "a mammal is warm blooded" was `unreadable`, because a two-word adjective
+    # defeats the compiler outright. Both are the commonest way English states a property.
+    #
+    # It sits last among the copula rules on purpose: every `is a`, `is the`, `is part of`,
+    # `is known for`, `is used to` and `is the process of` reading above claims the sentence
+    # first, and this only ever catches what none of them wanted. The lookahead is what keeps it
+    # from swallowing them — an object that opens with a determiner is a *kind* claim and belongs
+    # to `is_a`.
+    #
+    # The honest limit: a bare mass noun ("copper is metal") lands here as a property rather than
+    # a kind. English almost always writes the count noun with an article, which is what `is_a`
+    # keys on, so the loss is narrow and the alternative — leaving every stated property
+    # unwritable — is much worse.
+    # ``(?!(?:my|mera|meri)\b)`` on the SUBJECT is not a stylistic choice. "my lucky number is
+    # seven" is a statement about the Master, and it is owned by the personal rule at the top of
+    # this list and by whatever pattern `_learn_from` induced for it. Seeds are tried before
+    # induced patterns, so a broad copula rule placed here pre-empts a pattern that had *earned*
+    # its place on precision — measured, it took "my lucky number is seven" from `lucky_number
+    # seven` to `has_property seven` and broke two induction tests. A property claim is about a
+    # thing in the world; a possessive is about him.
+    (r"^(?!(?:my|mera|meri)\b)(?P<s>.+?)\s+(?:is|are)\s+"
+     r"(?!a\s|an\s|the\s|one\s|part\s|inside\s|known\s|used\s|considered\s|to\s|"
+     r"defined\s|called\s)"
+     r"(?P<o>[a-z][a-z \-]{2,48})$", "has_property"),
     (r"^(?P<s>.+?)\s+likes?\s+(?P<o>.+)$", "likes"),
     (r"^(?P<s>.+?)\s+knows?\s+(?P<o>.+)$", "knows"),
     (r"^(?P<s>.+?)\s+is\s+(?:part\s+of|inside)\s+(?P<o>.+)$", "part_of"),
@@ -1416,6 +1447,23 @@ def _clean(text: str) -> str:
     return " ".join(parts).strip()
 
 
+
+#: "is/are/does/can <something> <something>" — the whole surface, before anything tries to parse it.
+_POLAR_SURFACE = re.compile(
+    r"^(?P<verb>is|are|was|were|does|do|did|can|could|has|have)\s+(?P<rest>.+?)\s*\??$")
+
+#: Which relation each opening verb reaches for first. The evidence still decides — this only sets
+#: the order the two are tried in, because "can X ..." is far more often a capability and
+#: "is X ..." far more often a property, and trying the likelier one first costs nothing.
+_POLAR_PREFERENCE: Dict[str, Tuple[str, ...]] = {
+    "can": ("capable_of", "has_property"), "could": ("capable_of", "has_property"),
+    "does": ("capable_of", "has_property"), "do": ("capable_of", "has_property"),
+    "did": ("capable_of", "has_property"),
+    "has": ("has_part", "has_property"), "have": ("has_part", "has_property"),
+}
+_POLAR_DEFAULT: Tuple[str, ...] = ("has_property", "capable_of")
+
+
 class Grounder:
     """Turns turns into structure, and answers from it.
 
@@ -2213,6 +2261,64 @@ class Grounder:
         except Exception:  # noqa: BLE001
             pass
 
+    def correct(self, superseded: Sequence[GroundedTriple],
+                by: Sequence[GroundedTriple], *, why: str = "corrected") -> int:
+        """Retire a claim because she was **told** it was wrong. Returns how many were retired.
+
+        Distinct from :meth:`_revise`, and the distinction is the whole reason this exists.
+        ``_revise`` settles a clash she *noticed*, and it can only notice one for a relation that
+        holds a single value — see :meth:`_contradicts`. That is the right rule for inference: a
+        thing may be both small and brown, and treating every repeated predicate as a conflict
+        would make ordinary accumulation look like a fight.
+
+        It is the wrong rule for a correction she was **given**. Measured on the corpus's own
+        eleven ``contradiction`` and ``knowledge_revision`` records — pairs whose entire content
+        is *"this was believed, and then it was corrected"* — **nought of eleven superseded**, and
+        she came out holding *"deoxygenated blood is blue"* and *"deoxygenated blood is dark red"*
+        as live facts side by side, along with *"pluto is a planet"* and *"pluto is a dwarf
+        planet"*. Both sides answerable, neither retired, and a category of the corpus that exists
+        to teach revision teaching accumulation instead.
+
+        The authority here is testimony, not a rule about predicates: the ordered pair says which
+        claim replaced which, and that is a thing she was told rather than a thing she worked out.
+        Both sides are still marked ``contested`` and the survivor still pays the contested
+        penalty, because a claim that has been corrected is genuinely less certain than one that
+        never was — the same discipline :meth:`_revise` applies, reached by a different route.
+        """
+        retired = 0
+        try:
+            winners = [t for t in (by or ()) if t is not None]
+            if not winners:
+                return 0
+            for triple in (superseded or ()):
+                if triple is None or triple.superseded:
+                    continue
+                # Never retire a claim on the strength of nothing but the *same* claim restated:
+                # a pair whose two halves ground to the same triple is not a correction, and
+                # superseding it would leave the subject with nothing live at all.
+                #
+                # "Nothing but", and the qualifier is load-bearing. A correction's own sentence
+                # routinely re-derives the claim it is replacing — *"pluto is a dwarf planet"*
+                # grounds to **two** triples, ``is_a dwarf planet`` and ``is_a planet``, because
+                # the extractor reads the head noun as well. Checking whether *any* winner
+                # restated the loser therefore skipped exactly the pair the corpus put there to
+                # teach revision. What matters is whether the correction said anything new; if it
+                # did, the claim it replaced goes.
+                if all(w.subject == triple.subject and w.predicate == triple.predicate
+                       and w.object.strip().lower() == triple.object.strip().lower()
+                       for w in winners):
+                    continue
+                triple.superseded = True
+                triple.contested = True
+                retired += 1
+            if retired:
+                for winner in winners:
+                    winner.contested = True
+                    winner.confidence = max(0.0, winner.confidence - _CONTESTED_PENALTY)
+        except Exception:  # noqa: BLE001 — an uncorrectable pair corrects nothing
+            return retired
+        return retired
+
     def _contradicts(self, triple: GroundedTriple) -> Optional[GroundedTriple]:
         """Does this clash with something already believed?
 
@@ -2662,6 +2768,85 @@ class Grounder:
         # about facts she had just been taught.
         return self._compile_question(low)
 
+    def _known_entity(self, name: str) -> bool:
+        """Does the store hold anything at all about this? The only reliable boundary signal."""
+        key = self._key(name)
+        if not key:
+            return False
+        return any(subject == key for subject, _predicate in self.facts)
+
+    def _read_polar_surface(self, low: str, out: Answer) -> Optional[Answer]:
+        """Read "is X <phrase>" by *finding* where the subject ends, instead of assuming.
+
+        Splitting a polar question into subject and predicate is ambiguous from the surface alone —
+        "is norway governed by elected leaders" could break after any word. What disambiguates it
+        is not grammar, it is that **the store knows its own subjects**: try each split and keep
+        the one whose left half is an entity something has been said about.
+
+        Returns ``None`` when no split names a known entity, which hands the question back to
+        `compile_meaning` unchanged rather than guessing.
+        """
+        match = _POLAR_SURFACE.match(low)
+        if match is None:
+            return None
+        verb = match.group("verb")
+        words = match.group("rest").split()
+        if len(words) < 2:
+            return None
+        order = _POLAR_PREFERENCE.get(verb, _POLAR_DEFAULT)
+        # Longest subject first: "prime number" should beat "prime" where both are known.
+        for cut in range(min(4, len(words) - 1), 0, -1):
+            head = words[:cut]
+            if head and head[0] in ("a", "an", "the"):
+                head = head[1:]
+                if not head:
+                    continue
+            subject = self.resolve(" ".join(head))
+            if not subject or not self._known_entity(subject):
+                continue
+            phrase = " ".join(words[cut:]).strip()
+            if not phrase:
+                continue
+            entities = [subject, *self._neighbours(subject)]
+            # "do zorbins need glarn" is not a phrase about zorbins, it is a *relation* and an
+            # object — and reading it as one phrase answered UNKNOWN about a fact that was on
+            # record. So when the phrase opens with a word that folds to a relation the store
+            # knows, that reading is tried first; only a phrase that names no relation is treated
+            # as a predicative one. Both forms are polar and neither can stand in for the other.
+            head_word, _, tail = phrase.partition(" ")
+            folded = self._predicate(head_word)
+            readings: List[Tuple[str, str]] = []
+            if tail and folded in _KNOWN_PREDICATES:
+                readings.append((folded, tail))
+            readings.extend((predicate, phrase) for predicate in order)
+            for predicate, target in readings:
+                wanted = self._key(target)
+                for entity in entities:
+                    for negated in (False, True):
+                        found = [t for t in (self._lookup(entity, predicate, negated=negated) or [])
+                                 if self._key(t.object) == wanted]
+                        if not found:
+                            continue
+                        best = max(found, key=lambda t: t.confidence)
+                        out.polar = True
+                        out.polar_object = target
+                        out.triples = found
+                        out.confidence = best.confidence
+                        out.provenance = best.provenance
+                        out.text = "no" if negated else "yes"
+                        out.state = (Epistemic.KNOWN
+                                     if best.confidence >= self.known_floor
+                                     else Epistemic.BELIEVED)
+                        out.why = (f"{'denied' if negated else 'stated'}: {best.subject} "
+                                   f"{predicate} {best.object}")
+                        return out
+            # A known subject and no matching claim is UNKNOWN, not "no" — an open world says so.
+            out.polar = True
+            out.polar_object = phrase
+            out.why = "no claim either way about this pair"
+            return out
+        return None
+
     def _answer_polar(self, low: str, out: Answer) -> Optional[Answer]:
         """Yes, no, or unknown — the three states a polar question actually has.
 
@@ -2699,6 +2884,14 @@ class Grounder:
         """
         if low.split(" ", 1)[0] in _WH_OPENERS:
             return None
+        # Try the surface reader first. `compile_meaning` produces `polar_question` only for a
+        # narrow shape — measured, "is a seal warm blooded" parses and "is kiwi feathered" comes
+        # back `unreadable`, while "is norway governed by elected leaders" parses to the subject
+        # "norway governed elected". Two-token and long-tail polar questions are the majority of
+        # the form, so a reader that handles them cannot be a fallback.
+        surface = self._read_polar_surface(low, out)
+        if surface is not None:
+            return surface
         try:
             from nyxara.njp.semantics import compile_meaning
         except Exception:  # noqa: BLE001
@@ -2713,9 +2906,36 @@ class Grounder:
         predicate = self._predicate(meaning.relation)
         if not subject:
             return None
-        out.polar = True
-        out.polar_object = meaning.object
-        wanted = self._key(meaning.object)
+        # A relation nobody has ever stored, with an object beside it, is one adjective phrase cut
+        # in half by the compiler. "is a seal warm blooded" arrives as relation "warm", object
+        # "blooded"; the store holds `mammal has_property warm blooded` and the two never meet.
+        #
+        # This is the only question form that can ask for a *particular* inherited property, which
+        # is why it is worth repairing rather than routing around: `what are the properties of X`
+        # returns one of four and cannot be told which one is wanted, so before this the whole
+        # generalisation path was unaskable and the capability surface scored it 0.00 against
+        # inheritance that was firing correctly.
+        if predicate and predicate not in _KNOWN_PREDICATES and meaning.object:
+            phrase = f"{meaning.relation} {meaning.object}".strip()
+            out.polar = True
+            out.polar_object = phrase
+            wanted = self._key(phrase)
+            # Which relation the phrase belongs to is decided by what the store actually holds,
+            # not guessed from the wording. "is a seal warm blooded" is `has_property` and "can a
+            # seal breathe with lungs" is `capable_of`, and the surface gives no reliable signal
+            # for telling them apart — so try both and let the evidence choose. Neither matching
+            # leaves it on `has_property`, which is the honest default for a predicative phrase.
+            predicate = "has_property"
+            for candidate in ("has_property", "capable_of"):
+                if any(self._key(t.object) == wanted
+                       for entity in [subject, *self._neighbours(subject)]
+                       for t in (self._lookup(entity, candidate) or [])):
+                    predicate = candidate
+                    break
+        else:
+            out.polar = True
+            out.polar_object = meaning.object
+            wanted = self._key(meaning.object)
 
         def _matching(entity: str, *, negated: bool) -> List[GroundedTriple]:
             return [t for t in self._lookup(entity, predicate, negated=negated)
@@ -3201,6 +3421,7 @@ _PREDICATE_ALIASES: Dict[str, str] = {
     "umar": "age", "उम्र": "age",
 }
 
+
 # Relations that can hold only one value at a time. A second value contradicts rather than adds.
 # Relations that can hold exactly one value at a time, so a second value is a contradiction
 # rather than an addition.
@@ -3216,3 +3437,18 @@ _FUNCTIONAL = frozenset({
     "has_name", "located_in", "born_in", "age", "birthday",
     "works_at", "capital_of", "married_to",
 })
+
+#: Every relation name this package can legitimately produce — derived from the tables that
+#: already define them rather than hand-listed, so it cannot drift when one of them grows.
+#:
+#: Read by `_answer_polar` to tell a *relation* from an *adjective*. "is a seal warm blooded"
+#: compiles to relation "warm" and object "blooded", and "warm" is a relation nobody has ever
+#: stored — which is the signal that the pair is one property split in half.
+_KNOWN_PREDICATES: FrozenSet[str] = frozenset(
+    name for name in (
+        set(_PREDICATE_ALIASES) | set(_PREDICATE_ALIASES.values())
+        | {pred for _rx, pred in _SEED_PATTERNS if pred}
+        | {pred for _rx, pred in _QUESTION_PATTERNS if pred and pred.isidentifier()}
+        | set(_GENERAL_ANSWER) | set(_FUNCTIONAL)
+    ) if name
+)

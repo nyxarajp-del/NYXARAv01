@@ -319,7 +319,15 @@ class IntentReader:
             q, why_q = max(q, 0.8), why_q or "it opens with a question word"
         elif any(w in _Q_WORDS for w in words):
             q, why_q = max(q, 0.55), why_q or "it contains a question word"
-        if first in _Q_AUX and not low.rstrip().endswith("?"):
+        # ``first`` is the first *content* word, and the inversion test needs the first word said.
+        # Measured: "24 is an even number" drops the numeral out of `words`, so `first` became
+        # "is", the turn was read as a question at 0.6, and `ground` refused to store it as a fact.
+        # Every numeric statement — "7 is prime", "100 is greater than 10" — was discarded the same
+        # way, silently, because a question that grounds nothing looks exactly like a question.
+        # Inversion means the auxiliary is genuinely at the front, so compare against the surface.
+        spoken = low.split()
+        inverted = bool(spoken) and spoken[0].strip(".,!?;:'\"") == first
+        if first in _Q_AUX and inverted and not low.rstrip().endswith("?"):
             q, why_q = max(q, 0.6), why_q or "it opens with an auxiliary (subject–verb inversion)"
         if q:
             scores["question"] = (q, why_q)

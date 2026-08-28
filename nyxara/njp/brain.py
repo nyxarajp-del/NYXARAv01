@@ -378,8 +378,18 @@ class NJPBrain:
         # counterfactual context is compiled through it and the universe is what executes it.
         self.compiler = self._build_compiler(c)
         self.universe = self._build_universe(c)
+        # After `universe`, whose model it rolls forward, and after `predictor`, which is where
+        # its claims go to be scored. A planner built before either would hold two Nones and
+        # report every search as "no causal model".
+        self.rollout = self._build_rollout(c)
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
+        # After `beliefs`, whose claims it hunts, and after `universe`; it also reads `grounder`
+        # and `world`, both built well above. A killer with no ledger has nothing to go after.
+        self.killer = self._build_killer(c)
+        # After `curriculum` is *defined* but read lazily — the generator holds the same stage
+        # list and reads `brain.stats()`, so it needs no organ handed to it at construction.
+        self.proposer = self._build_proposer(c)
         # The subsystem that attacks what the ones above it conclude. After `world`, `universe`
         # and `beliefs`, because every one of its four attacks is settled against one of them —
         # an adversary with nothing to check against is a generator of rhetorical questions.
@@ -651,6 +661,52 @@ class NJPBrain:
             from nyxara.njp.curiosity import Curiosity
             return Curiosity(self, min_value=self._cfg("curiosity_min_value", 0.05))
         except Exception:  # noqa: BLE001 — she answers what she is asked and wonders nothing
+            return None
+
+    def _build_proposer(self, c: Any) -> Any:
+        """The rung she is not on, proposed from measured weakness rather than read off a list.
+
+        The ladder in :mod:`nyxara.njp.curriculum` is fixed and walked in order, so one rung
+        blocked on a sample count pins the whole thing while later rungs are already mastered.
+        See :mod:`nyxara.njp.propose`.
+        """
+        if not self._gate("propose", True):
+            return None
+        try:
+            from nyxara.njp.propose import StageGenerator
+            return StageGenerator(self)
+        except Exception:  # noqa: BLE001 — she works the fixed ladder, as before
+            return None
+
+    def _build_killer(self, c: Any) -> Any:
+        """What would end what she is most committed to — and has it already happened?
+
+        Every belief carried a falsifier and every falsifier was true of everything, because one
+        template wrote all of them and nothing ever went looking for what they named. See
+        :mod:`nyxara.njp.falsify`.
+        """
+        if not self._gate("falsify", True):
+            return None
+        try:
+            from nyxara.njp.falsify import TheoryKiller
+            return TheoryKiller(self)
+        except Exception:  # noqa: BLE001 — her beliefs then only ever gain support, as before
+            return None
+
+    def _build_rollout(self, c: Any) -> Any:
+        """Goal → imagined futures → the best one → and reality's verdict on it.
+
+        :meth:`~nyxara.njp.universe.InternalUniverse.imagine` had exactly one caller, which
+        imagined one variable at the value it already had. Nothing asked which intervention would
+        get a number where it needed to be, which is the only question a causal model is for.
+        See :mod:`nyxara.njp.rollout`.
+        """
+        if not self._gate("rollout", True):
+            return None
+        try:
+            from nyxara.njp.rollout import RolloutPlanner
+            return RolloutPlanner(self)
+        except Exception:  # noqa: BLE001 — she models what follows what and plans nothing with it
             return None
 
     def _build_assumptions(self, c: Any) -> Any:
@@ -1415,8 +1471,11 @@ class NJPBrain:
             return None
         try:
             from nyxara.njp.metareason import MetaReasoner, ProblemKind
+            # `self_model` is built at line 346, before this — so the gate has its record from
+            # the first turn rather than being attached afterwards and missing the early ones.
             meta = MetaReasoner(meta_learner=self.meta, beliefs=self.beliefs,
-                                world=self.world, universe=self.universe)
+                                world=self.world, universe=self.universe,
+                                self_model=self.self_model)
             if self.ladder is not None or self.reasoner is not None:
                 meta.register("ladder", (ProblemKind.SYMBOLIC, ProblemKind.CONTRADICTION),
                               self._strategy_ladder, prior=0.6)
@@ -2487,7 +2546,18 @@ class NJPBrain:
             # tests. Curiosity's known-unknown gap reads `reasoner.problems`, so an unwired
             # reasoner also meant she could never notice a question she had failed to answer.
             if not out.answer:
+                # A prediction that resolves **inside this turn**, which is the whole test the
+                # raw-stimulus key failed: she commits to whether the ladder will find an answer,
+                # and microseconds later it either did or did not. Nothing has to arrive later and
+                # nothing waits in the open queue.
+                #
+                # It is also the one prediction the self-model can act on directly — knowing when
+                # deliberating is worth the descent is a capability, separately measurable from
+                # deliberating well, and `outcome` routes the miss to `reasoning` so the record
+                # that `metareason._demoted` reads is the record this loop produced.
+                deliberation = self._predict_deliberation(out)
                 self._deliberate(out)
+                self._score_deliberation(out, deliberation)
                 # 4c. RECALL — the last thing tried, and last on purpose.
                 #
                 # She may hold the entity the question named under a relation it did not ask for:
@@ -2919,6 +2989,68 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a failed deliberation leaves the turn unanswered
             pass
 
+    def _predict_deliberation(self, thought: NJPThought) -> str:
+        """Commit to whether the ladder will answer, before it runs. Returns the key, or empty.
+
+        The prior comes from her own record rather than a constant: a brain that has found
+        deliberation fruitful expects it to be, and one that has not, does not. An untested record
+        sits at 0.5 and predicts "answered", which is the optimistic default that at least gets the
+        loop scored on its first turns.
+        """
+        predictor = getattr(self, "predictor", None)
+        if predictor is None:
+            return ""
+        try:
+            level = 0.5
+            model = getattr(self, "self_model", None)
+            if model is not None:
+                level = float(model.level("reasoning:deliberation"))
+            key = f"{getattr(thought, 'cycle_id', '')}:deliberation"
+            predictor.predict(key, "answered" if level >= 0.5 else "unanswered",
+                              confidence=abs(level - 0.5) * 2.0, organ="reasoning",
+                              stimulus=str(getattr(thought, "stimulus", "")))
+            return key
+        except Exception:  # noqa: BLE001 — the prediction loop is an optional organ
+            return ""
+
+    def _score_deliberation(self, thought: NJPThought, key: str) -> None:
+        """Reality, one call later. The half that makes the line above a prediction at all."""
+        if not key:
+            return
+        try:
+            actual = "answered" if str(getattr(thought, "answer", "") or "").strip() \
+                else "unanswered"
+            self.predictor.observe(key, actual, evidence={"organ": "reasoning", "triples": True,
+                                                          "facts_correct": True})
+            model = getattr(self, "self_model", None)
+            if model is not None:
+                model.observe("reasoning:deliberation", 1.0 if actual == "answered" else 0.0)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _turn_salience(self, thought: NJPThought) -> float:
+        """How much of a shock this turn was, 0…1 — the number that decides what outlives it.
+
+        The same rule `attention` uses, read from the same place rather than defined twice: the
+        prediction loop's `Outcome.surprise` for this cycle when there is one, otherwise the
+        manifold's settling residual. Two definitions of "how surprising was that" drifting apart
+        is precisely the defect this phase set out to close, and writing a second one here to save
+        an attribute lookup would have reopened it in the same commit.
+
+        Without this call the `salience` parameter is decoration: a hook every organ can read and
+        nothing ever fills.
+        """
+        try:
+            attention = getattr(self, "attention", None)
+            if attention is not None and hasattr(attention, "_scored_surprise"):
+                scored, _source = attention._scored_surprise(thought)
+                if scored > 0.0:
+                    return max(0.0, min(1.0, float(scored)))
+            settled = getattr(getattr(thought, "percept", None), "settled", None)
+            return max(0.0, min(1.0, float(getattr(settled, "surprise", 0.0) or 0.0)))
+        except Exception:  # noqa: BLE001 — an unmeasurable turn is simply not a surprising one
+            return 0.0
+
     def _remember_turn(self, thought: NJPThought) -> None:
         """File this turn's conclusion at the level it belongs to.
 
@@ -2928,17 +3060,19 @@ class NJPBrain:
         at all. Everything else is an episode, and becomes semantic only if it recurs.
         """
         try:
+            salience = self._turn_salience(thought)
             if self.levels is not None:
                 self.levels.remember(
                     f"turn-{self.turns}", thought.answer,
                     level=self._level_for(thought), cue=thought.stimulus,
                     source=f"turn-{self.turns}", claim=self._claim_of(thought),
+                    salience=salience,
                     cells=tuple(getattr(thought.percept, "cells", ()) or ()))
                 return
             if self.memory is not None:
                 self.memory.remember(f"turn-{self.turns}", thought.answer,
                                      kind=("conclusion" if thought.verified else "episode"),
-                                     cue=thought.stimulus,
+                                     cue=thought.stimulus, salience=salience,
                                      # The state she was in when she learned this. Without it
                                      # stored there is nothing for the recall side to compare a
                                      # later state against.
@@ -3866,6 +4000,8 @@ class NJPBrain:
                             ("loop", self.loop),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
+                            ("rollout", self.rollout), ("falsify", self.killer),
+                            ("propose", self.proposer),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
@@ -4039,6 +4175,8 @@ class NJPBrain:
                             ("attention", self.attention), ("readout", self.readout),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
+                            ("rollout", self.rollout), ("falsify", self.killer),
+                            ("propose", self.proposer),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent),
                             ("field", self.field), ("learner", self.learner),
@@ -4094,6 +4232,12 @@ class NJPBrain:
                 self.goals.load_dict(d["goals"])
             if d.get("curiosity") and self.curiosity is not None:
                 self.curiosity.load_dict(d["curiosity"])
+            if d.get("rollout") and self.rollout is not None:
+                self.rollout.load_dict(d["rollout"])
+            if d.get("falsify") and self.killer is not None:
+                self.killer.load_dict(d["falsify"])
+            if d.get("propose") and self.proposer is not None:
+                self.proposer.load_dict(d["propose"])
             if d.get("readout") and self.readout is not None:
                 self.readout.load_dict(d["readout"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):

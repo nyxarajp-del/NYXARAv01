@@ -176,6 +176,22 @@ class LoopReport:
     #: that fired. `goals_reached` counts the metric hitting its target, never "she acted".
     actions_taken: int = 0
     goals_reached: int = 0
+    #: Rungs proposed from measured weakness, and metrics that reached a new best this pass.
+    #: The falsifier for the generator is not that `stages_proposed` moves — it is that what it
+    #: proposes is ever *different* from the rung `Curriculum.next_stage` already returns.
+    stages_proposed: int = 0
+    metrics_at_best: int = 0
+    #: Beliefs whose own falsifier was searched for in her own record, and the ones it found.
+    #: `beliefs_falsified` is the number that matters: a hunt that never kills anything is a
+    #: search for evidence that only ever confirms, which is the failure the mechanism is for.
+    beliefs_hunted: int = 0
+    beliefs_falsified: int = 0
+    #: Imagined futures searched for a goal, and the ones reality has since graded. Reported as a
+    #: pair on purpose: `plans_committed` is a number the planner can raise by being called, and
+    #: `plans_settled` is one only a real reading can raise. A session where the first climbs and
+    #: the second stays at zero is the 113/0 failure again, in a new organ.
+    plans_committed: int = 0
+    plans_settled: int = 0
     #: §27. The eight-term vector, read on a cadence so *change* is visible — a single reading
     #: answers "how good is she", which `njp.index` says outright it cannot answer.
     index_scalar: Optional[float] = None
@@ -344,6 +360,9 @@ class LearningLoop:
             "weaknesses_trained": 0, "weaknesses_closed": 0,
             "cognitive_rewires": 0, "evolution_trials": 0,
             "actions_taken": 0, "goals_reached": 0,
+            "plans_committed": 0, "plans_settled": 0,
+            "beliefs_hunted": 0, "beliefs_falsified": 0,
+            "stages_proposed": 0, "metrics_at_best": 0,
             "index_measurements": 0, "index_regressions": 0,
             "deliberations": 0, "deliberation_objections": 0,
             "edits_attempted": 0, "edits_refused": 0,
@@ -390,6 +409,9 @@ class LearningLoop:
         self._trained: Dict[str, str] = {}
         self._closed_weaknesses = 0
         self._mission_nid: str = ""
+        #: (committed, settled) as of the last close, so the report can carry a per-turn delta
+        #: rather than a running total that looks the same on every turn after the first.
+        self._plans_seen: Tuple[int, int] = (0, 0)
 
         self._install_repairs()
 
@@ -1502,6 +1524,11 @@ class LearningLoop:
             except Exception:  # noqa: BLE001
                 pass
 
+        self._read_planner(rep)
+
+        if turn % self.assess_every == 0:
+            self._propose_stages(rep)
+
         if turn % self.assess_every == 0:
             try:
                 curriculum = getattr(self.brain, "curriculum", None)
@@ -1532,6 +1559,9 @@ class LearningLoop:
                     rep.generation = int(getattr(gen, "n", 0) or 0)
             except Exception:  # noqa: BLE001
                 pass
+
+        if turn % self.attack_every == 0:
+            self._hunt_falsifiers(rep)
 
         if turn % self.attack_every == 0:
             try:
@@ -1825,6 +1855,84 @@ class LearningLoop:
         except Exception:  # noqa: BLE001 — an unread index is a missing number, never a failed turn
             return
 
+    def _propose_stages(self, rep: LoopReport) -> None:
+        """Watch her own numbers, and propose a rung the fixed ladder has no way to express.
+
+        Before the assessment rather than after, and only just: the generator records a reading
+        for every ladder metric on this pass, and a high-water mark taken after the assessment
+        has read the same numbers would still be correct — but taking it first keeps *observe*
+        and *propose* adjacent, which is the whole reason they are separate methods.
+
+        The generator is deliberately not given the curriculum's report to work from beyond the
+        starvation check: it reads ``brain.stats()``, which is what every organ already publishes
+        about itself, and its own record of what she has previously achieved. It has never seen
+        the held-out split and must not — see :mod:`nyxara.njp.propose`.
+        """
+        try:
+            proposer = getattr(self.brain, "proposer", None)
+            if proposer is None:
+                return
+            rep.metrics_at_best = int(proposer.observe(self.brain))
+            rep.stages_proposed = len(proposer.propose(self.brain))
+        except Exception:  # noqa: BLE001 — a failed pass proposes nothing
+            return
+
+    def _hunt_falsifiers(self, rep: LoopReport) -> None:
+        """Go and look for what would end her strongest beliefs, before attacking them.
+
+        Before the adversary rather than after, and the order is the point.
+        :meth:`~nyxara.njp.adversary.SelfAttacker.attack_strongest` *argues* against a claim from
+        the record; this *searches* for the specific observation the claim's own falsifier names.
+        A belief her own record already contradicts should not be argued about — it should be
+        gone before the argument starts, and the attacker's verdict on a claim that was already
+        dead is a verdict about nothing.
+
+        On the attack cadence rather than every turn, for the reason that cadence exists: the
+        strongest beliefs do not change between one turn and the next, and re-hunting the same
+        claim every turn is how a search becomes a counter.
+        """
+        try:
+            killer = getattr(self.brain, "killer", None)
+            if killer is None:
+                return
+            for verdict in killer.hunt():
+                rep.beliefs_hunted += 1
+                rep.beliefs_falsified += int(bool(verdict.retracted))
+        except Exception:  # noqa: BLE001 — a failed hunt kills nothing and breaks no turn
+            return
+
+    def _read_planner(self, rep: LoopReport) -> None:
+        """Carry the planner's two counters onto this turn's report, as deltas.
+
+        Read rather than driven. The planner is *reached* through
+        :meth:`~nyxara.njp.doing.CognitiveAgency.act`, which already runs on this loop, and its
+        claims are settled in ``field._sync_world``, where the reading that can settle them
+        actually arrives. Neither belongs on a cadence here, and adding one would schedule a
+        search against a world nothing has re-measured — the shape of defect this package keeps
+        removing rather than adding.
+
+        What was missing is only that both numbers were invisible from the loop, which is where
+        every other mechanism is judged from.
+
+        **The delta on the report lags the settlement by a turn, and that is a fact about the
+        pipeline rather than a choice.** ``brain._think`` closes the loop at line 2616 and cycles
+        the field at 2630, and the field is where a plan is settled — because the field is where
+        the reading that can settle one arrives. So a settlement always lands just after this has
+        read. The per-turn number is still right about the turn it names; the *session* totals are
+        assigned from the planner's own counters rather than summed from these deltas, so the
+        number a session is judged on cannot lag at all.
+        """
+        try:
+            planner = getattr(self.brain, "rollout", None)
+            if planner is None:
+                return
+            committed, settled = int(planner.committed), int(planner.settled)
+            rep.plans_committed = max(0, committed - self._plans_seen[0])
+            rep.plans_settled = max(0, settled - self._plans_seen[1])
+            self._plans_seen = (committed, settled)
+        except Exception:  # noqa: BLE001
+            return
+
     def _pursue(self, report: Any, rep: LoopReport) -> None:
         """One goal → plan → action → outcome. Stage G, and it had never happened.
 
@@ -2088,6 +2196,11 @@ class LearningLoop:
             self.totals["deliberation_objections"] += rep.deliberation_objections
             self.totals["actions_taken"] += rep.actions_taken
             self.totals["goals_reached"] += rep.goals_reached
+            self.totals["beliefs_hunted"] += rep.beliefs_hunted
+            self.totals["beliefs_falsified"] += rep.beliefs_falsified
+            self.totals["stages_proposed"] += rep.stages_proposed
+            self.totals["metrics_at_best"] += rep.metrics_at_best
+            self._sync_plan_totals()
             self.totals["cognitive_rewires"] += rep.cognitive_rewires
             self.totals["evolution_trials"] += rep.evolution_trials
             self.totals["weaknesses_closed"] = self._closed_weaknesses
@@ -2114,8 +2227,28 @@ class LearningLoop:
         except Exception:  # noqa: BLE001
             pass
 
+    def _sync_plan_totals(self) -> None:
+        """Take the planner's own counters rather than summing the report's deltas.
+
+        Assigned rather than accumulated, and read here rather than only at close, because a
+        settlement lands *after* the loop has closed — the field cycles at ``brain.py:2630`` and
+        this closes at 2616. Summing deltas read at close would therefore miss the most recent
+        settlement permanently, and a session that ended on one would report zero plans settled
+        while the planner reported one. The counters are monotonic and owned by the planner, so
+        taking them directly cannot drift from what they say.
+        """
+        try:
+            planner = getattr(self.brain, "rollout", None)
+            if planner is None:
+                return
+            self.totals["plans_committed"] = int(planner.committed)
+            self.totals["plans_settled"] = int(planner.settled)
+        except Exception:  # noqa: BLE001
+            return
+
     def stats(self) -> Dict[str, Any]:
         """Is the loop actually closed? Every number here was zero before this module existed."""
+        self._sync_plan_totals()
         scored = self.totals["scored"]
         return {
             "closes": self.closes,
