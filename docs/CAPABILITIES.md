@@ -869,6 +869,97 @@ rather than letting a fallback babble in her name. `nyxara.njp.prove` is the pro
 sympy) — it returns a verdict only where a claim is formally expressible and reports
 `INEXPRESSIBLE` otherwise, which is the most-tested behaviour in the file.
 
+### NJP V.16 — she writes programs, and she is examined on what she was never taught
+
+Two organs, and one measurement that ties them together.
+
+**`nyxara.njp.coding` — the programming faculty.** Between the calculator (which closes an
+expression), the proof core (which certifies a proposition) and the forge (which lowers *her own*
+already-written Python to C) there was nothing that took a description of what a program should do
+and produced one. This is that, and it is narrow in four ways that are each a refusal:
+
+* **Nothing is ever `eval`ed or `exec`ed.** A program is a term tree over a fixed operator table and
+  runs in her own interpreter. Python source enters only through `read_python`, which walks
+  `ast.parse` output and raises on any node outside a whitelist — `__import__('os').system(...)` is
+  a parse-time refusal, not a shell command. The accepted set is enumerated, not the rejected one,
+  so a new Python node type cannot quietly widen it.
+* **Every program halts.** There is no open recursion; iteration is `map`/`filter`/`fold` over a
+  finite sequence, under a hard step budget counted in evaluated nodes rather than seconds, so a
+  result is reproducible across machines.
+* **A program is never believed, only executed.** `Coder.write` returns a program only if it
+  reproduces *every* shown example, and returns nothing at all otherwise. There is no best-effort
+  return: a program that nearly works is a wrong one that cost more to find out about.
+* **A lesson leaves a shape, never an answer.** `Coder.learn` verifies a demonstration by running
+  it, throws the program away, and keeps the skeleton with its constants and inner functions
+  blanked — `sum(map(double, filter(even, xs)))` is retained as `sum(map(?f, filter(?p, #0)))`.
+  That is §17's *"behaviour ko structured knowledge/programs mein convert karna"* on the one kind
+  of claim that can be checked mechanically.
+
+She also reads code (`read_python`), traces it step by step (`trace`), explains it in a sentence
+(`explain`), and debugs it (`repair` — one edit at a time, and the fix has to run on the held-out
+pairs before it counts).
+
+**`nyxara.njp.school` — the syllabus, taught and then examined.** Eleven subjects in a fixed order:
+six reasoning (arithmetic, composition, inheritance, mixed-relation shapes, abstention, depth) and
+five coding (reading, basics, composites, debugging, transfer). Every subject is **pre-tested**
+before it is taught and post-tested on freshly minted items, so what is reported is the floor, the
+gain and the rounds it took — never the final number alone. Reasoning items use generated nonsense
+vocabulary that has never been uttered, and coding items are held-out specs whose shape was
+demonstrated on a different task with different constants. Abstention is a first-class outcome:
+half the items are controls she is *supposed* to refuse, and on those, silence scores as right.
+
+Run it: `python -m nyxara.njp.school --rounds 2 --retention`, or `NJPBrain.go_to_school()`.
+The evolver and the pulse are switched off under exam conditions, and the reason is not
+performance: `evolve_every_s` is 300, a full syllabus takes longer than that, and an unconfigured
+brain part-way through starts `growth.self_optimize.Optimizer`, which benchmarks and **edits the
+package's own source** while the next subject is being graded. The thing under test must not change
+during the test.
+
+**What the run actually reports** (seed 7, two rounds — reproducible):
+
+| | taught | teacher off, fresh items |
+|---|---|---|
+| subjects mastered | 11 / 11 | 11 / 11 |
+| right / wrong / abstained | 107 / 0 / 3 | 109 / 0 / 1 |
+| accuracy · precision | 0.97 · 1.00 | 0.99 · 1.00 |
+
+Two subjects moved because a lesson ran, and both are gains on material that was never taught:
+
+* **`depth` 0.33 → 1.00.** A four-hop chain fails cold for two independent reasons — the per-hop
+  confidence falls under `core._MIN_LINK_CONFIDENCE` because an unproven relation's transitivity
+  prior is low, *and* `CognitiveLearningCore.max_depth` refuses to extend the walk. Distilling
+  verified demonstrations over entities the exam never sees moves the first; the second is a
+  budget, raised by one only once the posterior is earned and **rolled straight back if the
+  controls go soft**. Chains that do not exist stayed silent at every stage.
+* **`code-composites` 0.17 → 1.00 (0.83 in the run, 1.00 retained).** Grafting off and an identical
+  attempt budget on both sides, so the only difference between the two numbers is which shapes she
+  holds. She can still *invent* a composite by grafting primitives — measured at 6005 attempts
+  against 10 for the same task once the shape is known, which is what a lesson buys: search.
+
+**Three bugs the school found in the brain, all fixed.** This is the argument for having one.
+
+1. Asked *"what is 25 + 10?"* after a few similar turns she answered **10**. Every organ behaved:
+   the deliberation ladder settled on a token the question contained, marked it decided, and the
+   meta-reasoner — which learns its ordering from outcomes, so a prior does not decide it — took
+   that ahead of `calculate`. Now a question the calculator can *close* gets no guess offered
+   against it at all. (`brain._closed_arithmetic`.)
+2. Teaching a relation to chain also minted `shape:p>p>p` in the genome, which was promoted as a
+   rival arm **pinned at three hops** and shadowed the general composition walk on every four-hop
+   question — so the lesson worked and the report said it had not. A shape of one predicate
+   repeated is transitivity, `_strategy_compose` already owns that walk at any length, and it is
+   no longer promoted. (`core.walk_shape` says which of the two owns it.)
+3. Taught schemas were tried ahead of seeded ones whatever they cost, so every two-hole composite
+   was enumerated in full before the zero-hole seed that answers `sum(xs)` in one attempt —
+   `code-basics` fell from 1.00 to 0.50 on tasks it had just aced. Learning a hard thing had made
+   an easy thing time out. Cost now leads the ranking; within a cost tier the taught shape still
+   leads.
+
+**What this is not.** She writes programs in a first-course subset of Python over integers, lists
+and strings — no user-defined recursion, no mutable state, no I/O, no libraries. Synthesis is
+enumeration over learned shapes under an attempt budget, not a general program synthesiser, and a
+shape she has never seen and cannot reach by one graft is an abstention. Every one of those limits
+is reported as a number by the school rather than described here as a caveat.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
