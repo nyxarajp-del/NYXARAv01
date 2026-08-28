@@ -817,6 +817,18 @@ _DERIVED_FAMILIES = frozenset({"generalization", "inheritance", "planning", "rev
 #: test_compression_reward.py`` holds the question set fixed, moves only which organ is still
 #: yielding, and requires the top of the queue to change. That is an experiment with a control,
 #: which is more than a benchmark row would have been.
+#: ``representation`` is absent for a different reason, and it is about the corpus rather than
+#: about circularity. What ⑩ measures is whether a concept that **over-claims** gets re-formed so
+#: its awkward member is covered — and every ``examples`` block in the corpus is uniform by
+#: construction: four birds that all have feathers, four mammals that all give milk, four primes
+#: that all have exactly two divisors. There is no awkward member to hold out. Building one here
+#: would be the probe writing its own input, and a family whose cases the evaluator invents is
+#: measuring the evaluator.
+#:
+#: ⑩'s falsifier is a controlled A/B instead — ``tests/njp/test_representation_birth.py`` runs the
+#: same session with the detector off and on and requires the gap to close, the concept count to
+#: rise and compression not to fall. An experiment with a control arm is more than a row here
+#: would have been.
 _NO_KEY_FAMILIES = frozenset({"curiosity", "representation"})
 
 

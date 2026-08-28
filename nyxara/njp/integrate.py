@@ -176,6 +176,11 @@ class LoopReport:
     #: that fired. `goals_reached` counts the metric hitting its target, never "she acted".
     actions_taken: int = 0
     goals_reached: int = 0
+    #: Rungs proposed from measured weakness, and metrics that reached a new best this pass.
+    #: The falsifier for the generator is not that `stages_proposed` moves — it is that what it
+    #: proposes is ever *different* from the rung `Curriculum.next_stage` already returns.
+    stages_proposed: int = 0
+    metrics_at_best: int = 0
     #: Beliefs whose own falsifier was searched for in her own record, and the ones it found.
     #: `beliefs_falsified` is the number that matters: a hunt that never kills anything is a
     #: search for evidence that only ever confirms, which is the failure the mechanism is for.
@@ -357,6 +362,7 @@ class LearningLoop:
             "actions_taken": 0, "goals_reached": 0,
             "plans_committed": 0, "plans_settled": 0,
             "beliefs_hunted": 0, "beliefs_falsified": 0,
+            "stages_proposed": 0, "metrics_at_best": 0,
             "index_measurements": 0, "index_regressions": 0,
             "deliberations": 0, "deliberation_objections": 0,
             "edits_attempted": 0, "edits_refused": 0,
@@ -1521,6 +1527,9 @@ class LearningLoop:
         self._read_planner(rep)
 
         if turn % self.assess_every == 0:
+            self._propose_stages(rep)
+
+        if turn % self.assess_every == 0:
             try:
                 curriculum = getattr(self.brain, "curriculum", None)
                 if curriculum is not None:
@@ -1846,6 +1855,28 @@ class LearningLoop:
         except Exception:  # noqa: BLE001 — an unread index is a missing number, never a failed turn
             return
 
+    def _propose_stages(self, rep: LoopReport) -> None:
+        """Watch her own numbers, and propose a rung the fixed ladder has no way to express.
+
+        Before the assessment rather than after, and only just: the generator records a reading
+        for every ladder metric on this pass, and a high-water mark taken after the assessment
+        has read the same numbers would still be correct — but taking it first keeps *observe*
+        and *propose* adjacent, which is the whole reason they are separate methods.
+
+        The generator is deliberately not given the curriculum's report to work from beyond the
+        starvation check: it reads ``brain.stats()``, which is what every organ already publishes
+        about itself, and its own record of what she has previously achieved. It has never seen
+        the held-out split and must not — see :mod:`nyxara.njp.propose`.
+        """
+        try:
+            proposer = getattr(self.brain, "proposer", None)
+            if proposer is None:
+                return
+            rep.metrics_at_best = int(proposer.observe(self.brain))
+            rep.stages_proposed = len(proposer.propose(self.brain))
+        except Exception:  # noqa: BLE001 — a failed pass proposes nothing
+            return
+
     def _hunt_falsifiers(self, rep: LoopReport) -> None:
         """Go and look for what would end her strongest beliefs, before attacking them.
 
@@ -2167,6 +2198,8 @@ class LearningLoop:
             self.totals["goals_reached"] += rep.goals_reached
             self.totals["beliefs_hunted"] += rep.beliefs_hunted
             self.totals["beliefs_falsified"] += rep.beliefs_falsified
+            self.totals["stages_proposed"] += rep.stages_proposed
+            self.totals["metrics_at_best"] += rep.metrics_at_best
             self._sync_plan_totals()
             self.totals["cognitive_rewires"] += rep.cognitive_rewires
             self.totals["evolution_trials"] += rep.evolution_trials

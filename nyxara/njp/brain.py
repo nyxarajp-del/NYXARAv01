@@ -387,6 +387,9 @@ class NJPBrain:
         # After `beliefs`, whose claims it hunts, and after `universe`; it also reads `grounder`
         # and `world`, both built well above. A killer with no ledger has nothing to go after.
         self.killer = self._build_killer(c)
+        # After `curriculum` is *defined* but read lazily — the generator holds the same stage
+        # list and reads `brain.stats()`, so it needs no organ handed to it at construction.
+        self.proposer = self._build_proposer(c)
         # The subsystem that attacks what the ones above it conclude. After `world`, `universe`
         # and `beliefs`, because every one of its four attacks is settled against one of them —
         # an adversary with nothing to check against is a generator of rhetorical questions.
@@ -658,6 +661,21 @@ class NJPBrain:
             from nyxara.njp.curiosity import Curiosity
             return Curiosity(self, min_value=self._cfg("curiosity_min_value", 0.05))
         except Exception:  # noqa: BLE001 — she answers what she is asked and wonders nothing
+            return None
+
+    def _build_proposer(self, c: Any) -> Any:
+        """The rung she is not on, proposed from measured weakness rather than read off a list.
+
+        The ladder in :mod:`nyxara.njp.curriculum` is fixed and walked in order, so one rung
+        blocked on a sample count pins the whole thing while later rungs are already mastered.
+        See :mod:`nyxara.njp.propose`.
+        """
+        if not self._gate("propose", True):
+            return None
+        try:
+            from nyxara.njp.propose import StageGenerator
+            return StageGenerator(self)
+        except Exception:  # noqa: BLE001 — she works the fixed ladder, as before
             return None
 
     def _build_killer(self, c: Any) -> Any:
@@ -3983,6 +4001,7 @@ class NJPBrain:
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
                             ("rollout", self.rollout), ("falsify", self.killer),
+                            ("propose", self.proposer),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
@@ -4157,6 +4176,7 @@ class NJPBrain:
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
                             ("rollout", self.rollout), ("falsify", self.killer),
+                            ("propose", self.proposer),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent),
                             ("field", self.field), ("learner", self.learner),
@@ -4216,6 +4236,8 @@ class NJPBrain:
                 self.rollout.load_dict(d["rollout"])
             if d.get("falsify") and self.killer is not None:
                 self.killer.load_dict(d["falsify"])
+            if d.get("propose") and self.proposer is not None:
+                self.proposer.load_dict(d["propose"])
             if d.get("readout") and self.readout is not None:
                 self.readout.load_dict(d["readout"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):

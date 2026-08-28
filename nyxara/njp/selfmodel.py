@@ -313,8 +313,17 @@ class SelfModel:
         reliable = [c.name for c in self.capabilities.values() if c.reliable]
         untested = [c.name for c in self.capabilities.values()
                     if c.observations < _MIN_OBSERVATIONS]
+        weakest = self.weakest()
         return {"reliable": reliable, "weak": weak, "untested": untested,
-                "weakest": self.weakest().name if self.weakest() else None,
+                "weakest": weakest.name if weakest else None,
+                # The weakest measured level as a **number**, beside the name. Every other entry
+                # here is a name or a nested dict, and a curriculum rung is scored by reading one
+                # flat number out of an organ's stats block — so "how bad is her worst measured
+                # faculty" was a question this report could describe and not answer. A stage
+                # proposed against it would have been unevaluable, which is a worse failure than
+                # not proposing one.
+                "weakest_level": (round(weakest.level, 4) if weakest else None),
+                "measured": len(self.capabilities) - len(untested),
                 "capabilities": {n: c.to_dict() for n, c in self.capabilities.items()},
                 "state": dict(self.state), "updates": self.updates}
 

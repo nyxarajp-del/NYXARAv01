@@ -112,6 +112,27 @@ retracted rather than argued with. What was there before was a template that fil
 for every belief — so ``falsifiable`` was true of all of them and discriminated nothing — and
 nobody ever looked for what it named.
 
+**The rung she is on is proposed from what her own numbers say, not read off a list.**
+:mod:`nyxara.njp.curriculum` is nine fixed stages walked in order, and one rung blocked on a
+*sample count* pins the whole ladder while later rungs are already mastered — measured, five
+mastered and ``next_stage`` returning the same unworkable rung forever.
+:mod:`nyxara.njp.propose` reads her own published counters and proposes a rung that is not on the
+list: a metric that has fallen below a level she has personally reached, a stage that cannot be
+*judged* because the evidence for it does not exist yet, a capability her own posterior calls
+weak. **No source picks its own bar** — a proposal whose threshold is set relative to the current
+reading is a test written to be passed — and the generator never sees the held-out split, which a
+test enforces by parsing its imports rather than by trusting the docstring. The evaluator is the
+code that already scored the nine.
+
+**And when nothing she has explains a thing, a kind can be born.** :mod:`nyxara.njp.concepts`
+could always answer *"what is this, and if nothing, why not"*, and could always re-form the
+hierarchy around the answer; the only thing that ever asked was a prediction error that happened
+to be diagnosed conceptual. Now the store is scanned, and a concept caught **over-claiming** —
+promising an invariant one of its own members lacks — is split so the member is covered. Refused
+where the repair would be global: loosening what counts as kinship until an outlier fits cost
+compression and closed nothing when it was measured, so those gaps are found and reported and
+left alone.
+
 **Curiosity is priced by what closing a gap would let her compress.** Value of information says
 what rides on an answer; it cannot say that a region is *still yielding structure*.
 :mod:`nyxara.njp.progress` reads the two honest description-length ratios in this package as a
