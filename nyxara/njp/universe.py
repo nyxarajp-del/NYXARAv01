@@ -1096,11 +1096,28 @@ class InternalUniverse:
            well is a coefficient problem, and `observe` already refits every arrow on every
            observation — retiring for that would throw away structure to solve a problem that was
            already being solved.
-        3. **Somewhere to go.** At least one pair she is currently refusing to orient. Retiring a
-           model with nothing to replace it is how a system talks itself into amnesia.
+        3. **Somewhere to go.** At least one direction she inferred *for herself* whose reverse is
+           also fitted — see :meth:`retirable`. Retiring a model with nothing to replace it is how
+           a system talks itself into amnesia.
 
         Returns the version to retire, or ``None``. Deciding is separate from doing on purpose:
         the caller runs it through a held-out trial.
+
+        **Condition 3 used to read** ``if not self.ambiguous(): return None``, **and that made the
+        whole mechanism unreachable.** It is a circular dependency, and it was measured rather
+        than reasoned about: :meth:`ambiguous` reports pairs where *neither* direction is
+        oriented, :meth:`retire` un-orients the directions she inferred, and un-orienting an
+        inferred arrow whose reverse is fitted is the only thing anywhere in this package that
+        produces such a pair. So retirement was gated on a state only retirement could create.
+        Probed directly: a universe fed eight ordered readings orients the forward arrow
+        ``INFERRED`` and reports ``ambiguous: []``; retire it and ``ambiguous: [('p.x', 'p.y')]``;
+        restore it and the pair is gone again.
+
+        The intent of the condition survives the fix and only the quantity changes. "Somewhere to
+        go" is not "I already have an open question" — it is "giving this up would leave me a
+        question I can re-answer rather than a hole", and a pair whose reverse is fitted is
+        exactly that: both directions have the numbers to be re-derived from once the inference
+        is withdrawn.
         """
         try:
             version = self.compile().version
@@ -1110,11 +1127,42 @@ class InternalUniverse:
             fitted = [r for r in self.relations.values() if r.usable and r.oriented]
             if fitted and sum(r.r2 for r in fitted) / len(fitted) >= _REFIT_R2:
                 return None            # the arrows are fine; this is a coefficient problem
-            if not self.ambiguous():
-                return None            # nothing to become instead
+            if not self.retirable():
+                return None            # nothing of her own to give up
             return version
         except Exception:  # noqa: BLE001
             return None
+
+    def retirable(self) -> List[Tuple[str, str]]:
+        """Directions she inferred herself that she could give up and still re-answer.
+
+        Two requirements, and the second is what separates a question from a hole:
+
+        * the arrow is ``INFERRED`` — read off her own observations rather than told to her or
+          established by intervention. :meth:`retire` gives up exactly these, because testimony
+          and intervention did not come from the model under suspicion and discarding them would
+          be throwing away evidence to save a hypothesis;
+        * the **reverse** direction is fitted too. Withdrawing an inference whose reverse has no
+          numbers leaves nothing to re-derive from; withdrawing one whose reverse is fitted leaves
+          a genuine open question — the pair becomes Markov-equivalent again, which is precisely
+          the state :meth:`ambiguous` reports and :meth:`seed_ambiguities` turns into an
+          experiment.
+
+        This is the reachable half of what :meth:`ambiguous` describes: the pairs that *would*
+        become ambiguous, rather than the ones that already are.
+        """
+        out: List[Tuple[str, str]] = []
+        try:
+            for (cause, effect), relation in self.relations.items():
+                if relation.orientation != Orientation.INFERRED:
+                    continue
+                back = self.relations.get((effect, cause))
+                if back is None or not back.usable:
+                    continue
+                out.append((cause, effect))
+        except Exception:  # noqa: BLE001
+            return out
+        return out
 
     def retire(self, version: str, *, why: str = "") -> int:
         """Give up the directions this model inferred for itself. Archived, never deleted.

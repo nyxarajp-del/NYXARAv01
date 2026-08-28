@@ -140,7 +140,13 @@ def test_concepts_are_formed_and_claim_their_members(report):
 def test_belief_revision_actually_supersedes(report):
     """`_assert` does not revise — it is the bulk path — so the router calls `_revise` itself."""
     assert report.revisions_asked >= 3
-    assert report.supersedes == report.revisions_asked
+    # `supersedes` has two sources now and they are counted apart. `_clash` produces one by
+    # *noticing* a functional relation given two values; `grounder.correct` produces one because
+    # a `contradiction` pair **said** the second replaced the first — and that second route did
+    # not exist when this read `==`. Measured before it was added: eleven corpus pairs whose whole
+    # content is a correction, nought superseded, and both halves of every one of them live.
+    assert report.corrections >= 9
+    assert report.supersedes >= report.revisions_asked
 
 
 def test_hypotheses_are_proposed_and_resolved(report):

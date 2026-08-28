@@ -252,3 +252,68 @@ def test_planning_is_scored_on_the_taught_set():
     from nyxara.eval.capability import _DERIVED_FAMILIES
 
     assert "planning" in _DERIVED_FAMILIES
+
+
+# --------------------------------------------------------------------------- #
+# The revision family, and the control that proves it can fail
+# --------------------------------------------------------------------------- #
+def _corrected_brain():
+    """A brain taught one correction, through the path that states it as a correction."""
+    import os
+    os.environ.setdefault("NYXARA_NJP__EVOLVE_ENABLED", "false")
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.unified import absorb
+
+    record = {"id": "probe", "category": "contradiction", "domain": "astronomy",
+              "contradiction": [["deoxygenated blood is blue",
+                                 "deoxygenated blood is dark red"]]}
+    brain = NJPBrain()
+    absorb(brain, [record], check=False)
+    return brain, [record]
+
+
+def test_the_revision_probe_can_fail():
+    """Un-retire the claim and the row must collapse, or the probe is not reading anything.
+
+    ``revision`` reads 1.00 on the corpus, and a perfect row is the shape a tautological probe
+    takes. The control puts the retired claim back on the live shelf — which is exactly the
+    failure ``Grounder._revise`` names, *"she would announce the clash and keep answering with the
+    superseded fact"* — and requires the score to go with it.
+    """
+    from nyxara.eval.capability import _probe_revision
+
+    brain, records = _corrected_brain()
+    honest = _probe_revision(brain, records, "contradiction")
+    assert honest.asked == 1 and honest.answered == 1 and honest.correct == 1
+
+    for triples in brain.grounder.facts.values():
+        for triple in triples:
+            triple.superseded = False           # the correction is announced and not applied
+    broken = _probe_revision(brain, records, "contradiction")
+    assert broken.asked == 0 or broken.correct == 0, \
+        "the probe scored a store that kept answering with the retired claim"
+
+
+def test_the_revision_probe_reads_the_answer_not_the_flag():
+    """A probe that checked `superseded` would be checking that its own cause ran."""
+    import inspect
+
+    from nyxara.eval import capability
+
+    source = inspect.getsource(capability._probe_revision)
+    assert "_ask(" in source, "the probe must go through the read path"
+
+
+def test_revision_is_scored_on_the_taught_set():
+    from nyxara.eval.capability import _DERIVED_FAMILIES
+
+    assert "revision" in _DERIVED_FAMILIES
+
+
+def test_a_correction_retires_the_claim_it_replaces():
+    """The defect underneath the row: nought of eleven corpus corrections used to supersede."""
+    brain, _records = _corrected_brain()
+    objects = {t.object: t.superseded
+               for triples in brain.grounder.facts.values() for t in triples}
+    assert objects.get("blue") is True
+    assert objects.get("dark red") is False

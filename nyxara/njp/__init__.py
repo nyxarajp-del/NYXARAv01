@@ -93,6 +93,25 @@ each candidate experiment, the mutual information between the hypothesis set and
 experiment's outcome. An experiment every live hypothesis predicts identically scores exactly
 zero bits however interesting it looks, and she does not run it.
 
+**A model she keeps being surprised by can be given up, and giving it up is reversible.**
+:mod:`nyxara.njp.universe` counts surprises *per model version*, and retirement withdraws only the
+directions she inferred **for herself** — testimony and intervention came from outside the model
+under suspicion, and discarding them would be throwing away evidence to save a hypothesis. The
+whole trial is judged on a held-out fold and reverts on a tie. That mechanism and its caller both
+existed and the loop had never once run, because its own criterion was circular: it demanded a
+pair with neither direction settled, and withdrawing an inference is the only thing that produces
+one. It now asks whether there is anything of *hers* to give up, and the pair a retirement opens
+goes straight to :class:`~nyxara.njp.universe.ExperimentDesigner` as two rivals that predict
+differently under intervention — the one experiment that can break Markov equivalence.
+
+**And a belief carries what would end it, as something she goes and looks for.**
+:mod:`nyxara.njp.falsify` reads the falsifier off the claim's own shape and searches her own
+record for it: a functional relation already holding a different value, a cause that keeps
+occurring without its effect, an arrow established the other way. Found, and the belief is
+retracted rather than argued with. What was there before was a template that filled the field in
+for every belief — so ``falsifiable`` was true of all of them and discriminated nothing — and
+nobody ever looked for what it named.
+
 **Curiosity is priced by what closing a gap would let her compress.** Value of information says
 what rides on an answer; it cannot say that a region is *still yielding structure*.
 :mod:`nyxara.njp.progress` reads the two honest description-length ratios in this package as a

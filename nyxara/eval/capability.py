@@ -696,6 +696,85 @@ def _probe_planning(brain: Any, records: Sequence[Dict[str, Any]],
     return out
 
 
+#: Question forms whose ``Grounder._read_question`` output is exactly ``(subject, predicate)``.
+#: Taken from the same verified table ``scripts/prepare_knowledge_corpus.py`` maintains rather
+#: than invented here — an ad-hoc phrasing reads as a different question and scores a capability
+#: she has as one she lacks. Measured while building this probe: *"what is ulcers like"* returns
+#: nothing at all, and reporting that as a failure to revise would have been a measurement of my
+#: phrasing.
+_REVISION_ASKS: Dict[str, str] = {
+    "is_a": "What is {s}?",
+    "has_property": "What are the properties of {s}?",
+    "located_in": "Where is {s}?",
+    "capital": "Tell me the capital of {s}.",
+}
+
+
+def _probe_revision(brain: Any, records: Sequence[Dict[str, Any]],
+                    category: str) -> ProbeResult:
+    """After a correction, is the retired claim still what she says?
+
+    The surface had a row for what she knows and none for what she has *stopped* believing, and
+    those are different capabilities: a store that only ever accumulates answers every question
+    twice and calls it knowledge.
+
+    A derived family. What the corpus states is the ordered pair — *"this was believed, then
+    corrected"* — and what is never stated anywhere is which claim should come back when she is
+    asked. So the record has to be in the **taught** set for the correction to have happened at
+    all, and the answer is held out by construction rather than by the splitter.
+
+    **Scored on the read path, not on the store.** Checking that the superseded flag is set would
+    be checking that the line which sets it ran, and a probe that restates its own cause measures
+    nothing. What can independently fail is the half ``Grounder._revise`` names in its own
+    docstring: *"Detecting a contradiction and then leaving the old answer in place would be the
+    worst of both worlds — she would announce the clash and keep answering with the superseded
+    fact."* That is the failure this asks about, through ``brain.think``, exactly as a person
+    would meet it.
+
+    Marked wrong **only** when the retired claim comes back. An answer naming neither side is not
+    a revision failure — she may simply have no phrasing for the question — so it counts as
+    unanswered, and ``asked`` against ``answered`` keeps the two apart.
+    """
+    out = ProbeResult(family="revision", category=category)
+    grounder = getattr(brain, "grounder", None)
+    if grounder is None or not hasattr(grounder, "facts"):
+        return out
+    asked_about: Set[Tuple[str, str]] = set()
+    for record in records:
+        for pair in record.get("contradiction") or []:
+            if len(pair) < 2 or out.asked >= _MAX_PROBES:
+                break
+            # Find the claim this pair actually retired, in her own store.
+            for (subject, predicate), triples in list(grounder.facts.items()):
+                if (subject, predicate) in asked_about:
+                    continue
+                retired = [t for t in triples if getattr(t, "superseded", False)]
+                kept = [t for t in triples if not getattr(t, "superseded", False)]
+                if not retired or not kept:
+                    continue
+                template = _REVISION_ASKS.get(predicate)
+                if not template or _norm(subject) not in _norm(str(pair[0])):
+                    continue
+                asked_about.add((subject, predicate))
+                out.asked += 1
+                said = _norm(_ask(brain, template.format(s=subject)))
+                if not said:
+                    break
+                gone = _norm(str(getattr(retired[0], "object", "")))
+                alive = [_norm(str(getattr(t, "object", ""))) for t in kept]
+                # Substring both ways, because "planet" is inside "dwarf planet": the retired
+                # claim only counts as returned when nothing she kept explains the match.
+                returned = bool(gone) and gone in said and not any(
+                    gone in live and live in said for live in alive)
+                if returned:
+                    out.answered += 1
+                elif any(live and live in said for live in alive):
+                    out.answered += 1
+                    out.correct += 1
+                break
+    return out
+
+
 _FAMILIES = (
     ("recall", _probe_recall),
     ("relation", _probe_relation),
@@ -704,6 +783,7 @@ _FAMILIES = (
     ("generalization", _probe_generalization),
     ("inheritance", _probe_inheritance),
     ("planning", _probe_planning),
+    ("revision", _probe_revision),
     ("transfer", _probe_transfer),
     ("transition", _probe_transition),
 )
@@ -722,7 +802,7 @@ def _capped(result: ProbeResult) -> ProbeResult:
 #: record is load-bearing for its own probe, so a fair split had nothing left to withhold and the
 #: row vanished to `asked: 0`. They read the **taught** set, where the premises are, and the answer
 #: is held out by construction rather than by the splitter.
-_DERIVED_FAMILIES = frozenset({"generalization", "inheritance", "planning"})
+_DERIVED_FAMILIES = frozenset({"generalization", "inheritance", "planning", "revision"})
 
 #: Why there is no ``curiosity`` row here, and why adding one would be worse than the gap.
 #:
@@ -737,7 +817,7 @@ _DERIVED_FAMILIES = frozenset({"generalization", "inheritance", "planning"})
 #: test_compression_reward.py`` holds the question set fixed, moves only which organ is still
 #: yielding, and requires the top of the queue to change. That is an experiment with a control,
 #: which is more than a benchmark row would have been.
-_NO_KEY_FAMILIES = frozenset({"curiosity", "revision", "representation"})
+_NO_KEY_FAMILIES = frozenset({"curiosity", "representation"})
 
 
 def evaluate(brain: Any, held_out: Sequence[Dict[str, Any]], *,

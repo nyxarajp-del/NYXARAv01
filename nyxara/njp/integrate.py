@@ -176,6 +176,11 @@ class LoopReport:
     #: that fired. `goals_reached` counts the metric hitting its target, never "she acted".
     actions_taken: int = 0
     goals_reached: int = 0
+    #: Beliefs whose own falsifier was searched for in her own record, and the ones it found.
+    #: `beliefs_falsified` is the number that matters: a hunt that never kills anything is a
+    #: search for evidence that only ever confirms, which is the failure the mechanism is for.
+    beliefs_hunted: int = 0
+    beliefs_falsified: int = 0
     #: Imagined futures searched for a goal, and the ones reality has since graded. Reported as a
     #: pair on purpose: `plans_committed` is a number the planner can raise by being called, and
     #: `plans_settled` is one only a real reading can raise. A session where the first climbs and
@@ -351,6 +356,7 @@ class LearningLoop:
             "cognitive_rewires": 0, "evolution_trials": 0,
             "actions_taken": 0, "goals_reached": 0,
             "plans_committed": 0, "plans_settled": 0,
+            "beliefs_hunted": 0, "beliefs_falsified": 0,
             "index_measurements": 0, "index_regressions": 0,
             "deliberations": 0, "deliberation_objections": 0,
             "edits_attempted": 0, "edits_refused": 0,
@@ -1546,6 +1552,9 @@ class LearningLoop:
                 pass
 
         if turn % self.attack_every == 0:
+            self._hunt_falsifiers(rep)
+
+        if turn % self.attack_every == 0:
             try:
                 adversary = getattr(self.brain, "adversary", None)
                 if adversary is not None:
@@ -1835,6 +1844,30 @@ class LearningLoop:
             rep.index_scalar = vector.scalar
             rep.index_regressions = int(getattr(index, "regressions_found", 0) or 0) - before
         except Exception:  # noqa: BLE001 — an unread index is a missing number, never a failed turn
+            return
+
+    def _hunt_falsifiers(self, rep: LoopReport) -> None:
+        """Go and look for what would end her strongest beliefs, before attacking them.
+
+        Before the adversary rather than after, and the order is the point.
+        :meth:`~nyxara.njp.adversary.SelfAttacker.attack_strongest` *argues* against a claim from
+        the record; this *searches* for the specific observation the claim's own falsifier names.
+        A belief her own record already contradicts should not be argued about — it should be
+        gone before the argument starts, and the attacker's verdict on a claim that was already
+        dead is a verdict about nothing.
+
+        On the attack cadence rather than every turn, for the reason that cadence exists: the
+        strongest beliefs do not change between one turn and the next, and re-hunting the same
+        claim every turn is how a search becomes a counter.
+        """
+        try:
+            killer = getattr(self.brain, "killer", None)
+            if killer is None:
+                return
+            for verdict in killer.hunt():
+                rep.beliefs_hunted += 1
+                rep.beliefs_falsified += int(bool(verdict.retracted))
+        except Exception:  # noqa: BLE001 — a failed hunt kills nothing and breaks no turn
             return
 
     def _read_planner(self, rep: LoopReport) -> None:
@@ -2132,6 +2165,8 @@ class LearningLoop:
             self.totals["deliberation_objections"] += rep.deliberation_objections
             self.totals["actions_taken"] += rep.actions_taken
             self.totals["goals_reached"] += rep.goals_reached
+            self.totals["beliefs_hunted"] += rep.beliefs_hunted
+            self.totals["beliefs_falsified"] += rep.beliefs_falsified
             self._sync_plan_totals()
             self.totals["cognitive_rewires"] += rep.cognitive_rewires
             self.totals["evolution_trials"] += rep.evolution_trials

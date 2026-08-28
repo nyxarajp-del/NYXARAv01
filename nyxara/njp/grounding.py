@@ -2261,6 +2261,64 @@ class Grounder:
         except Exception:  # noqa: BLE001
             pass
 
+    def correct(self, superseded: Sequence[GroundedTriple],
+                by: Sequence[GroundedTriple], *, why: str = "corrected") -> int:
+        """Retire a claim because she was **told** it was wrong. Returns how many were retired.
+
+        Distinct from :meth:`_revise`, and the distinction is the whole reason this exists.
+        ``_revise`` settles a clash she *noticed*, and it can only notice one for a relation that
+        holds a single value — see :meth:`_contradicts`. That is the right rule for inference: a
+        thing may be both small and brown, and treating every repeated predicate as a conflict
+        would make ordinary accumulation look like a fight.
+
+        It is the wrong rule for a correction she was **given**. Measured on the corpus's own
+        eleven ``contradiction`` and ``knowledge_revision`` records — pairs whose entire content
+        is *"this was believed, and then it was corrected"* — **nought of eleven superseded**, and
+        she came out holding *"deoxygenated blood is blue"* and *"deoxygenated blood is dark red"*
+        as live facts side by side, along with *"pluto is a planet"* and *"pluto is a dwarf
+        planet"*. Both sides answerable, neither retired, and a category of the corpus that exists
+        to teach revision teaching accumulation instead.
+
+        The authority here is testimony, not a rule about predicates: the ordered pair says which
+        claim replaced which, and that is a thing she was told rather than a thing she worked out.
+        Both sides are still marked ``contested`` and the survivor still pays the contested
+        penalty, because a claim that has been corrected is genuinely less certain than one that
+        never was — the same discipline :meth:`_revise` applies, reached by a different route.
+        """
+        retired = 0
+        try:
+            winners = [t for t in (by or ()) if t is not None]
+            if not winners:
+                return 0
+            for triple in (superseded or ()):
+                if triple is None or triple.superseded:
+                    continue
+                # Never retire a claim on the strength of nothing but the *same* claim restated:
+                # a pair whose two halves ground to the same triple is not a correction, and
+                # superseding it would leave the subject with nothing live at all.
+                #
+                # "Nothing but", and the qualifier is load-bearing. A correction's own sentence
+                # routinely re-derives the claim it is replacing — *"pluto is a dwarf planet"*
+                # grounds to **two** triples, ``is_a dwarf planet`` and ``is_a planet``, because
+                # the extractor reads the head noun as well. Checking whether *any* winner
+                # restated the loser therefore skipped exactly the pair the corpus put there to
+                # teach revision. What matters is whether the correction said anything new; if it
+                # did, the claim it replaced goes.
+                if all(w.subject == triple.subject and w.predicate == triple.predicate
+                       and w.object.strip().lower() == triple.object.strip().lower()
+                       for w in winners):
+                    continue
+                triple.superseded = True
+                triple.contested = True
+                retired += 1
+            if retired:
+                for winner in winners:
+                    winner.contested = True
+                    winner.confidence = max(0.0, winner.confidence - _CONTESTED_PENALTY)
+        except Exception:  # noqa: BLE001 — an uncorrectable pair corrects nothing
+            return retired
+        return retired
+
     def _contradicts(self, triple: GroundedTriple) -> Optional[GroundedTriple]:
         """Does this clash with something already believed?
 

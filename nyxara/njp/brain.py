@@ -384,6 +384,9 @@ class NJPBrain:
         self.rollout = self._build_rollout(c)
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
+        # After `beliefs`, whose claims it hunts, and after `universe`; it also reads `grounder`
+        # and `world`, both built well above. A killer with no ledger has nothing to go after.
+        self.killer = self._build_killer(c)
         # The subsystem that attacks what the ones above it conclude. After `world`, `universe`
         # and `beliefs`, because every one of its four attacks is settled against one of them —
         # an adversary with nothing to check against is a generator of rhetorical questions.
@@ -655,6 +658,21 @@ class NJPBrain:
             from nyxara.njp.curiosity import Curiosity
             return Curiosity(self, min_value=self._cfg("curiosity_min_value", 0.05))
         except Exception:  # noqa: BLE001 — she answers what she is asked and wonders nothing
+            return None
+
+    def _build_killer(self, c: Any) -> Any:
+        """What would end what she is most committed to — and has it already happened?
+
+        Every belief carried a falsifier and every falsifier was true of everything, because one
+        template wrote all of them and nothing ever went looking for what they named. See
+        :mod:`nyxara.njp.falsify`.
+        """
+        if not self._gate("falsify", True):
+            return None
+        try:
+            from nyxara.njp.falsify import TheoryKiller
+            return TheoryKiller(self)
+        except Exception:  # noqa: BLE001 — her beliefs then only ever gain support, as before
             return None
 
     def _build_rollout(self, c: Any) -> Any:
@@ -3964,7 +3982,7 @@ class NJPBrain:
                             ("loop", self.loop),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
-                            ("rollout", self.rollout),
+                            ("rollout", self.rollout), ("falsify", self.killer),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
@@ -4138,7 +4156,7 @@ class NJPBrain:
                             ("attention", self.attention), ("readout", self.readout),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
-                            ("rollout", self.rollout),
+                            ("rollout", self.rollout), ("falsify", self.killer),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent),
                             ("field", self.field), ("learner", self.learner),
@@ -4196,6 +4214,8 @@ class NJPBrain:
                 self.curiosity.load_dict(d["curiosity"])
             if d.get("rollout") and self.rollout is not None:
                 self.rollout.load_dict(d["rollout"])
+            if d.get("falsify") and self.killer is not None:
+                self.killer.load_dict(d["falsify"])
             if d.get("readout") and self.readout is not None:
                 self.readout.load_dict(d["readout"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):

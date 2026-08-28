@@ -133,6 +133,11 @@ class CycleReport:
     restructure_gain: float = 0.0
     experiment: str = ""
     experiment_gain: float = 0.0
+    #: Rival hypotheses seeded from directions observation alone cannot settle. Reported apart
+    #: from `hypotheses` because these are a different kind of claim: not "this arrow may exist"
+    #: but "these two arrows are indistinguishable on everything I have, and exactly one
+    #: intervention tells them apart".
+    ambiguities_seeded: int = 0
     beliefs_touched: int = 0
     #: Clashes the grounder found and the ledger was told about. Zero here and zero because
     #: nothing ever contradicted are different findings.
@@ -330,6 +335,10 @@ class RecursiveCognitiveField:
         self._retire_cooldown: Dict[str, int] = {}
         self.retirements_tried = 0
         self.retirements_kept = 0
+        #: Rival pairs handed to the designer across the session. The falsifier for the
+        #: hidden-factor step: if this stays at zero the loop is wired and starved, which is the
+        #: state it was in before it had a caller at all.
+        self.ambiguities_seeded = 0
 
     # ================= LOOP 1 — the cognitive cycle ========================== #
     def cycle(self, thought: Any) -> CycleReport:
@@ -356,6 +365,7 @@ class RecursiveCognitiveField:
 
             rep.beliefs_touched = self._record_beliefs(thought, triples)
             rep.beliefs_contradicted = self._record_contradictions(thought)
+            self._seed_ambiguities(rep)
             self._design_experiment(rep)
 
             if self.concepts is not None:
@@ -799,10 +809,18 @@ class RecursiveCognitiveField:
                 # that it is true. Observing it herself is what raises it, through `support`.
                 parsed = float(getattr(triple, "confidence", 0.6) or 0.6)
                 confidence = min(parsed, EvidenceKind.WEIGHTS[EvidenceKind.TESTIMONY])
+                # One source for the sentence, and it is the same object
+                # :class:`~nyxara.njp.falsify.TheoryKiller` later searches for. The template this
+                # replaces built the string here and nothing anywhere could recover what it meant,
+                # so the record filled with *"an observation in which fire does not causes heat"*
+                # — a predicate is a relation name, not a verb — and with
+                # *"an observation in which plant does not water 2"*, which names nothing at all.
+                # A falsifier the searcher cannot parse is a falsifier nobody will ever look for.
+                from nyxara.njp.falsify import Falsifier
                 self.beliefs.hold(
                     claim, confidence=confidence, domain=self._domain_of(predicate),
                     produced_by="grounding",
-                    falsifier=f"an observation in which {subject} does not {predicate} {obj}".strip(),
+                    falsifier=Falsifier.of(claim).stated(),
                     why="grounded from the Master's statement")
                 self.beliefs.support(claim, EvidenceKind.TESTIMONY,
                                      detail=str(getattr(triple, "text", ""))[:120],
@@ -824,6 +842,31 @@ class RecursiveCognitiveField:
         return "general"
 
     # ---- curiosity as information gain -------------------------------------------- #
+    def _seed_ambiguities(self, rep: CycleReport) -> None:
+        """Hand every direction observation cannot settle to the experiment designer.
+
+        :meth:`~nyxara.njp.universe.InternalUniverse.seed_ambiguities` is the wiring for the whole
+        hidden-factor step and **it had no caller anywhere in the package** — universe.py defined
+        it, one test exercised it, and nothing in a running brain ever invoked it. Its own
+        docstring says what it is for: a pair that fits both ways is not a gap in the data, it is
+        a question observation is *structurally* unable to answer, and stating it as two rivals is
+        what makes the designer's information gain over the pair non-zero.
+
+        Called here rather than on its own cadence because this is where the designer is already
+        being fed, and because the pairs it reads only exist for part of a session:
+        :meth:`~nyxara.njp.universe.InternalUniverse.ambiguous` is empty while every direction is
+        either asserted or inferred, and fills the moment a retirement withdraws an inference. So
+        the seeding has to run *after* retirement can have happened, on the same cycle, or the one
+        window in which there is anything to seed is the one window nothing looks.
+        """
+        if self.designer is None or self.universe is None:
+            return
+        try:
+            rep.ambiguities_seeded = int(self.universe.seed_ambiguities(self.designer))
+            self.ambiguities_seeded += rep.ambiguities_seeded
+        except Exception:  # noqa: BLE001 — an unseedable pair is simply not seeded
+            return
+
     def _design_experiment(self, rep: CycleReport) -> None:
         if self.designer is None:
             return
@@ -1440,6 +1483,11 @@ class RecursiveCognitiveField:
             "retirements_kept": self.retirements_kept,
             "retirements_cooling": len([v for v, n in self._retire_cooldown.items() if n > 0]),
             "experiments_designed": self.experiments_designed,
+            # Directions observation alone cannot settle, handed over as rival hypotheses. Zero
+            # for most of a session by construction — it fills only once a retirement has
+            # withdrawn an inference — so a non-zero reading is the evidence the whole chain
+            # ran: surprise → retirement → ambiguity → experiment.
+            "ambiguities_seeded": self.ambiguities_seeded,
             "surprises": self.surprises,
             "errors": dict(self.errors_diagnosed),
             "samples": len(self._samples), "holdout": len(self._holdout),
