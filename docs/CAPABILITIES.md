@@ -992,8 +992,14 @@ never showed her, with the same attempt budget on both sides:
 
 | | cold | taught |
 |---|---|---|
-| families she can write | **29 / 65** | **65 / 65** |
+| families she can write | **37 / 65** | **65 / 65** |
 | median attempts | — | 26 |
+
+Ten of those cold solves are **invented**: `Coder.invent` runs when nothing she holds fits, and
+builds a program out of the operator grammar by bottom-up enumeration with observational-
+equivalence pruning — the bank holds behaviours rather than expressions, so two terms that agree
+on the witness inputs collapse to one. It raised the cold baseline from 29 to 37 and left the
+taught number untouched at 65/65, because there recall answers first.
 
 **The syllabus is nineteen subjects now** — six of reasoning, thirteen of coding: reading, tracing,
 one-operator programs, composed ones, loops, recursion, mappings, strings, nested data, the classic
@@ -1038,6 +1044,12 @@ failure with all fifty-four taught shapes in hand.
 | says what happened inside it (trace) | **30 / 30** |
 | repairs it after one node is corrupted | **21 / 24** |
 | **invents it from examples alone** | **1 / 28** |
+
+That last row did **not** move when `Coder.invent` was added, and the fact is worth more than the
+improvement would have been: invention raised the cold baseline on the ordinary families from
+29/65 to 37/65 and changed the hard set by nothing at all — 1/28 before, 1/28 after. It composes
+expressions; every problem on this list needs a loop with a carried state, and that is a different
+space which no budget over this one reaches.
 
 The single cold solve is `permutation_count`, and only because *n!* is the factorial shape she was
 already taught. Nothing genuinely new was invented, and that is the honest ceiling: synthesis is

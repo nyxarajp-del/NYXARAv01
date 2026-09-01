@@ -68,10 +68,19 @@ then one hole swept while the others hold. That is what a family *is* — the sa
 constants moved — so transfer between two instances of one costs tens of attempts rather than tens
 of thousands.
 
+**And a shape nobody ever showed her is now buildable rather than unreachable.**
+:meth:`Coder.invent` runs when nothing she holds fits: bottom-up enumeration over the operator
+grammar, pruned by observational equivalence. It composes *expressions* — a fold over a filtered
+map, an index into a sort — and it does not compose an algorithm with a loop and a carried state.
+
 Measured over the sixty-five families in :mod:`nyxara.njp.tasks`, on instances the teacher never
-showed her and with the same attempt budget on both sides: **29 of 65 untaught, 65 of 65 taught**,
-median 26 attempts. That is the whole acquisition claim, and :mod:`nyxara.njp.school` re-measures
-it rather than quoting it.
+showed her and with the same attempt budget on both sides: **37 of 65 untaught, 65 of 65 taught**,
+median 26 attempts, ten of the untaught solves built from the grammar outright. Measured over
+thirty classic hard algorithms she was never taught — edit distance, Dijkstra, KMP, N-Queens —
+invention changed nothing at all: **1 of 28 before it and 1 of 28 after**, because every one of
+those needs the thing it cannot build. It moved the shape of the ceiling; it did not remove it.
+:mod:`nyxara.njp.school` and ``tests/njp/test_unseen_hard.py`` re-measure both rather than
+quoting them.
 
 Pure standard library. No LLM anywhere in the path.
 """
