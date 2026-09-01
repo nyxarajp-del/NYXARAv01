@@ -347,6 +347,24 @@ from nyxara.njp.core import (
     Transitivity,
 )
 from nyxara.njp.curriculum import STAGES, Curriculum, Report, Stage, StageResult
+from nyxara.njp.coding import (
+    Check,
+    CodeError,
+    Coder,
+    Demonstration,
+    Example,
+    Interpreter,
+    Learned,
+    Program,
+    Schema as CodeSchema,
+    Spec,
+    Written,
+    read_python,
+)
+# `nyxara.njp.school` is deliberately NOT imported here. It carries a `__main__` entry point, and
+# a module that a package's `__init__` has already imported emits a RuntimeWarning about
+# unpredictable behaviour when it is then run with `python -m`. `nyxara.njp.study` is kept out for
+# the same reason; `NJPBrain.go_to_school` is the in-process entry point.
 from nyxara.njp.predictive import (
     Assumption,
     Explanation,
@@ -434,4 +452,7 @@ __all__ = [
     # NJP V.15 — §7 goal → plan → action → outcome, and §19 eight specialists over one claim
     "CognitiveAgency", "Goal", "Affordance",
     "CognitiveSociety", "Role", "Case", "Contribution",
+    # NJP V.16 — she writes programs, and the machine, not her confidence, decides if they run
+    "Coder", "Spec", "Program", "Example", "Demonstration", "Written", "Check", "Learned",
+    "CodeSchema", "Interpreter", "CodeError", "read_python",
 ]

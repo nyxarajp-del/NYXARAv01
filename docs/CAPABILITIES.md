@@ -869,6 +869,318 @@ rather than letting a fallback babble in her name. `nyxara.njp.prove` is the pro
 sympy) — it returns a verdict only where a claim is formally expressible and reports
 `INEXPRESSIBLE` otherwise, which is the most-tested behaviour in the file.
 
+### NJP V.16 — she writes programs, and she is examined on what she was never taught
+
+Two organs, and one measurement that ties them together.
+
+**`nyxara.njp.coding` — the programming faculty.** Between the calculator (which closes an
+expression), the proof core (which certifies a proposition) and the forge (which lowers *her own*
+already-written Python to C) there was nothing that took a description of what a program should do
+and produced one. This is that, and it is narrow in four ways that are each a refusal:
+
+* **Nothing is ever `eval`ed or `exec`ed.** A program is a term tree over a fixed operator table and
+  runs in her own interpreter. Python source enters only through `read_python`, which walks
+  `ast.parse` output and raises on any node outside a whitelist — `__import__('os').system(...)` is
+  a parse-time refusal, not a shell command. The accepted set is enumerated, not the rejected one,
+  so a new Python node type cannot quietly widen it.
+* **Every program halts.** There is no open recursion; iteration is `map`/`filter`/`fold` over a
+  finite sequence, under a hard step budget counted in evaluated nodes rather than seconds, so a
+  result is reproducible across machines.
+* **A program is never believed, only executed.** `Coder.write` returns a program only if it
+  reproduces *every* shown example, and returns nothing at all otherwise. There is no best-effort
+  return: a program that nearly works is a wrong one that cost more to find out about.
+* **A lesson leaves a shape, never an answer.** `Coder.learn` verifies a demonstration by running
+  it, throws the program away, and keeps the skeleton with its constants and inner functions
+  blanked — `sum(map(double, filter(even, xs)))` is retained as `sum(map(?f, filter(?p, #0)))`.
+  That is §17's *"behaviour ko structured knowledge/programs mein convert karna"* on the one kind
+  of claim that can be checked mechanically.
+
+She also reads code (`read_python`), traces it step by step (`trace`), explains it in a sentence
+(`explain`), and debugs it (`repair` — one edit at a time, and the fix has to run on the held-out
+pairs before it counts).
+
+**`nyxara.njp.school` — the syllabus, taught and then examined.** Eleven subjects in a fixed order:
+six reasoning (arithmetic, composition, inheritance, mixed-relation shapes, abstention, depth) and
+five coding (reading, basics, composites, debugging, transfer). Every subject is **pre-tested**
+before it is taught and post-tested on freshly minted items, so what is reported is the floor, the
+gain and the rounds it took — never the final number alone. Reasoning items use generated nonsense
+vocabulary that has never been uttered, and coding items are held-out specs whose shape was
+demonstrated on a different task with different constants. Abstention is a first-class outcome:
+half the items are controls she is *supposed* to refuse, and on those, silence scores as right.
+
+Run it: `python -m nyxara.njp.school --rounds 2 --retention`, or `NJPBrain.go_to_school()`.
+The evolver and the pulse are switched off under exam conditions, and the reason is not
+performance: `evolve_every_s` is 300, a full syllabus takes longer than that, and an unconfigured
+brain part-way through starts `growth.self_optimize.Optimizer`, which benchmarks and **edits the
+package's own source** while the next subject is being graded. The thing under test must not change
+during the test.
+
+**What the run actually reports** (seed 7, two rounds — reproducible):
+
+| | taught | teacher off, fresh items |
+|---|---|---|
+| subjects mastered | 11 / 11 | 11 / 11 |
+| right / wrong / abstained | 107 / 0 / 3 | 109 / 0 / 1 |
+| accuracy · precision | 0.97 · 1.00 | 0.99 · 1.00 |
+
+Two subjects moved because a lesson ran, and both are gains on material that was never taught:
+
+* **`depth` 0.33 → 1.00.** A four-hop chain fails cold for two independent reasons — the per-hop
+  confidence falls under `core._MIN_LINK_CONFIDENCE` because an unproven relation's transitivity
+  prior is low, *and* `CognitiveLearningCore.max_depth` refuses to extend the walk. Distilling
+  verified demonstrations over entities the exam never sees moves the first; the second is a
+  budget, raised by one only once the posterior is earned and **rolled straight back if the
+  controls go soft**. Chains that do not exist stayed silent at every stage.
+* **`code-composites` 0.17 → 1.00 (0.83 in the run, 1.00 retained).** Grafting off and an identical
+  attempt budget on both sides, so the only difference between the two numbers is which shapes she
+  holds. She can still *invent* a composite by grafting primitives — measured at 6005 attempts
+  against 10 for the same task once the shape is known, which is what a lesson buys: search.
+
+**Three bugs the school found in the brain, all fixed.** This is the argument for having one.
+
+1. Asked *"what is 25 + 10?"* after a few similar turns she answered **10**. Every organ behaved:
+   the deliberation ladder settled on a token the question contained, marked it decided, and the
+   meta-reasoner — which learns its ordering from outcomes, so a prior does not decide it — took
+   that ahead of `calculate`. Now a question the calculator can *close* gets no guess offered
+   against it at all. (`brain._closed_arithmetic`.)
+2. Teaching a relation to chain also minted `shape:p>p>p` in the genome, which was promoted as a
+   rival arm **pinned at three hops** and shadowed the general composition walk on every four-hop
+   question — so the lesson worked and the report said it had not. A shape of one predicate
+   repeated is transitivity, `_strategy_compose` already owns that walk at any length, and it is
+   no longer promoted. (`core.walk_shape` says which of the two owns it.)
+3. Taught schemas were tried ahead of seeded ones whatever they cost, so every two-hole composite
+   was enumerated in full before the zero-hole seed that answers `sum(xs)` in one attempt —
+   `code-basics` fell from 1.00 to 0.50 on tasks it had just aced. Learning a hard thing had made
+   an easy thing time out. Cost now leads the ranking; within a cost tier the taught shape still
+   leads.
+
+### NJP V.17 — the language grows, and the syllabus grows with it
+
+V.16 taught her a first-course *expression* language. She could read a loop and not write one,
+could not name a function inside itself, and had no mappings, no sets and no local variables.
+That is now closed, and closed on both sides — what she can run, and what she is examined on.
+
+**The language.** Integers, booleans, strings, lists, mappings, sets and `None`. Arithmetic,
+comparison (chained included), the boolean connectives, `in`/`not in`, `is None`. Indexing,
+slicing, the container operations, `map`/`filter`/`fold` and the rest of the higher-order
+vocabulary. Local variables, `if`/`elif`/`else`, `for` with tuple unpacking, `while`, `break`,
+`continue`, parallel assignment (`a, b = b, a % b`), subscript assignment, and **functions that
+call themselves or each other**. `read_python` takes list, dict and set comprehensions, f-strings,
+`sorted(…, key=…)`, `.append()`, and the rest of what a person actually writes.
+
+**Every program still halts, and it is now a budget that makes that true rather than a missing
+feature.** `while True` is something she can write; what she cannot do is run it forever. The step
+counter and the call-depth counter turn non-termination into an `Exhausted` rather than a hung
+process, and the depth limit sits deliberately *below* CPython's own — one level costs about ten
+host frames, so a budget set higher is never reached and the interpreter dies of a `RecursionError`
+that is not a `CodeError` and escapes every guard the searcher has.
+
+**One deliberate divergence from Python, and it is listed rather than discovered.** Containers here
+are values: `xs.append(v)` reads as `xs = xs + [v]` and `d[k] = v` as `d = {**d, k: v}`. For the
+accumulator idiom that is the same answer; for two names pointing at one object it is not. A second
+divergence is smaller and argued for in `_int`: `True + 1` is an error here where Python says `2`,
+because a predicate leaking into arithmetic returns a *plausible wrong number* instead of failing —
+the one outcome a verifier that works by running the program cannot catch. Both are in
+`tasks.EDGE_CASES`, so they stay decisions rather than defects nobody remembers making.
+
+**What teaching buys, measured.** A shape she has been shown is reached three ways before
+enumeration begins: the exact fillings that stood in it before, the same operators with different
+constants, then one hole swept while the others hold. That is what a *family* is — the same
+skeleton with the constants moved — so transfer between instances costs tens of attempts instead
+of tens of thousands. Over the sixty-five families in `nyxara.njp.tasks`, on instances the teacher
+never showed her, with the same attempt budget on both sides:
+
+| | cold | taught |
+|---|---|---|
+| families she can write | **37 / 65** | **65 / 65** |
+| median attempts | — | 26 |
+
+Ten of those cold solves are **invented**: `Coder.invent` runs when nothing she holds fits, and
+builds a program out of the operator grammar by bottom-up enumeration with observational-
+equivalence pruning — the bank holds behaviours rather than expressions, so two terms that agree
+on the witness inputs collapse to one. It raised the cold baseline from 29 to 37 and left the
+taught number untouched at 65/65, because there recall answers first.
+
+**The syllabus is nineteen subjects now** — six of reasoning, thirteen of coding: reading, tracing,
+one-operator programs, composed ones, loops, recursion, mappings, strings, nested data, the classic
+algorithms, debugging, the awkward inputs, and transfer with the teacher off. Every writing subject
+is the same class over a different bank, so none can be graded more kindly than another by
+accident, and every one is scored on **held-out** pairs.
+
+`python -m nyxara.njp.school --rounds 2 --retention`, seed 7:
+
+| | taught | teacher off, fresh items |
+|---|---|---|
+| subjects mastered | 19 / 19 | 19 / 19 |
+| right / wrong / abstained | 438 / 3 / 3 | 438 / 1 / 5 |
+| accuracy · precision | 0.99 · 0.99 | 0.99 · **1.00** |
+
+Nine subjects moved because a lesson ran: `depth` 0.33→1.00, `mappings` 0.12→1.00, `algorithms`
+0.30→1.00, `code-composites` 0.25→0.88, `strings` 0.25→0.88, `loops` 0.50→1.00, `recursion`
+0.62→1.00, `structures` 0.71→1.00, `code-basics` 0.88→1.00. The other ten read 1.00 or near it
+cold and are printed as `already`.
+
+**Four more bugs the school found, all fixed.** A list comprehension over a set gave back the set
+rather than a list. `_kind_of` returned `"any"` for every mapping, which pruned the function pool
+down to the identity and made every dictionary task unreachable. `abstract` blanked the empty list
+that *builds* a literal, turning `[] + [b]` into a hole no pool could fill — seventeen of
+sixty-five families were unwritable that way, every one of them already taught. And a bare
+statement the reader did not understand was silently dropped rather than refused, so a program
+containing one was read as a different program.
+
+### What she does with a problem she was never taught
+
+Thirty classic hard algorithms, none of them resembling any of the sixty-five families she was
+taught: edit distance, LCS, LIS, knapsack, coin change, subset sum, word break, N-Queens,
+Dijkstra, topological sort, union-find, KMP, regex matching, longest palindromic substring,
+longest valid parentheses, minimum window, trapping rain water, median of two sorted arrays,
+largest rectangle in a histogram, merge intervals, determinants, Josephus, Catalan, Pascal, convex
+hull, sudoku validity, inversions. She is given the **whole curriculum first**, so a failure is a
+failure with all fifty-four taught shapes in hand.
+
+| | |
+|---|---|
+| reads it and gives the right answer | **76 / 76** |
+| says what happened inside it (trace) | **30 / 30** |
+| repairs it after one node is corrupted | **21 / 24** |
+| **writes it from examples alone, cold** | **25 / 28** |
+
+That last row was **1 / 28** when it was first measured. How it moved matters more than where it
+got to, and the honest version of the story has a failure in the middle of it.
+
+**Adding `Coder.invent` moved it by nothing.** Bottom-up enumerative synthesis with
+observational-equivalence pruning raised the cold baseline on the ordinary families from 29/65 to
+37/65 and changed the hard set from 1/28 to 1/28 — not a rounding, the identical single problem.
+It composes *expressions*, and `sum(map(f, filter(p, xs)))` is an expression while
+`for i: for j: if xs[i] > xs[j]: n += 1` is not.
+
+**Skeletons with a carried variable took it to 4 / 28, and skeletons carrying a table to 16 / 28.**
+`Coder.compose` fills an imperative skeleton — a loop, an accumulator, a test, an update, with a
+**scope** attached to each hole so `xs[i]` is only offered inside a loop that has an `i`.
+
+**Skeletons for the control structures still missing took it to 25 / 28** — a relaxation fixpoint,
+a window judged by a scan of its own, a monotonic stack, a worklist that peels, a backtracker, a
+grid read along both axes, cofactor expansion, a two-cursor matcher. Thirty skeletons in all.
+
+### The result that matters more than the twenty-five
+
+Twenty-eight problems were the ones being measured *while the skeletons were being written*. A
+skeleton written until a bank goes green is fitted to that bank however carefully its docstring is
+phrased. So a **second bank was written afterwards** — twenty-five more hard problems from a
+different corner of the subject, chosen with the skeletons already finished — and measured once.
+
+| second bank, chosen after the skeletons existed | |
+|---|---|
+| reads it and gives the right answer | **70 / 70** |
+| **writes it from examples alone, cold** | **0 / 21** |
+
+Not one. Twenty-one abstentions out of twenty-one. The safety property held perfectly and the
+generalisation claim did not exist: 25/28 was a list of answers.
+
+### What was done about it, and what that bought
+
+The response was deliberately **not** twenty-one more skeletons. Reading what actually blocked each
+problem, the same two gaps came up over and over, and neither was a missing pattern:
+
+* a loop may carry **more than one variable, updated together** — `take, skip = skip + x,
+  max(skip, take)` reads the old value of both on the right-hand side, and no number of one-variable
+  skeletons expresses it;
+* a table may be laid over a **grid** rather than over a sequence — indexed by the grid's own rows
+  and columns, each cell reading the one above, the one to its left, and the one diagonally back.
+
+Those are **axes** of skeletons that already existed. The fillings for them are enumerated over the
+live scope and collapsed by behaviour — the same observational-equivalence pruning `invent` uses,
+applied to a hole instead of to a whole program — rather than written out by hand.
+
+| | first bank | second bank |
+|---|---|---|
+| before the two axes | 25 / 28 | **0 / 21** |
+| after the two axes | 25 / 28 | **6 / 21** |
+
+Six is not a triumph and it is not presented as one. What makes it worth reporting is that one of
+the six — `binary_search_position` — is a problem **neither axis was designed for**; it falls out
+of "two variables updated together in a loop" the same way the two that were. That is the only
+kind of evidence that separates a capability from a lookup table, and it is why the axes stay and
+why the answer to the remaining fifteen is more axes rather than more skeletons.
+
+### What she still cannot write, named
+
+On the first bank, three: `dijkstra` (she composes correct Bellman–Ford on the hand-written
+instance; the benchmark's *generated* instances are malformed graphs — an edge leaving node six of
+a four-node graph — which the reference tolerates only because its own loop never looks at that
+edge, so nothing correct reproduces it), `connected_components` (an earlier expression-level pass
+fits the shown pairs first; the fixpoint skeleton finds the right program when asked directly), and
+`median_two_sorted` (genuinely underdetermined — several programs fit every pair shown).
+
+On the second bank, fifteen, and each names a control structure that is still missing: a stack
+whose pops consult a mapping, a sieve with a strided inner range, a triple-nested scan, a set
+grown to a fixed point, a string built by walking an index up and back down, a breadth-first
+frontier.
+
+**Two oracle-free tie-breaks were tried on the underdetermined cases and both failed**, which is
+worth recording because both sound like they should work. *Consensus* — prefer the behaviour most
+fitting candidates agree on — just counts redundant fillings, and picked the wrong program for
+Josephus. *Stability* — prefer the candidate that survives dropping any one shown pair — called
+Josephus's wrong answer stable and edit distance's **right** answer unstable. With two or three
+examples these problems are underdetermined and no tie-break invented after the fact fixes that;
+the honest answer is more examples.
+
+**Two bugs in the measurement itself, both found and fixed.** A candidate that ran out of step
+budget was scored identically to one shown wrong — so the exactly correct N-Queens backtracker was
+rejected for being expensive, twice: once in search and once in the held-out check. And the
+benchmark's input generator invented integers freely *inside* structures, producing graph
+instances the problem does not have. Neither was a limit of hers.
+
+### What the axes cost
+
+They are not free and the price is reported rather than buried. More search power is more chances
+to fit a coincidence: on the 444-item syllabus one basics item now comes back as a program that
+fits the shown pairs and fails held-out, taking `code-basics` from 1.00 to 0.88 in the taught
+round — 438 right, 4 wrong, 2 abstained, precision 0.99, and 1.00 again on the retention run.
+And the syllabus went from four minutes to over twenty until `compose` was bounded by **evaluated
+nodes** rather than by candidates counted: a fold over three elements and a nested loop over
+thirty are one candidate each and a thousandfold apart in cost, so counting candidates bounds
+nothing that matters. With the step bound it runs in seven minutes and every measured win
+survives.
+
+The safety property is unchanged and is the one asserted, on both banks: what she cannot write,
+she **abstains** from. Across every sweep, at 0/21 and at 25/28 alike, every program she wrote
+cold passed the held-out pairs. Not knowing shows up as silence, never as a wrong program.
+
+
+**Shown one worked solution, though, she keeps it.** The inputs are generated once and split — the
+first half demonstrates, the second half examines, and no input appears in both:
+
+| | |
+|---|---|
+| shown once, then asked on unseen data | **22 / 24** |
+| never shown, same budget, same shapes | **5 / 24** |
+
+Edit distance, three attempts after a single demonstration, `kitten` → `sitting` = 3. Dijkstra,
+KMP and the regex matcher likewise. This is retention and reapplication of a shape from one
+demonstration; it is *not* generalisation to a different variant, which is the separate claim the
+school measures over instances that differ.
+
+**Two bugs this found, both fixed.** `min(a, b, c)` was refused past two arguments — the
+expression at the centre of edit distance, so the reader could not read dynamic programming at
+all. `range(n, -1, -1)` was refused — the backwards pass, which is the other half of it.
+
+**And two flaws in the benchmark itself, found and fixed before the numbers were believed.** Short
+example lists were padded by repeating rows, so the held-out set was a subset of the shown set and
+`trapping_rain_water` "solved" as `return n`; and the one-shot lesson and exam were built from the
+same inputs, so a solve in one attempt was the exact program recalled against the exact examples
+it was shown. Fixing the first took cold writing from 5/27 to 1/28; fixing the second took
+one-shot from 27/30 to 22/24. Both first numbers were wrong and neither is quoted.
+
+**What this is not.** No classes, no exceptions, no generators, no imports, no closures over
+mutable state, no shared mutation, no floats. Synthesis is enumeration over learned shapes under
+an attempt budget plus thirty imperative skeletons over two generalised axes, not a general
+program synthesiser. A shape needing a control structure none of them has is an abstention — and
+on a bank of hard problems chosen after the skeletons were finished that is **fifteen of
+twenty-one**, against three of twenty-eight on the bank they were written against. Both numbers
+are reported because only the pair of them says what the thing can do. Every one of
+those limits is reported as a number by the school rather than described here as a caveat.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,

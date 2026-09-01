@@ -427,6 +427,11 @@ class NJPBrain:
         # Held, not driven: the index reads its curve, a caller steps it deliberately.
         self.noesis = self._build_noesis(c)
         self.curriculum = self._build_curriculum(c)
+        # The programming faculty. Late, and dependent on nothing above it: a Coder holds shapes
+        # and an interpreter, and neither reads another organ. It is here rather than at the top
+        # because the gate should be able to switch it off without disturbing anything that runs
+        # before it.
+        self.coder = self._build_coder(c)
         # Truth is not relevance, and reasoning is not always what a turn calls for.
         self._speech, self._policy, self.gate = self._build_relevance(c)
         # Last, because it registers repairs against organs built above it and reads them on
@@ -1008,6 +1013,21 @@ class NJPBrain:
             for candidate in self.genome.candidates():
                 shape = tuple(candidate.shape)
                 if not shape or shape in liabilities:
+                    continue
+                if len(set(shape)) == 1:
+                    # A shape of one predicate repeated is transitivity, and `_strategy_compose`
+                    # already owns that walk at *any* length. Promoting it registers a second arm
+                    # that does the same thing at a **pinned** length, on the record the first arm
+                    # earned — so it outranks `compose` and then returns nothing the moment the
+                    # chain is one hop longer than the form that was promoted.
+                    #
+                    # Found by `njp.school`'s `depth` subject, and it looked like the teaching had
+                    # failed: after distillation `core.connects` derived a four-hop chain at 0.18
+                    # and `_strategy_compose` returned "yes" when called directly, while `think`
+                    # answered nothing and named `shape:p>p>p` as the arm it had used. Teaching had
+                    # worked perfectly; what it also did was mint a rival that could not do the
+                    # job. `core.walk_shape` says which of the two owns this: "a shape as
+                    # `njp.genome` records it is a sequence of *different* predicates".
                     continue
                 name = "shape:" + ">".join(shape)
                 if name in self.metareason.strategies:
@@ -1650,6 +1670,86 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_coder(self, c: Any) -> Any:
+        """The organ that reads a program, runs it, writes one from examples, and repairs one.
+
+        Everything else in this brain produces claims that carry a confidence and go to the
+        gauntlet. Code is the one thing here with a decision procedure attached — it runs on the
+        examples or it does not — so :mod:`nyxara.njp.coding` needs none of the organs above it
+        and none of them need to weigh what it returns.
+        """
+        if not self._gate("coder", True):
+            return None
+        try:
+            from nyxara.njp.coding import Coder
+            return Coder(max_attempts=self._cfg("coder_max_attempts", 20000),
+                         max_steps=self._cfg("coder_max_steps", 20000),
+                         graft=bool(self._cfg("coder_graft", True)))
+        except Exception:  # noqa: BLE001 — a brain that cannot program still thinks
+            return None
+
+    # ---- programming ------------------------------------------------------ #
+    def read_code(self, source: str) -> Any:
+        """Read a small piece of Python into a program she can run and explain.
+
+        Raises :class:`~nyxara.njp.coding.CodeError` on anything outside the reader's whitelist,
+        and that refusal is the security boundary rather than a limitation to be worked around:
+        what comes back is a term tree, and the only machine that runs a term tree is her own
+        interpreter.
+        """
+        from nyxara.njp.coding import read_python
+        if self.coder is None:
+            raise RuntimeError("the coding faculty is switched off")
+        return read_python(source)
+
+    def run_code(self, source: str, *args: Any) -> Any:
+        r"""Read it and run it on ``args``. Nothing is ever ``eval``\ ed or ``exec``\ ed."""
+        program = self.read_code(source)
+        return self.coder.run(program, args)
+
+    def trace_code(self, source: str, *args: Any) -> List[Any]:
+        """Every sub-expression with the value it took — the answer to "why does it print that"."""
+        program = self.read_code(source)
+        return self.coder.trace(program, args)
+
+    def write_code(self, spec: Any, *, attempts: Optional[int] = None) -> Any:
+        """Write a program that reproduces every shown example of ``spec``, or abstain.
+
+        There is no best-effort return. A program that nearly works is not a partial answer, and
+        the one thing this brain is built never to do is hand back something unverified as though
+        it were verified.
+        """
+        if self.coder is None:
+            return None
+        return self.coder.write(spec, attempts=attempts)
+
+    def learn_code(self, spec: Any, source: str) -> Any:
+        """Take a worked solution, verify it by running it, and keep only its shape.
+
+        The demonstrated answer is discarded. What is retained is the skeleton, which is what
+        applies to a task nobody demonstrated — the same rule :mod:`nyxara.njp.teacher` applies
+        to a demonstrated chain, on the one kind of claim that can be checked mechanically.
+        """
+        if self.coder is None:
+            return None
+        return self.coder.learn_python(spec, source)
+
+    def go_to_school(self, *, rounds: int = 1, seed: int = 7,
+                     subjects: Any = None) -> Any:
+        """Sit the reasoning and coding syllabus and come back with the report card.
+
+        Deliberately not driven by anything: like :meth:`report_card` this is run when somebody
+        asks for it. Teaching mutates her — it states facts, it moves a transitivity posterior,
+        and on one subject it raises a search budget — and a thing that mutates her is a thing a
+        caller should have to ask for by name.
+        """
+        try:
+            from nyxara.njp.school import School
+            return School(seed=seed, rounds=rounds, subjects=subjects).attend(
+                self, coder=self.coder)
+        except Exception:  # noqa: BLE001
+            return None
+
     def pursue(self, goal: Any, *, actuator: Any = None, steps: int = 4) -> Any:
         """Plan toward ``goal`` over the learned world model and act, re-planning each step.
 
@@ -2210,9 +2310,35 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — an uncompiled intervention is simply not simulated
             return {}
 
+    def _closed_arithmetic(self, problem: str) -> bool:
+        """Is this a question the calculator can *close*? Then no guess may answer it.
+
+        Found by :mod:`nyxara.njp.school`, and worth stating as the rule rather than as the fix:
+        asked ``"what is 25 + 10?"`` after a few similar turns she answered **10**. Every organ
+        behaved: the deliberation ladder settled on a token the question itself contained, marked
+        the conclusion decided, and the meta-reasoner — which learns its ordering from outcomes,
+        so a prior does not decide it — took that ahead of ``calculate``. A recalled token is a
+        plausible answer to an arithmetic question in exactly the way that is worst: it is a
+        number, it is in the right range, and it is wrong.
+
+        The rule the repo already holds is *verifiable beats probabilistic*, and this is that rule
+        applied one level earlier. A question with a decision procedure does not get a guess
+        offered against it at all — not weighed against it, not ranked below it, not offered.
+        ``_strategy_calculate`` closes the expression or returns ``None``, so when this reads true
+        there is an arm that cannot be wrong, and every other arm abstaining costs nothing.
+        """
+        try:
+            if self.calculator is None:
+                return False
+            return bool(self.calculator.evaluate(problem).ok)
+        except Exception:  # noqa: BLE001
+            return False
+
     def _strategy_ladder(self, problem: str, ctx: Dict[str, Any]) -> Any:
         try:
             if self.reasoner is None:
+                return None
+            if self._closed_arithmetic(problem):
                 return None
             conclusion = self.reasoner.reason(problem)
             # Honour the ladder's own refusal to commit. This path used to read the answer
@@ -4014,7 +4140,7 @@ class NJPBrain:
                             ("index", self.index),
                             ("society", self.society),
                             ("evolution", self.evolution),
-                            ("epistemic", self.epistemic)):
+                            ("epistemic", self.epistemic), ("coding", self.coder)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -4183,7 +4309,7 @@ class NJPBrain:
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),
                             ("compiler", self.compiler),
-                            ("epistemic", self.epistemic)):
+                            ("epistemic", self.epistemic), ("coding", self.coder)):
             if organ is None:
                 continue
             try:
