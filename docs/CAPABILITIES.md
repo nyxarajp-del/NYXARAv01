@@ -1431,15 +1431,218 @@ record, since that is evidence from outside the lessons.
 
 #### What this is not
 
+*(This was the state at V.18. The next section replaced the first three of these limits and
+measured what that bought; it is left standing here because the numbers above are the numbers a
+faculty with these limits produced.)*
+
 Not a parser for English. No dictionary, no syntax theory, no recursion into subordinate clauses;
 one construction is one flat sentence and a filler is one token, so a two-word noun phrase is
-unreadable rather than mis-cut. Affix induction is concatenative — suffixes and prefixes only, no
-stem changes, no infixes, no reduplication — so an irregular is a memorised pair and never a rule.
+unreadable rather than mis-cut. **Three roles**, so a clause with an agent, a theme and a
+recipient has nowhere to put the third. Affix induction is concatenative — suffixes and prefixes
+only, no stem changes, no infixes, no reduplication — so an irregular is a memorised pair and
+never a rule. A demonstration whose meaning is not in its surface is refused outright.
 Nothing here decides truth or relevance: it produces a `Meaning` and stops. Nothing drives it —
 no pulse, no evolver — because everything it learns comes from a demonstration, and a
 demonstration is something a caller makes rather than something a clock produces. And on a brain
 nobody has taught, every entry point returns the empty answer, which is the correct day-one
 behaviour rather than a gap being apologised for.
+
+### NJP V.19 — hard language problems, and what a bank is worth when it is written first
+
+V.18's language syllabus reads 84/84 across forty minted languages. That number is worth exactly
+as much as the bank behind it is hard, and the bank behind it was built alongside the faculty, so
+it can only ask for what the faculty was built to do. Every dialect in it is one flat clause with
+three arguments, a particle or two, and one suffix per feature.
+
+The coding half of this package already learned what that is worth, expensively: 25/28 on a bank
+written while the skeletons that solve it were being written, then **0/21** on a second bank
+chosen afterwards. *"25/28 was a list of answers."*
+
+So `nyxara.njp.hard` was written **first**, against a finished faculty, by looking for what it
+cannot do. Twenty-one problems, each naming a property of human language the module has no
+representation for, each minted per seed. Then measured, once, with nothing changed for it:
+
+| the finished V.18 faculty, on twenty-one problems chosen against it | |
+|---|---|
+| problems solved | **1 / 21** |
+| items | **35 / 278** |
+| readings that were confidently **wrong** | **0** |
+
+One. `ergative` — case marking chosen by whether the clause has an object — and it fell out of
+machinery written for something else. Everything else was a refusal: nine problems could not
+represent a fourth argument, six could not represent a morphological process that is not a suffix,
+and the rest could not compose two features or license an order nobody demonstrated.
+
+#### What was changed, and why it is four things rather than twenty-one
+
+The response was deliberately **not** twenty-one mechanisms. Reading what actually blocked each
+problem, the same four gaps came up over and over.
+
+**A · A construction binds any number of named roles.** `ROLES` was the literal tuple
+`("subject", "verb", "object")` — a statement about which sentences may exist. A clause with an
+agent, a theme *and* a recipient had nowhere to put the third; nor did one with a location, an
+adjective, a possessor, a coordinate subject, a relative clause or a complement clause.
+`Meaning.roles` is a dict now, a role name is whatever a demonstration called it, and there is no
+list of permitted ones — the same stance `concepts` and `core.represent` take about kinds.
+**1 → 9 solved on its own**, and it took `classifier` too, which was not among the nine.
+
+**B · A construction is a skeleton plus detachable markers.** A marker says *this affix, on this
+slot, means this feature has this value*. Markers of different dimensions attach independently, so
+three demonstrated cells license the fourth. Shown singular-present, plural-present and
+singular-past, a grammar made of whole shapes holds three and has no fourth — and it did not even
+refuse: the singular-past shape matched the plural-past sentence and read the plural ending as
+part of the subject's name. A family is folded into a paradigm only where its members differ in
+*one* piece of material carrying *one* feature; anything less separable is left alone, because
+which piece carries which feature is then a guess. A dimension **every** member marks is recorded
+as required, so a sentence lacking it is still refused. **9 → 15**, taking agreement, pro-drop,
+syncretism and double-marking together.
+
+**C · A morphological process is a shape, not a suffix.** `Morphology` induced prefixes and
+suffixes, which is a statement about which languages exist. Circumfixes, infixes, reduplication,
+partial reduplication and root-and-pattern templates were not mis-analysed, they were *invisible*
+— the word this repo used about Devanagari at NYX V.01 and about negation at V.09. Six shapes now,
+and the honesty is in how one is chosen: **a lesson proposes and the vocabulary corroborates.**
+`maran` → `mamaran` proposes both "prefix *ma*" and "copy the first syllable", and they are told
+apart not by taste but by the fact that the corpus contains `sotel` → `sosotel` and no `masotel`
+at all. A process that reaches no support is refused and kept as an irregular that never
+generalises. Allomorphs get a condition induced from the stems that corroborated each rule, and
+two rules whose stems overlap keep no condition, because that is a choice the evidence does not
+license. **15 → 21 on the first bank.**
+
+**D · Order is free where marking is not.** Shown a case-marked language in two of its six orders,
+she refused the other four. The precondition is checked rather than assumed: every slot must carry
+material distinct from every other slot's, and at most one may carry none. Then a token names its
+own role and order genuinely cannot change the meaning. A family with two unmarked slots gets
+nothing, because there the order is the only thing telling them apart.
+
+| the same twenty-one problems, after the four axes | |
+|---|---|
+| problems solved | **21 / 21** |
+| items | **278 / 278** |
+
+Over ten seeds — a different word order, different markers and different particles each time —
+**209 / 210 problems** and **2778 / 2780 items**. The single miss is `harmony` at one seed, and it
+is two *abstentions*: the stems that corroborated the front-vowel rule happened never to end in
+`i`, so a stem ending in `i` met neither rule's condition and she declined. That is the induction
+reporting the limit of its own evidence, which is what it is for.
+
+#### The measurement that decides whether any of that is real
+
+Twenty-one problems were the ones being measured while the axes were being written. So a **second
+bank was written afterwards** — fifteen more problems from a different corner of the subject,
+chosen with the axes already finished — and measured once.
+
+| second bank, chosen after the axes existed | |
+|---|---|
+| problems solved | **7 / 15** |
+| items | **108 / 191** |
+
+Seven, not fifteen, and that gap is the finding. It is also not zero, which is what separates this
+from the coding half's result on the same test: eight of the fifteen were solved by machinery
+written for something else. The one worth naming is **`apophony`** — *sing* / *sang*, a stem whose
+vowel changes with nothing added. Nobody wrote anything for it. It falls out of the root-and-
+pattern template, which was written for Semitic morphology, and it is the only kind of evidence
+that separates an axis from a special case.
+
+#### What the eight failures had in common, and the two axes that came out of them
+
+Again the answer was not eight mechanisms. The failures fell into exactly two shapes.
+
+**E · A process can be an edit at a position that can be named.** A plural made by *removing* the
+last letter, one made by *swapping* the last two, one made by writing the last vowel *twice*:
+0/6, 0/6 and 3/6, all abstentions, because every one of the six shapes above is about something
+added. Each of these is one edit at an anchor — the far end of the word, or its last vowel — so
+the same edit is proposed measured from each anchor and the vocabulary decides which the language
+uses. A deletion always one character from the right end is a rule; the same deletion measured
+from the left is a different offset in every word and corroborates nothing. An edit ranks *below*
+a plain affix that explains the same pair, because it is the most powerful shape here and so the
+most easily fitted to a coincidence.
+
+**F · A role remembers what has filled it.** Where a language says *denied* by moving the verb to
+the front, `s v o` and `v s o` are the same three tokens under two shapes that disagree, and she
+returned `ambiguous` to all of them — correctly, on the evidence she was using. The evidence she
+was **not** using is that the verbs of a corpus recur and its subjects do not. A reading that puts
+a word she has seen as a verb in the verb's place is better supported. It is evidence and never a
+gate: an unmet word is not barred from a role, it simply brings nothing to a tie.
+
+| second bank, after the two further axes | |
+|---|---|
+| problems solved | **14 / 15** |
+| items | **183 / 191** |
+
+Over ten seeds: **140 / 150 problems**, **1830 / 1910 items**, and the unsolved ten are all the
+same problem at every seed.
+
+#### The one it does not solve, named
+
+**`polypersonal`** — a verb marking both its arguments, neither of which is a word. She **reads
+every item correctly, 8/8**, and produces the two endings in the wrong order. Nothing in the
+lesson shows which comes first: each cell demonstrated one marker alone, so the stacking order is
+not in the evidence, and she guesses. Reading survives it because reading offers both orders and
+the sentence decides; production has to pick.
+
+This is also the only place in either bank where a miss is a **wrong answer rather than an
+abstention** — 8 items out of 469 — and it is worth naming because the round-trip check that
+guarantees the rest cannot catch it: she reads her own output back to the meaning she started
+from, so by her own standard the sentence is valid. The coding half established the verdict on
+this class already, on `median_two_sorted` and Josephus: *these problems are underdetermined, no
+tie-break invented after the fact fixes that, and the honest answer is more examples.*
+
+#### Seven flaws in the banks themselves, and who found them
+
+Every one was found from **her** side of the exam — by a refusal, or by a rejection notice —
+rather than by anybody inspecting the generator. Three were in V.18's minted dialects and four
+here.
+
+1. A wh-word ending in its own language's object-case marker: `<subject>gu <verb> nuza` is both
+   *"who does she V"* and *"she V's a nu"*. She answered `ambiguous` four times, correctly, and
+   was marked wrong for it.
+2. A verb stem drawn ending in the tense suffix **is** a past-tense verb by that language's rules,
+   so her past reading of the present sentence was not wrong.
+3. A subject-question that emptied both argument slots instead of the one being asked about, so
+   the object word sat in the surface with nothing accounting for it. Eight demonstrations, eight
+   signatures, every one rejected as *"one demonstration is a sentence, not a shape"* — the
+   rejection notices named the defect and nothing had to be guessed at.
+4. Grading production by exact string where the language's **order is free**: six surfaces say one
+   meaning and the grader accepted one, so a right answer was marked wrong 8/8 on the very problem
+   whose point is that order does not matter. It happened a second time, on the second-position
+   clitic, which is why it is recorded as a class rather than as an incident.
+5. A verb pool the same size as the cell count, so every demonstration of a cell used the same
+   verb and each shape was five copies of one sentence. She refused all three — *"identical
+   fillers"* — which is what a shape supported by one repeated sentence should get.
+6. A three-consonant root drawn for a wug item colliding with one already demonstrated. This is
+   the only one that **flattered** the score, and it was caught by a test rather than by her.
+7. Two novel words written together have a boundary nothing can see: `benuapseliao` divides after
+   six letters, or five, or eight, with no evidence anywhere preferring one. She answered
+   `ambiguous` to all eight. An item whose only correct answer is *"I cannot tell"* measures the
+   item, so the heads now come from a pool the lesson also uses as bare words — and finding the
+   boundary at a word she has met is the ability the problem was supposed to be about.
+
+#### One change that had to be given up, and what replaced it
+
+V.18 refused any demonstration whose meaning was not in its surface, as a guard against a
+mislabelled lesson. That guard had to go, because **a subject that is not in the sentence is
+pro-drop**, and a grammar that refuses it refuses something half the world's languages do.
+
+What replaced it is structural rather than a rule about role names, and it needed nothing written
+for it. When a lesson mislabels the subject, the word that *would* have been it is still sitting
+in the sentence, so it becomes fixed material — and fixed material differs from one demonstration
+to the next, so no shape ever gets a second demonstration to agree with it. When the subject is
+genuinely dropped there is no leftover, every demonstration produces the same shape, and it
+accrues support in the ordinary way. Both are tested.
+
+#### What this is still not
+
+Not a parser for English, and the axes did not change that. One construction is one flat sentence:
+the relative-clause and complement-clause problems are solved as **flat** patterns with more
+roles, not by recursion, so a clause inside a clause inside a clause has no representation and
+arbitrary depth is not claimed. A filler is one token. Affix induction proposes from a lesson and
+corroborates from a vocabulary, so a language met only in running text — with no paradigm to
+count — grows no rules. The free-order axis enumerates permutations and stops at four slots.
+And a feature whose realisation depends on two slots at once is read and said correctly but is
+never folded into a paradigm, so it cannot compose with anything.
+
+`python -m nyxara.njp.hard` runs the first bank, `--second` the second, `--all` both.
 
 ### Reachable over the wire
 

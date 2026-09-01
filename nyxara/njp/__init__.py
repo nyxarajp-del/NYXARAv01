@@ -368,6 +368,10 @@ from nyxara.njp.coding import (
 from nyxara.njp.language import (
     Affix,
     Construction,
+    Joint,
+    Marker,
+    Process,
+    Rule,
     Demonstration as ShownSentence,
     Grammar,
     LanguageFaculty,
@@ -380,6 +384,9 @@ from nyxara.njp.language import (
     Tongue,
 )
 from nyxara.njp.dialects import Dialect, Utterance, mint_dialect
+# The hard banks are deliberately NOT imported here: `nyxara.njp.hard` carries a `__main__` entry
+# point, and a module a package's `__init__` has already imported emits a RuntimeWarning when it
+# is then run with `python -m`. Same reason `school` and `study` are kept out.
 # `nyxara.njp.school` is deliberately NOT imported here. It carries a `__main__` entry point, and
 # a module that a package's `__init__` has already imported emits a RuntimeWarning about
 # unpredictable behaviour when it is then run with `python -m`. `nyxara.njp.study` is kept out for
@@ -475,7 +482,7 @@ __all__ = [
     "Coder", "Spec", "Program", "Example", "Demonstration", "Written", "Check", "Learned",
     "CodeSchema", "Interpreter", "CodeError", "read_python",
     # NJP V.18 — the grammar she learns, and the languages she is examined in
-    "LanguageFaculty", "Tongue", "Grammar", "Construction", "Slot", "ShownSentence",
-    "ParseReading", "GrammarLearned", "Morphology", "Lexicon", "Affix", "Segment",
-    "Dialect", "Utterance", "mint_dialect",
+    "LanguageFaculty", "Tongue", "Grammar", "Construction", "Slot", "Joint", "Marker",
+    "ShownSentence", "ParseReading", "GrammarLearned", "Morphology", "Lexicon", "Affix",
+    "Process", "Rule", "Segment", "Dialect", "Utterance", "mint_dialect",
 ]

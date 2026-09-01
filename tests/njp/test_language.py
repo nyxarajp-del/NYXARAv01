@@ -209,16 +209,37 @@ def test_a_shape_generalises_to_words_that_were_never_in_a_lesson():
     assert (got.subject, got.relation, got.object) == ("horse", "push", "stone")
 
 
-def test_a_demonstration_whose_meaning_is_not_in_its_surface_is_refused():
-    """A mislabelled lesson mints a shape that reads every sentence of that form wrong."""
-    grammar = Grammar("t")
-    grammar.show("cat chase dog", Meaning(kind="assertion", subject="pelican",
-                                          relation="chase", object="dog"))
-    grammar.show("bird chase fish", Meaning(kind="assertion", subject="pelican",
-                                            relation="chase", object="fish"))
-    report = grammar.learn()
+def test_a_mislabelled_lesson_and_a_dropped_subject_are_told_apart_structurally():
+    """The same evidence — a role that is not in the surface — and two different answers.
+
+    It used to be one answer: *refused*. That was a statement about which languages exist, because
+    a subject that is not in the sentence is **pro-drop**, and a grammar that refuses it refuses a
+    thing half the world's languages do. Measured: 0/8, all refusals.
+
+    What tells them apart is not a rule about role names, it is the leftover token. When a lesson
+    mislabels the subject, the word that *would* have been it is still sitting in the sentence, so
+    it becomes fixed material — and fixed material differs from one demonstration to the next, so
+    no shape ever gets a second demonstration to agree with it. When the subject is genuinely
+    dropped there is no leftover, every demonstration produces the same shape, and it accrues
+    support in the ordinary way.
+    """
+    mislabelled = Grammar("t")
+    mislabelled.show("cat chase dog", Meaning(kind="assertion", subject="pelican",
+                                              relation="chase", object="dog"))
+    mislabelled.show("bird chase fish", Meaning(kind="assertion", subject="pelican",
+                                                relation="chase", object="fish"))
+    report = mislabelled.learn()
     assert report.kept == 0
-    assert any("not in its surface" in reason for reason in report.reasons)
+    assert any("not a shape" in reason for reason in report.reasons)
+    assert not mislabelled.read("cat chase dog").readable
+
+    dropped = Grammar("t")
+    for verb, obj in (("chase", "dog"), ("chase", "fish"), ("eat", "worm")):
+        dropped.show(f"{verb}me {obj}",
+                     Meaning(kind="assertion", subject="speaker", relation=verb, object=obj))
+    assert dropped.learn().kept == 1
+    got = dropped.read("pushme stone")
+    assert (got.subject, got.relation, got.object) == ("speaker", "push", "stone")
 
 
 def test_a_construction_that_misreads_its_own_lesson_is_dropped():

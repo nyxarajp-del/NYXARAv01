@@ -1,4 +1,4 @@
-"""NYXARA · njp/language.py — the grammar she learns, not the one she shipped (🗣, NJP V.18).
+"""NYXARA · njp/language.py — the grammar she learns, not the one she shipped (🗣, NJP V.19).
 
 :mod:`nyxara.njp.tongue` tokenises any script. :mod:`nyxara.njp.semantics` tags the closed class
 and matches **frames over the tag sequence**, which is what made an open verb list unnecessary.
@@ -36,6 +36,14 @@ This module is the missing half, and it is deliberately the same discipline
   sentence with its content words replaced by **slots**, and everything else — word order, case
   markers, particles, the negator, the question word — kept as fixed material.
 
+**A role that is not in the sentence is a feature, not a refusal.** V.18 refused any demonstration
+whose meaning was not in its surface, as a guard against a mislabelled lesson — and that guard had
+to go, because a subject that is not in the sentence is **pro-drop**. What replaced it needed
+nothing written for it: a mislabelled lesson leaves the word that *would* have been the subject
+sitting in the sentence, so it becomes fixed material, and fixed material differs from one
+demonstration to the next, so no shape ever gets a second demonstration to agree with it. A
+genuinely dropped argument leaves no such residue.
+
 **Two demonstrations, not one, and they have to disagree.** A shape supported by a single sentence
 is that sentence. A shape is kept only when at least two demonstrations produce it *with different
 fillers in at least one slot*, which is the smallest evidence that a slot is a position rather
@@ -64,13 +72,36 @@ tongue named tries all of them and lets the evidence say which language a senten
 that meaning is stored apart from surface — the same fact, twice, in two grammars that share no
 word.
 
-**What is NOT claimed.** This is not a parser for English. It has no dictionary, no syntax theory,
-no recursion into subordinate clauses, and one construction is one flat sentence. A filler is
-**one token** (see :data:`MAX_SPAN`), so a two-word noun phrase is *unreadable* rather than
-mis-cut. Affix induction is concatenative — suffixes and prefixes only, no stem changes, no
-infixes, no reduplication — so an irregular is a memorised pair and never a rule. Nothing here
-decides truth or relevance: it produces a :class:`~nyxara.njp.semantics.Meaning` and stops, and
-where it cannot, it produces an unreadable one rather than a guess.
+**Six axes, and what each of them bought.** V.18 was the four bullets above and nothing else, and
+:mod:`nyxara.njp.hard` measured it on twenty-one problems chosen against it: **1 / 21**. What
+closed that was not twenty-one mechanisms but six general ones, each of which is a refusal
+loosened in exactly one place —
+
+#. **any number of named roles** (:data:`LEGACY_ROLES`), because three was a statement about
+   which sentences may exist;
+#. **detachable markers** (:class:`Marker`), so three demonstrated cells license a fourth;
+#. **processes that are not affixes** (:class:`Process`) — circumfix, infix, reduplication,
+   template — proposed by a lesson and corroborated by the vocabulary;
+#. **an edit at a nameable anchor** (:func:`_edits`), for the shapes that remove, swap or double
+   something instead of adding it;
+#. **free order where marking is not free** (:meth:`Grammar._licence_order`);
+#. **a role remembering what has filled it** (:attr:`Construction.fillers`), which is the only
+   evidence there is when two shapes read the same three tokens differently.
+
+Measured after all six: **21 / 21** on that bank, and **14 / 15** on a second bank written
+afterwards. The full account, including the one problem that is not solved and the seven flaws the
+banks turned out to have, is in ``docs/CAPABILITIES.md`` under NJP V.19.
+
+**What is NOT claimed.** This is not a parser for English. It has no dictionary and no syntax
+theory. **One construction is one flat sentence**: an embedded clause is read as more roles on a
+flat pattern, not by recursion, so a clause inside a clause inside a clause has no representation
+and arbitrary depth is not claimed. A filler is **one token** (see :data:`MAX_SPAN`), so a
+two-word noun phrase is *unreadable* rather than mis-cut. A morphological rule needs a *paradigm*
+to count — a language met only in running text grows none. The free-order axis enumerates, and
+stops at :attr:`Grammar.max_free_slots`. A feature realised on two slots at once is read and said
+correctly and is never folded into a paradigm, so it composes with nothing. Nothing here decides
+truth or relevance: it produces a :class:`~nyxara.njp.semantics.Meaning` and stops, and where it
+cannot, it produces an unreadable one rather than a guess.
 
 Pure standard library. No LLM, no corpus on disk, no network. Every public entry point is
 fail-soft: on any internal error it degrades to a null result rather than breaking a turn.
@@ -82,13 +113,15 @@ import math
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import (Any, Dict, FrozenSet, Iterable, List, Optional, Sequence,
+                    Set, Tuple)
 
 from nyxara.njp.semantics import Meaning
 
 __all__ = [
-    "MAX_SPAN", "ROLES", "Segment", "Affix", "Morphology", "Lexicon",
-    "Slot", "Construction", "Demonstration", "Grammar", "Tongue",
+    "MAX_SPAN", "ROLES", "LEGACY_ROLES", "Segment", "Affix", "Process", "Rule",
+    "Morphology", "Lexicon",
+    "Slot", "Joint", "Marker", "Construction", "Demonstration", "Grammar", "Tongue",
     "LanguageFaculty", "Learned", "Reading", "tokenize_surface",
 ]
 
@@ -109,10 +142,19 @@ __all__ = [
 #: this says — is written to survive somebody raising it.
 MAX_SPAN = 1
 
-#: The roles a construction can bind — deliberately the three that
-#: :class:`~nyxara.njp.semantics.Meaning` already carries. This module adds no representation of
-#: its own, so everything above language keeps reading exactly the object it always read.
-ROLES: Tuple[str, ...] = ("subject", "verb", "object")
+#: The three roles that live in named fields on :class:`~nyxara.njp.semantics.Meaning`. Every
+#: other role a construction binds lives in that class's ``roles`` dict, and a construction may
+#: bind **any number** of them.
+#:
+#: It was this tuple and only this tuple, and that was a statement about which sentences may exist.
+#: Measured on twenty-one hard problems: a clause with an agent, a theme *and* a recipient scored
+#: 0/8, and so did one with a location, an adjective, a possessor, a coordinate subject, a
+#: relative clause and a complement clause — nine of the twenty-one, all for the same reason, none
+#: of them mis-read. There was nowhere to put the fourth thing.
+LEGACY_ROLES: Tuple[str, ...] = ("subject", "verb", "object")
+
+#: Kept under its old name because it is exported, and no longer the ceiling it used to be.
+ROLES: Tuple[str, ...] = LEGACY_ROLES
 
 _TOKEN_RX = re.compile(r"[^\W\d_]+|\d+|[?!]", re.UNICODE)
 
@@ -165,6 +207,293 @@ class Affix:
                 "feature": self.feature}
 
 
+#: What counts as a vowel when a process has to talk about them. Latin-script only, and the one
+#: place in this module that is not script-agnostic — a templatic or harmony rule is a claim about
+#: vowels, and there is no way to make that claim without knowing which letters are vowels. A
+#: language written in a script this does not cover simply grows no such rule, which is the same
+#: failure mode as an affix with no support: absence, not a wrong answer.
+_VOWELS = frozenset("aeiouāēīōūáéíóúàèìòùäëïöü")
+
+
+@dataclass(frozen=True)
+class Process:
+    """How one form is made from another — and not always by sticking something on the end.
+
+    :class:`Morphology` induced suffixes and prefixes, which is a statement about which languages
+    exist. Measured on six minted languages that mark a feature some other way: a circumfix, an
+    infix, full reduplication, partial reduplication, a root-and-pattern template, and a suffix
+    with two allomorphs — **0, 0, 0, 0, 0 and 4 of 8**. Not mis-analysed. Invisible, which is the
+    same word this package used about Devanagari at NYX V.01 and about negation at V.09, and it
+    means the same thing here: the mechanism had no way to represent what it was looking at.
+
+    Six kinds, and the list is closed on purpose — each is a shape a process can have, not a
+    language it belongs to:
+
+    ``suffix`` / ``prefix``
+        ``a`` on the end or the front.
+    ``circumfix``
+        ``a`` on the front **and** ``b`` on the end, as one process. Two halves that only ever
+        occur together are one morpheme, and inducing them separately gets both of them wrong.
+    ``infix``
+        ``a`` inserted ``at`` characters in. Neither end, which is what makes it invisible to a
+        mechanism that only looks at ends.
+    ``reduplicate``
+        the stem copied — the whole of it when ``at`` is 0, its first ``at`` characters otherwise.
+        The affix *is* the stem, so no table of forms can hold it.
+    ``template``
+        the consonants are the word and the vowels are the grammar: keep the stem's consonants in
+        order and write ``a``'s vowels between them. Nothing is concatenated anywhere.
+    """
+
+    kind: str = "suffix"
+    a: str = ""
+    b: str = ""
+    at: int = 0
+    #: For ``kind="edit"``: what is done — ``ins``, ``del``, ``dup`` or ``swap``.
+    op: str = ""
+    #: For ``kind="edit"``: what ``at`` is measured from — the left end (``L``), the right end
+    #: (``R``), or the stem's last vowel (``V``).
+    anchor: str = "R"
+    #: For ``kind="edit"``: how many characters the edit touches.
+    n: int = 0
+
+    # -- what it does ------------------------------------------------------- #
+    @staticmethod
+    def _last_vowel_at(stem: str) -> int:
+        for index in range(len(stem) - 1, -1, -1):
+            if stem[index] in _VOWELS:
+                return index
+        return -1
+
+    def _position(self, stem: str) -> int:
+        if self.anchor == "L":
+            return self.at
+        if self.anchor == "R":
+            return len(stem) - self.at
+        return self._last_vowel_at(stem)
+
+    def apply(self, stem: str) -> str:
+        """The inflected form, or ``""`` where this process cannot act on this stem."""
+        stem = str(stem or "")
+        if not stem:
+            return ""
+        if self.kind == "edit":
+            where = self._position(stem)
+            if where < 0 or where > len(stem):
+                return ""
+            if self.op == "ins":
+                return stem[:where] + self.a + stem[where:]
+            if self.op == "del":
+                if where - self.n < 1 or where > len(stem):
+                    return ""
+                return stem[: where - self.n] + stem[where:]
+            if self.op == "swap":
+                if where - 2 < 0 or where > len(stem):
+                    return ""
+                return stem[: where - 2] + stem[where - 1] + stem[where - 2] + stem[where:]
+            if self.op == "dup":
+                if where >= len(stem):
+                    return ""
+                return stem[: where + 1] + stem[where] + stem[where + 1:]
+            return ""
+        if self.kind == "suffix":
+            return stem + self.a
+        if self.kind == "prefix":
+            return self.a + stem
+        if self.kind == "circumfix":
+            return f"{self.a}{stem}{self.b}"
+        if self.kind == "infix":
+            if len(stem) <= self.at:
+                return ""
+            return stem[:self.at] + self.a + stem[self.at:]
+        if self.kind == "reduplicate":
+            if self.at <= 0:
+                return stem + stem
+            return stem[:self.at] + stem if len(stem) > self.at else ""
+        if self.kind == "template":
+            bones = [char for char in stem if char not in _VOWELS]
+            if len(bones) != len(self.a) + 1:
+                return ""
+            out = bones[0]
+            for vowel, bone in zip(self.a, bones[1:]):
+                out += vowel + bone
+            return out
+        return ""
+
+    def strip(self, word: str) -> str:
+        """The stem this process would have acted on, or ``""``.
+
+        Not defined for every process, and that is honest rather than incomplete: a template
+        erases the information that says which vowels the stem had, so ``strip`` on one cannot
+        return a stem and does not pretend to.
+        """
+        word = str(word or "")
+        if self.kind == "suffix":
+            if self.a and len(word) > len(self.a) and word.endswith(self.a):
+                return word[: len(word) - len(self.a)]
+        elif self.kind == "prefix":
+            if self.a and len(word) > len(self.a) and word.startswith(self.a):
+                return word[len(self.a):]
+        elif self.kind == "circumfix":
+            if (len(word) > len(self.a) + len(self.b)
+                    and word.startswith(self.a) and word.endswith(self.b)):
+                return word[len(self.a): len(word) - len(self.b)] if self.b \
+                    else word[len(self.a):]
+        elif self.kind == "infix":
+            head, rest = word[:self.at], word[self.at:]
+            if self.a and rest.startswith(self.a) and len(head) + len(rest) > len(self.a):
+                return head + rest[len(self.a):]
+        elif self.kind == "reduplicate":
+            if self.at <= 0:
+                half = len(word) // 2
+                if half and word[:half] == word[half:]:
+                    return word[:half]
+            elif len(word) > self.at and word[:self.at] == word[self.at:self.at * 2]:
+                return word[self.at:]
+        return ""
+
+    @property
+    def size(self) -> int:
+        """How much of the word this process is responsible for — the tie-break on support."""
+        if self.kind == "edit":
+            # Below a suffix of the same length on purpose. An edit is the most powerful shape
+            # here and the most easily fitted to a coincidence, so where a plain affix accounts
+            # for the same pair it wins, and the edit is what is left for the pairs no affix can
+            # explain at all.
+            return 1
+        if self.kind == "reduplicate":
+            return 8 if self.at <= 0 else 6
+        if self.kind == "template":
+            return 7
+        return len(self.a) + len(self.b) + (2 if self.kind in ("circumfix", "infix") else 0)
+
+    @property
+    def key(self) -> Tuple[Any, ...]:
+        return (self.kind, self.a, self.b, self.at, self.op, self.anchor, self.n)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"kind": self.kind, "a": self.a, "b": self.b, "at": self.at,
+                "op": self.op, "anchor": self.anchor, "n": self.n}
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "Process":
+        return Process(kind=str(data.get("kind") or "suffix"), a=str(data.get("a") or ""),
+                       b=str(data.get("b") or ""), at=int(data.get("at") or 0),
+                       op=str(data.get("op") or ""), anchor=str(data.get("anchor") or "R"),
+                       n=int(data.get("n") or 0))
+
+
+def _candidates(base: str, inflected: str) -> List[Process]:
+    """Every process that could relate these two forms. All of them, not the first that fits.
+
+    Which one is right is a question about the *rest of the vocabulary*, so this proposes and
+    :meth:`Morphology.bind` disposes. A generator that stopped at the first fit would call
+    ``maran`` → ``mamaran`` a prefix ``ma``, which is true of that pair and false of the language.
+    """
+    out: List[Process] = []
+    if not base or not inflected or base == inflected:
+        return out
+    if inflected.startswith(base):
+        out.append(Process("suffix", a=inflected[len(base):]))
+    if inflected.endswith(base):
+        out.append(Process("prefix", a=inflected[: len(inflected) - len(base)]))
+    at = inflected.find(base)
+    if at > 0 and at + len(base) < len(inflected):
+        out.append(Process("circumfix", a=inflected[:at], b=inflected[at + len(base):]))
+    # An infix: the two forms share a head and a tail, and the difference sits between them.
+    head = 0
+    while head < len(base) and head < len(inflected) and base[head] == inflected[head]:
+        head += 1
+    tail = 0
+    while (tail < len(base) - head and tail < len(inflected) - head
+           and base[len(base) - 1 - tail] == inflected[len(inflected) - 1 - tail]):
+        tail += 1
+    if head and tail and head + tail == len(base) and len(inflected) > len(base):
+        out.append(Process("infix", a=inflected[head: len(inflected) - tail], at=head))
+    if head + tail > min(len(base), len(inflected)):
+        tail = max(0, min(len(base), len(inflected)) - head)
+    if inflected == base + base:
+        out.append(Process("reduplicate"))
+    for copy in range(1, min(len(base), 4) + 1):
+        if inflected == base[:copy] + base:
+            out.append(Process("reduplicate", at=copy))
+    bones = [char for char in base if char not in _VOWELS]
+    other = [char for char in inflected if char not in _VOWELS]
+    vowels = [char for char in inflected if char in _VOWELS]
+    if bones and bones == other and len(vowels) == len(bones) - 1:
+        out.append(Process("template", a="".join(vowels)))
+    out.extend(_edits(base, inflected, head, tail))
+    return out
+
+
+def _edits(base: str, inflected: str, head: int, tail: int) -> List[Process]:
+    """Processes expressed as one edit, measured from an end or from the stem's last vowel.
+
+    The six named shapes above are a closed list, and a closed list of shapes is a statement about
+    which languages exist. Measured on a bank chosen after they were written: a plural made by
+    **removing** the last letter, one made by **swapping** the last two, and one made by writing
+    the last vowel **twice** — 0/6, 0/6 and 3/6, all abstentions, because none of the three adds
+    anything anywhere and every one of those shapes is about something added.
+
+    What they have in common is that each is one edit at a position that can be *named* — the far
+    end of the word, or its last vowel. So this proposes the same edit measured from each anchor,
+    and the vocabulary decides which anchor the language actually uses: a deletion that is always
+    one character from the right end is a rule, and the same deletion measured from the left is a
+    different offset in every word and corroborates nothing.
+    """
+    out: List[Process] = []
+    removed = base[head: len(base) - tail]
+    added = inflected[head: len(inflected) - tail]
+    anchors: List[Tuple[str, int]] = [("L", head + len(removed)),
+                                      ("R", len(base) - head - len(removed))]
+    vowel_at = Process._last_vowel_at(base)
+    if not removed and added:
+        for anchor, _at in (("L", head), ("R", len(base) - head)):
+            out.append(Process("edit", a=added, op="ins", anchor=anchor,
+                               at=head if anchor == "L" else len(base) - head))
+        # The last vowel written twice: an insertion whose content is the character before it,
+        # sitting exactly where the stem's last vowel is. Nothing about that is a fixed offset.
+        if (len(added) == 1 and head > 0 and base[head - 1] == added
+                and head - 1 == vowel_at):
+            out.append(Process("edit", op="dup", anchor="V"))
+    if removed and not added:
+        for anchor, at in anchors:
+            out.append(Process("edit", op="del", anchor=anchor, at=at, n=len(removed)))
+    if removed and added and len(removed) == 2 and added == removed[::-1]:
+        for anchor, at in anchors:
+            out.append(Process("edit", op="swap", anchor=anchor, at=at))
+    return out
+
+
+@dataclass(frozen=True)
+class Rule:
+    """A process, the feature a lesson bound it to, and when it applies rather than its rival.
+
+    ``condition`` is the set of final vowels a stem may have for this rule to be the one that
+    fires. It is empty for a feature with a single rule, and it is **induced** where a feature has
+    two — from the stems that corroborated each of them, not from a theory about harmony. Two
+    rules whose conditions overlap are two rules this module cannot choose between, and it says so
+    rather than picking the more popular one and calling that a grammar.
+    """
+
+    feature: str = ""
+    process: Process = field(default_factory=Process)
+    condition: FrozenSet[str] = frozenset()
+    support: int = 0
+
+    def fits(self, stem: str) -> bool:
+        if not self.condition:
+            return True
+        for char in reversed(str(stem or "")):
+            if char in _VOWELS:
+                return char in self.condition
+        return False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"feature": self.feature, "process": self.process.to_dict(),
+                "condition": sorted(self.condition), "support": self.support}
+
+
 @dataclass(frozen=True)
 class Segment:
     """A word taken apart. ``analysed`` is false when no induced affix explains it."""
@@ -209,6 +538,10 @@ class Morphology:
         #: inspectable rather than silent.
         self.refused: List[Tuple[str, str, str]] = []
         self.irregular: Dict[Tuple[str, str], str] = {}
+        #: What a lesson bound, as processes rather than as suffixes. See :class:`Rule`.
+        self.rules: List[Rule] = []
+        #: Which stems corroborated which rule, kept so a condition can be induced from them.
+        self._witness: Dict[Tuple[str, Tuple[str, str, str, int]], List[str]] = {}
 
     # -- observation -------------------------------------------------------- #
     def observe(self, words: Iterable[str]) -> int:
@@ -258,37 +591,112 @@ class Morphology:
         self.affixes = found
         return found
 
-    # -- binding: what an affix means, and only where it was demonstrated ---- #
-    def bind(self, base: str, inflected: str, feature: str) -> bool:
-        """Bind the affix relating ``base`` to ``inflected`` to ``feature``.
+    # -- binding: what a process means, and only where the vocabulary agrees -- #
+    def _corroborate(self, process: Process, exclude: str) -> Tuple[int, List[str]]:
+        """How many *other* words in the vocabulary this process also relates to a word.
 
-        Refuses — and records the refusal — when the affix relating the two was never induced.
-        The alternative is a "rule" whose entire evidence is the pair that named it, which is
-        exactly what the wug test exists to tell apart from a rule.
+        The whole of the honesty in :meth:`bind` is here. A demonstrated pair proposes a process;
+        this counts how much of the language agrees. ``maran`` → ``mamaran`` proposes both "prefix
+        ``ma``" and "copy the first syllable", and they are told apart not by taste but by the
+        fact that the language contains ``sotel`` → ``sosotel`` and ``pigan`` → ``pipigan`` and
+        no ``masotel`` at all.
+        """
+        support: List[str] = []
+        for word in self.vocabulary:
+            if word == exclude:
+                continue
+            made = process.apply(word)
+            if made and made != word and made in self.vocabulary:
+                support.append(word)
+        return len(support), support
+
+    @staticmethod
+    def _last_vowel(word: str) -> str:
+        for char in reversed(str(word or "")):
+            if char in _VOWELS:
+                return char
+        return ""
+
+    def _condition_rules(self, feature: str) -> None:
+        """Where one feature has two processes, work out which stems each of them is for.
+
+        Induced from the stems that corroborated each rule, never assumed: the condition is the
+        set of final vowels those stems actually had. Two rules whose stem sets overlap in that
+        vowel are two rules she cannot choose between, and both keep an empty condition so
+        :meth:`inflect` falls back to support and the ambiguity stays visible rather than being
+        decided by whichever was demonstrated first.
+        """
+        family = [rule for rule in self.rules if rule.feature == feature]
+        if len(family) < 2:
+            return
+        vowels = {rule.process.key: {self._last_vowel(stem)
+                                     for stem in self._witness.get((feature, rule.process.key),
+                                                                   [])} - {""}
+                  for rule in family}
+        for one in family:
+            for other in family:
+                if one is other:
+                    continue
+                if vowels[one.process.key] & vowels[other.process.key]:
+                    return                      # overlapping: no condition is defensible
+        conditioned = []
+        for rule in family:
+            found = vowels[rule.process.key]
+            conditioned.append(Rule(feature=rule.feature, process=rule.process,
+                                    condition=frozenset(found), support=rule.support)
+                               if found else rule)
+        self.rules = [rule for rule in self.rules if rule.feature != feature] + conditioned
+
+    def bind(self, base: str, inflected: str, feature: str) -> bool:
+        """Bind the process relating ``base`` to ``inflected`` to ``feature``.
+
+        Every process that could relate the two is proposed, each is checked against the rest of
+        the vocabulary, and the one the vocabulary actually supports wins — on support first and
+        on how much of the word it accounts for second, so a bigger claim never wins on a tie it
+        did not earn.
+
+        Refuses — and records the refusal — when nothing reaches ``min_stems``. The alternative is
+        a "rule" whose entire evidence is the pair that named it, which is exactly what the wug
+        test exists to tell apart from a rule. A refused pair is kept as an **irregular** and
+        never generalises to a stem it was not shown on.
         """
         base, inflected = str(base or "").strip().lower(), str(inflected or "").strip().lower()
         feature = str(feature or "").strip()
         if not base or not inflected or not feature or inflected == base:
             return False
-        side, form = "", ""
-        if inflected.startswith(base):
-            side, form = "suffix", inflected[len(base):]
-        elif inflected.endswith(base):
-            side, form = "prefix", inflected[: len(inflected) - len(base)]
-        if not form:
-            # Not concatenative at all. Kept as a memorised pair — which is what an irregular is —
-            # and never generalised to a stem it was not shown on.
+        best: Optional[Tuple[int, int, Process, List[str]]] = None
+        for process in _candidates(base, inflected):
+            support, witnesses = self._corroborate(process, base)
+            if support + 1 < self.min_stems:
+                continue
+            scored = (support, process.size, process, witnesses)
+            if best is None or (scored[0], scored[1]) > (best[0], best[1]):
+                best = scored
+        if best is None:
             self.irregular[(base, feature)] = inflected
-            self.refused.append((base, inflected, "not concatenative — kept as an irregular"))
+            self.refused.append((base, inflected,
+                                 f"no process reached {self.min_stems} stems in the vocabulary"))
             return False
-        for index, affix in enumerate(self.affixes):
-            if affix.form == form and affix.side == side:
-                self.affixes[index] = Affix(form=form, side=side, stems=affix.stems,
-                                            feature=feature)
-                return True
-        self.irregular[(base, feature)] = inflected
-        self.refused.append((base, inflected, f"{side} {form!r} was never induced"))
-        return False
+        support, _size, process, witnesses = best
+        self._witness[(feature, process.key)] = witnesses + [base]
+        self.rules = [rule for rule in self.rules
+                      if not (rule.feature == feature and rule.process.key == process.key)]
+        self.rules.append(Rule(feature=feature, process=process, support=support + 1))
+        self.rules.sort(key=lambda rule: (-rule.support, rule.feature))
+        self._condition_rules(feature)
+        # Keep the old flat view in step for the concatenative cases, so `analyse` and the word
+        # classes keep seeing what they always saw.
+        if process.kind in ("suffix", "prefix"):
+            for index, affix in enumerate(self.affixes):
+                if affix.form == process.a and affix.side == process.kind:
+                    self.affixes[index] = Affix(form=process.a, side=process.kind,
+                                                stems=affix.stems, feature=feature)
+                    break
+            else:
+                self.affixes.append(Affix(form=process.a, side=process.kind,
+                                          stems=support + 1, feature=feature))
+                self.affixes.sort(key=lambda a: (-len(a.form), -a.stems, a.form))
+        return True
 
     # -- use ---------------------------------------------------------------- #
     def analyse(self, word: str) -> Segment:
@@ -296,6 +704,13 @@ class Morphology:
         word = str(word or "").strip().lower()
         if not word:
             return Segment()
+        # Bound rules first: a process a lesson gave a meaning to is a better account of a word
+        # than a bare shape that happens to fit, and it is the only one that can name a feature.
+        for rule in sorted(self.rules, key=lambda rule: (-rule.process.size, -rule.support)):
+            stem = rule.process.strip(word)
+            if stem and len(stem) >= 2 and rule.fits(stem):
+                return Segment(word=word, stem=stem, affix=rule.process.a or rule.process.kind,
+                               side=rule.process.kind, feature=rule.feature)
         for affix in self.affixes:
             stem = affix.strip(word)
             if stem and len(stem) >= 2:
@@ -329,17 +744,24 @@ class Morphology:
         memorised = self.irregular.get((stem, feature))
         if memorised:
             return memorised
-        for affix in self.affixes:
-            if affix.feature == feature:
-                return affix.apply(stem)
+        family = [rule for rule in self.rules if rule.feature == feature]
+        # A rule whose condition this stem meets, best-supported first; then any unconditioned
+        # rule. The order matters exactly once — under harmony, where two rules both exist and
+        # only one of them is for this stem.
+        for rule in sorted(family, key=lambda rule: (-len(rule.condition), -rule.support)):
+            if rule.fits(stem):
+                made = rule.process.apply(stem)
+                if made:
+                    return made
         return ""
 
     def features(self) -> List[str]:
-        return sorted({a.feature for a in self.affixes if a.feature})
+        return sorted({rule.feature for rule in self.rules}
+                      | {a.feature for a in self.affixes if a.feature})
 
     def stats(self) -> Dict[str, Any]:
         return {"vocabulary": len(self.vocabulary), "affixes": len(self.affixes),
-                "bound": sum(1 for a in self.affixes if a.feature),
+                "bound": len(self.rules), "rules": [rule.to_dict() for rule in self.rules[:8]],
                 "features": self.features(), "irregular": len(self.irregular),
                 "refused": len(self.refused)}
 
@@ -361,6 +783,7 @@ class Morphology:
         ranked = sorted(self.vocabulary.items(), key=lambda kv: (-kv[1], kv[0]))[:self.max_kept]
         return {"vocabulary": dict(ranked),
                 "bound": [[a.form, a.side, a.feature] for a in self.affixes if a.feature],
+                "rules": [rule.to_dict() for rule in self.rules],
                 "irregular": [[base, feature, form]
                               for (base, feature), form in self.irregular.items()]}
 
@@ -381,6 +804,14 @@ class Morphology:
             if feature:
                 self.affixes[index] = Affix(form=affix.form, side=affix.side,
                                             stems=affix.stems, feature=feature)
+        self.rules = []
+        for row in data.get("rules") or []:
+            if not isinstance(row, dict):
+                continue
+            self.rules.append(Rule(feature=str(row.get("feature") or ""),
+                                   process=Process.from_dict(row.get("process") or {}),
+                                   condition=frozenset(row.get("condition") or ()),
+                                   support=int(row.get("support") or 0)))
 
 
 # --------------------------------------------------------------------------- #
@@ -603,6 +1034,153 @@ class Slot:
         return inner if len(inner) >= 2 else ""
 
 
+@dataclass(frozen=True)
+class Marker:
+    """A piece of fixed material that carries a feature, and can be left off.
+
+    This is the axis that reaches a cell no lesson contained. Shown singular-present,
+    plural-present and singular-past, a grammar made of whole sentence shapes holds three shapes
+    and has no fourth — plural-past is a *combination*, and a list of shapes cannot combine.
+    Measured before this existed: **0 / 8**, and not as a refusal either, because the
+    singular-past shape matched the plural-past sentence and read the plural marker as part of the
+    subject's name.
+
+    A marker says: *this affix, on this slot, means this feature has this value.* Markers of
+    different **dimensions** — different ``name`` — attach independently, so three demonstrated
+    cells license the fourth without anybody demonstrating it. Markers of the same dimension are
+    alternatives, because a word cannot be singular and plural at once.
+
+    ``slot`` is an index into the construction's pattern, or ``-1`` for a feature the shape
+    carries with no material at all — which is what a *pro-dropped* subject is: the sentence never
+    contains it, and the ending on the verb is what says who it was.
+    """
+
+    slot: int = -1
+    prefix: str = ""
+    suffix: str = ""
+    name: str = ""
+    value: str = ""
+
+    @property
+    def material(self) -> int:
+        return len(self.prefix) + len(self.suffix)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"slot": self.slot, "prefix": self.prefix, "suffix": self.suffix,
+                "name": self.name, "value": self.value}
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "Marker":
+        return Marker(slot=int(data.get("slot", -1)), prefix=str(data.get("prefix") or ""),
+                      suffix=str(data.get("suffix") or ""), name=str(data.get("name") or ""),
+                      value=str(data.get("value") or ""))
+
+
+#: Names a construction may carry that live on the Meaning itself rather than among its roles.
+_MEANING_FEATURES = ("temporal", "modality", "focus", "negated")
+
+
+def _pool_fillers(group: Sequence["Construction"]) -> Dict[str, FrozenSet[str]]:
+    """What has stood in each role, across a whole family of shapes."""
+    pooled: Dict[str, Set[str]] = {}
+    for construction in group:
+        for role, values in construction.fillers.items():
+            pooled.setdefault(role, set()).update(values)
+    return {role: frozenset(values) for role, values in pooled.items()}
+
+
+def _stamp(item: Any) -> Any:
+    """One pattern item, as something hashable that says exactly what it is."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, Joint):
+        return ("joint", item.left.role, item.left.prefix, item.left.suffix,
+                item.right.role, item.right.prefix, item.right.suffix,
+                item.prefix, item.suffix)
+    return ("slot", item.role, item.prefix, item.suffix)
+
+
+def _render_item(item: Any) -> str:
+    if isinstance(item, str):
+        return item
+    if isinstance(item, Joint):
+        return f"{item.prefix}<{item.left.role}+{item.right.role}>{item.suffix}"
+    return f"{item.prefix}<{item.role}>{item.suffix}"
+
+
+def _orderings(markers: Sequence[Marker]) -> List[List[Marker]]:
+    """The orders these markers could stack in, where two of them land on one slot.
+
+    Only the ones that could differ: markers on different slots commute, so the ordering question
+    is per slot, and with two markers on a slot there are two answers. Bounded hard, because a
+    paradigm whose stacking order is a free variable in six places is not a paradigm.
+    """
+    import itertools
+    by_slot: Dict[int, List[Marker]] = {}
+    for marker in markers:
+        by_slot.setdefault(marker.slot, []).append(marker)
+    contested = [slot for slot, group in by_slot.items() if slot >= 0 and len(group) > 1]
+    if not contested or len(contested) > 2:
+        return [list(markers)]
+    out: List[List[Marker]] = []
+    slot = contested[0]
+    for order in itertools.permutations(by_slot[slot]):
+        arranged: List[Marker] = []
+        for other, group in by_slot.items():
+            arranged.extend(order if other == slot else group)
+        out.append(arranged)
+        if len(out) >= 6:
+            break
+    return out
+
+
+@dataclass(frozen=True)
+class Joint:
+    """One token holding two roles, written with nothing between them.
+
+    A compound. ``benuapseliao`` is a modifier and a head with no space and no marker, and every
+    other pattern item here consumes whole tokens — so before this existed, a language that writes
+    two of its arguments as one word scored **0 / 8**, as refusals, because there was no shape in
+    which a token could be two things.
+
+    Deliberately two and not many: the split point is what has to be learned, and with three parts
+    there are two of them and the evidence for each is halved. What makes this safe is that both
+    halves have to be filled by roles the demonstration named — a joint never invents a boundary
+    to make a sentence fit, it reproduces one a lesson showed it.
+    """
+
+    left: Slot = field(default_factory=Slot)
+    right: Slot = field(default_factory=Slot)
+    prefix: str = ""
+    suffix: str = ""
+
+    @property
+    def roles(self) -> Tuple[str, str]:
+        return (self.left.role, self.right.role)
+
+    @property
+    def bound_chars(self) -> int:
+        return len(self.prefix) + len(self.suffix) + self.left.bound_chars \
+            + self.right.bound_chars
+
+    def splits(self, token: str) -> List[Tuple[str, str]]:
+        """Every way this joint reads one token. Usually one; never zero silently."""
+        if not token.startswith(self.prefix) or not token.endswith(self.suffix):
+            return []
+        inner = token[len(self.prefix): len(token) - len(self.suffix)] if self.suffix \
+            else token[len(self.prefix):]
+        out: List[Tuple[str, str]] = []
+        for cut in range(2, len(inner) - 1):
+            head = self.left.unwrap(inner[:cut])
+            tail = self.right.unwrap(inner[cut:])
+            if head and tail:
+                out.append((head, tail))
+        return out
+
+    def wrap(self, left: str, right: str) -> str:
+        return f"{self.prefix}{self.left.wrap(left)}{self.right.wrap(right)}{self.suffix}"
+
+
 @dataclass
 class Construction:
     """One learned sentence shape, and the record of how it has done.
@@ -611,6 +1189,10 @@ class Construction:
     matches a whole sentence and never part of one: a construction matching a *prefix* of a
     sentence would read "the cat sat on the mat" with the shape for "the cat sat" and lose the
     half that changes what it says.
+
+    ``features`` are the things this shape says that no slot of it holds — a tense, a polarity, a
+    number, a person. ``markers`` are the ones that can be *left off*, each with the material that
+    carries it, and they are what make a shape a paradigm instead of a list. See :class:`Marker`.
     """
 
     tongue: str = ""
@@ -620,6 +1202,24 @@ class Construction:
     focus: str = ""
     modality: str = ""
     temporal: str = ""
+    #: ``(name, value)`` pairs this shape asserts without a slot holding them, sorted.
+    features: Tuple[Tuple[str, str], ...] = ()
+    #: Optional material, each piece carrying one feature. See :class:`Marker`.
+    markers: Tuple[Marker, ...] = ()
+    #: Dimensions every demonstration of this shape marked. A variant missing one of these is
+    #: not offered — no lesson showed the shape without it, so a sentence lacking it is not a
+    #: sentence of this language and reading one as if it were would be inventing a reading.
+    required: Tuple[str, ...] = ()
+    #: What has actually stood in each role, as words. Evidence, never a gate: a word she has not
+    #: met is not barred from a role, it just brings nothing to a tie.
+    #:
+    #: This is the axis for the sentences whose roles order alone cannot settle. Where a language
+    #: says *"denied"* by moving the verb to the front, ``s v o`` and ``v s o`` are the same three
+    #: tokens under two shapes that disagree, and she returned ``ambiguous`` to all of them —
+    #: correctly, on the evidence she was using. The evidence she was **not** using is that the
+    #: verbs of a corpus recur and its subjects do not, so the reading that puts a word she has
+    #: seen as a verb in the verb's place is the better-supported one.
+    fillers: Dict[str, FrozenSet[str]] = field(default_factory=dict)
     support: int = 0
     hits: int = 0
     misses: int = 0
@@ -627,19 +1227,28 @@ class Construction:
 
     # -- shape -------------------------------------------------------------- #
     @property
+    def skeleton(self) -> Tuple[Any, ...]:
+        """The shape with every slot's fixed material stripped off.
+
+        Two constructions with one skeleton are candidates for being one paradigm, and this is
+        what :meth:`Grammar._factorise` groups on.
+        """
+        return (self.tongue, self.kind, self.focus,
+                tuple(item if isinstance(item, str)
+                      else (("joint",) + item.roles if isinstance(item, Joint)
+                            else ("slot", item.role))
+                      for item in self.pattern))
+
+    @property
     def signature(self) -> Tuple[Any, ...]:
         """What makes two demonstrations the same shape."""
         return (self.tongue, self.kind, self.negated, self.focus, self.modality, self.temporal,
-                tuple(item if isinstance(item, str)
-                      else ("slot", item.role, item.prefix, item.suffix)
-                      for item in self.pattern))
+                self.features, tuple(_stamp(item) for item in self.pattern))
 
     @property
     def shape(self) -> str:
         """The pattern as one readable line: ``<subject>gu <verb> nuza``."""
-        return " ".join(item if isinstance(item, str)
-                        else f"{item.prefix}<{item.role}>{item.suffix}"
-                        for item in self.pattern)
+        return " ".join(_render_item(item) for item in self.pattern)
 
     @property
     def key(self) -> str:
@@ -649,7 +1258,13 @@ class Construction:
 
     @property
     def roles(self) -> Tuple[str, ...]:
-        return tuple(item.role for item in self.pattern if isinstance(item, Slot))
+        out: List[str] = []
+        for item in self.pattern:
+            if isinstance(item, Slot):
+                out.append(item.role)
+            elif isinstance(item, Joint):
+                out.extend(item.roles)
+        return tuple(out)
 
     @property
     def literals(self) -> int:
@@ -657,7 +1272,8 @@ class Construction:
 
     @property
     def bound_chars(self) -> int:
-        return sum(item.bound_chars for item in self.pattern if isinstance(item, Slot))
+        return sum(item.bound_chars for item in self.pattern
+                   if isinstance(item, (Slot, Joint)))
 
     @property
     def record(self) -> float:
@@ -665,36 +1281,110 @@ class Construction:
         seen = self.hits + self.misses
         return self.hits / seen if seen else 0.5
 
+    # -- the paradigm this shape stands for --------------------------------- #
+    def variants(self) -> List[Tuple[Tuple[Any, ...], Dict[str, str], int]]:
+        """Every combination of markers this shape licenses, with the features each one asserts.
+
+        One dimension at most once — a word is not singular and plural at the same time — and
+        every combination of *different* dimensions, which is the whole point: three cells
+        demonstrated, the fourth reachable because its two halves attach independently.
+
+        Where two markers land on one slot their order was never demonstrated (each lesson showed
+        one of them alone), so **both orders are offered** and the sentence decides. That is a
+        genuine underdetermination rather than a gap, and offering both is what lets reading
+        succeed on a stacking nobody showed her — while :meth:`Grammar.say`, which has to pick
+        one, is the place where it costs something.
+        """
+        dimensions: Dict[str, List[Marker]] = {}
+        for marker in self.markers:
+            dimensions.setdefault(marker.name, []).append(marker)
+        chosen: List[List[Marker]] = [[]]
+        for name in sorted(dimensions):
+            grown: List[List[Marker]] = []
+            for existing in chosen:
+                if name not in self.required:
+                    grown.append(existing)
+                for marker in dimensions[name]:
+                    grown.append(existing + [marker])
+            chosen = grown
+            if len(chosen) > 64:                # a paradigm this wide is not one shape
+                break
+        out: List[Tuple[Tuple[Any, ...], Dict[str, str], int]] = []
+        seen: Set[Tuple[Any, ...]] = set()
+        for subset in chosen:
+            for order in _orderings(subset):
+                pattern = self._with(order)
+                features = {marker.name: marker.value for marker in order}
+                stamp = (tuple(_stamp(item) for item in pattern),
+                         tuple(sorted(features.items())))
+                if stamp in seen:
+                    continue
+                seen.add(stamp)
+                out.append((pattern, features, sum(m.material for m in order)))
+        return out
+
+    def _with(self, markers: Sequence[Marker]) -> Tuple[Any, ...]:
+        """The pattern with these markers' material wrapped onto their slots, in order."""
+        pattern = list(self.pattern)
+        for marker in markers:
+            if marker.slot < 0 or marker.slot >= len(pattern):
+                continue
+            item = pattern[marker.slot]
+            if not isinstance(item, Slot):
+                continue
+            pattern[marker.slot] = Slot(role=item.role,
+                                        prefix=marker.prefix + item.prefix,
+                                        suffix=item.suffix + marker.suffix)
+        return tuple(pattern)
+
     # -- matching ----------------------------------------------------------- #
     def match(self, tokens: Sequence[str]) -> List[Dict[str, str]]:
-        """Every way this construction reads ``tokens``. Empty where it does not.
+        """Every way this construction reads ``tokens``, ignoring the features it also asserts."""
+        return [fills for fills, _features, _material in self.readings(tokens)]
+
+    def readings(self, tokens: Sequence[str]) -> List[Tuple[Dict[str, str], Dict[str, str], int]]:
+        """Every way this construction reads ``tokens``, with the features each reading asserts.
 
         All readings are returned rather than the first, because *which* one is right is a
         question about evidence and the caller is what holds the evidence. A construction
         returning two readings of one sentence has found an ambiguity, and saying so is the
         honest outcome.
         """
-        out: List[Dict[str, str]] = []
+        out: List[Tuple[Dict[str, str], Dict[str, str], int]] = []
         try:
-            self._walk(list(tokens), 0, 0, {}, out)
+            words = list(tokens)
+            for pattern, features, material in self.variants():
+                found: List[Dict[str, str]] = []
+                self._walk(pattern, words, 0, 0, {}, found)
+                for fills in found:
+                    out.append((fills, features, material))
         except Exception:  # noqa: BLE001
             return []
         return out
 
-    def _walk(self, tokens: List[str], at: int, index: int,
+    def _walk(self, pattern: Tuple[Any, ...], tokens: List[str], at: int, index: int,
               fills: Dict[str, str], out: List[Dict[str, str]]) -> None:
         if len(out) >= 8:                       # an ambiguity this deep is already reported
             return
-        if index == len(self.pattern):
+        if index == len(pattern):
             if at == len(tokens):
                 out.append(dict(fills))
             return
-        item = self.pattern[index]
+        item = pattern[index]
         if isinstance(item, str):
             if at < len(tokens) and tokens[at] == item:
-                self._walk(tokens, at + 1, index + 1, fills, out)
+                self._walk(pattern, tokens, at + 1, index + 1, fills, out)
             return
-        remaining = len(self.pattern) - index - 1
+        if isinstance(item, Joint):
+            if at >= len(tokens):
+                return
+            for head, tail in item.splits(tokens[at]):
+                fills[item.left.role], fills[item.right.role] = head, tail
+                self._walk(pattern, tokens, at + 1, index + 1, fills, out)
+                fills.pop(item.left.role, None)
+                fills.pop(item.right.role, None)
+            return
+        remaining = len(pattern) - index - 1
         # Two reasons a slot is held to exactly one token, and they are different reasons.
         #
         # Fixed material: case marking a whole noun phrase is a real thing in real languages and
@@ -717,16 +1407,24 @@ class Construction:
             if not filler:
                 continue
             fills[item.role] = filler
-            self._walk(tokens, at + span, index + 1, fills, out)
+            self._walk(pattern, tokens, at + span, index + 1, fills, out)
             fills.pop(item.role, None)
 
     # -- rendering ---------------------------------------------------------- #
-    def render(self, fills: Dict[str, str]) -> str:
+    def render(self, fills: Dict[str, str],
+               pattern: Optional[Tuple[Any, ...]] = None) -> str:
         """Instantiate. Returns ``""`` when a slot has nothing to put in it."""
         words: List[str] = []
-        for item in self.pattern:
+        for item in (self.pattern if pattern is None else pattern):
             if isinstance(item, str):
                 words.append(item)
+                continue
+            if isinstance(item, Joint):
+                head = str(fills.get(item.left.role, "") or "").strip().lower()
+                tail = str(fills.get(item.right.role, "") or "").strip().lower()
+                if not head or not tail:
+                    return ""
+                words.append(item.wrap(head, tail))
                 continue
             filler = str(fills.get(item.role, "") or "").strip().lower()
             if not filler:
@@ -738,6 +1436,8 @@ class Construction:
         return {"tongue": self.tongue, "shape": self.shape, "kind": self.kind,
                 "negated": self.negated, "focus": self.focus, "temporal": self.temporal,
                 "modality": self.modality, "support": self.support,
+                "features": [list(pair) for pair in self.features],
+                "markers": [marker.to_dict() for marker in self.markers],
                 "hits": self.hits, "misses": self.misses, "record": round(self.record, 3)}
 
 
@@ -813,20 +1513,42 @@ def _meaning_from_dict(data: Dict[str, Any]) -> Meaning:
 
 
 def _fills_of(meaning: Meaning) -> Dict[str, str]:
-    """What a construction has to be able to put back, given the meaning it came with.
+    """Every role a meaning carries, whatever it is called and however many there are.
 
     The **verb** role is filled from ``relation`` — the lemma — rather than from ``verb``, the
     surface. That one choice is what makes tense visible to this module: whatever the surface
     carries beyond the lemma becomes fixed material on the slot, so *"glim"* and *"glimta"* end
     up in two constructions rather than in one that cannot tell a past from a present.
+
+    Everything past the legacy three comes out of
+    :attr:`~nyxara.njp.semantics.Meaning.roles` under whatever name a demonstration used. There
+    is no list of permitted role names here and there is not going to be one: a role is whatever
+    a teacher pointed at, exactly as a concept id is whatever the clustering found.
     """
     out: Dict[str, str] = {}
-    for role in ROLES:
+    for key, value in (getattr(meaning, "roles", None) or {}).items():
+        text = " ".join(str(value or "").strip().lower().split())
+        if text:
+            out[str(key)] = text
+    for role in LEGACY_ROLES:
         value = getattr(meaning, "relation" if role == "verb" else role, "")
         value = " ".join(str(value or "").strip().lower().split())
         if value:
             out[role] = value
     return out
+
+
+def _write_fills(meaning: Meaning, fills: Dict[str, str]) -> None:
+    """The inverse: put the roles back where each of them lives."""
+    for role, value in fills.items():
+        if role == "subject":
+            meaning.subject = value
+        elif role == "verb":
+            meaning.relation = meaning.verb = value
+        elif role == "object":
+            meaning.object = value
+        else:
+            meaning.roles[role] = value
 
 
 def _affixes_around(token: str, filler: str) -> Optional[Tuple[str, str]]:
@@ -858,6 +1580,10 @@ class Grammar:
         self.constructions: List[Construction] = []
         self.demonstrations: List[Demonstration] = []
         self.rejected: List[str] = []
+        #: "Have I met this word?", supplied by the :class:`Tongue` that owns this grammar. Used
+        #: only to break a tie between readings, never to reject one — a word she has not met is
+        #: not a word, and a grammar that refused new vocabulary would refuse every real sentence.
+        self.known: Optional[Any] = None
 
     # -- teaching ----------------------------------------------------------- #
     def show(self, surface: str, meaning: Meaning) -> bool:
@@ -879,9 +1605,33 @@ class Grammar:
         fills = _fills_of(meaning)
         if not tokens or not fills:
             return None
+        # A role the surface does not contain is not a mislabelled lesson — it is a **feature**.
+        # "these are plural" is said by an ending, not by a word, and demanding that every role
+        # appear as material is what made every plural demonstration unlearnable: measured, all
+        # five plural lessons rejected, and the singular-past shape then read the plural-past
+        # sentence with the ending inside the subject's name.
+        #
+        # Which roles are which is decided by looking, not by a list of feature names — a role is
+        # a feature here exactly when this sentence does not contain it.
         placed = self._place(tokens, fills)
+        joints: Dict[int, Joint] = {}
+        features: Dict[str, str] = {}
         if placed is None:
-            return None
+            # Before deciding a role is a feature, ask whether two of them are sharing a token.
+            # A compound writes its two halves with nothing between them, and a placer that only
+            # ever consumes whole tokens reads that as one word it cannot account for.
+            found = self._place_joined(tokens, fills)
+            if found is not None:
+                placed, joints = found
+        if placed is None:
+            spoken = {role: value for role, value in fills.items()
+                      if self._locatable(tokens, value)}
+            if not spoken or spoken == fills:
+                return None
+            features = {role: value for role, value in fills.items() if role not in spoken}
+            placed = self._place(tokens, spoken)
+            if placed is None:
+                return None
         pattern: List[Any] = []
         index = 0
         while index < len(tokens):
@@ -891,16 +1641,60 @@ class Grammar:
                 index += 1
                 continue
             role, span, prefix, suffix = here
-            pattern.append(Slot(role=role, prefix=prefix, suffix=suffix))
+            joint = joints.get(index)
+            pattern.append(joint if joint is not None
+                           else Slot(role=role, prefix=prefix, suffix=suffix))
             index += span
         return Construction(
             tongue=self.tongue, pattern=tuple(pattern),
             kind=meaning.kind or "assertion", negated=bool(meaning.negated),
             focus=meaning.focus or "", modality=meaning.modality or "",
-            temporal=meaning.temporal or "", support=1, source=" ".join(tokens))
+            temporal=meaning.temporal or "",
+            features=tuple(sorted(features.items())),
+            support=1, source=" ".join(tokens))
 
-    def _place(self, tokens: Sequence[str],
-               fills: Dict[str, str]) -> Optional[Dict[int, Tuple[str, int, str, str]]]:
+    def _place_joined(self, tokens: Sequence[str], fills: Dict[str, str]
+                      ) -> Optional[Tuple[Dict[int, Tuple[str, int, str, str]], Dict[int, Joint]]]:
+        """Try reading one token as two roles written together, then place the rest normally.
+
+        A boundary is only ever taken from a demonstration: the two halves must be values the
+        lesson named, in the order the token has them, and together with whatever fixed material
+        surrounds them they must account for the **whole** token. A joint never invents a split to
+        make a sentence fit.
+        """
+        singles = {role: value for role, value in fills.items() if " " not in value}
+        for index, token in enumerate(tokens):
+            for left, head in singles.items():
+                if head not in token:
+                    continue
+                for right, tail in singles.items():
+                    if right == left or tail not in token:
+                        continue
+                    at = token.find(head)
+                    then = token.find(tail, at + len(head))
+                    if at < 0 or then != at + len(head):
+                        continue
+                    joint = Joint(left=Slot(role=left), right=Slot(role=right),
+                                  prefix=token[:at], suffix=token[then + len(tail):])
+                    rest = {role: value for role, value in fills.items()
+                            if role not in (left, right)}
+                    placed = self._place(tokens, rest, blocked={index})
+                    if placed is None:
+                        continue
+                    placed[index] = (left, 1, joint.prefix, joint.suffix)
+                    return placed, {index: joint}
+        return None
+
+    @staticmethod
+    def _locatable(tokens: Sequence[str], value: str) -> bool:
+        """Is this value anywhere in this sentence at all?"""
+        if " " in value:
+            return value in " ".join(tokens)
+        return any(value in token for token in tokens)
+
+    def _place(self, tokens: Sequence[str], fills: Dict[str, str], *,
+               blocked: Optional[Set[int]] = None
+               ) -> Optional[Dict[int, Tuple[str, int, str, str]]]:
         """Assign every role to a non-overlapping span of ``tokens``, or refuse.
 
         Refusal is the right answer more often than it looks. A demonstration whose subject does
@@ -909,9 +1703,12 @@ class Grammar:
         the mislabelling said.
         """
         options: Dict[str, List[Tuple[int, int, str, str]]] = {}
+        held = set(blocked or ())
         for role, filler in fills.items():
             found: List[Tuple[int, int, str, str]] = []
             for start in range(len(tokens)):
+                if start in held:
+                    continue
                 for span in range(1, MAX_SPAN + 1):
                     if start + span > len(tokens):
                         break
@@ -929,7 +1726,7 @@ class Grammar:
             options[role] = found
         roles = sorted(options, key=lambda role: len(options[role]))
         chosen: Dict[int, Tuple[str, int, str, str]] = {}
-        used: Set[int] = set()
+        used: Set[int] = set(held)
 
         def assign(depth: int) -> bool:
             if depth == len(roles):
@@ -977,7 +1774,14 @@ class Grammar:
                 continue
             head = constructions[0]
             head.support = len(group)
+            seen: Dict[str, Set[str]] = {}
+            for filling in fillings:
+                for role, value in filling.items():
+                    seen.setdefault(role, set()).add(value)
+            head.fillers = {role: frozenset(values) for role, values in seen.items()}
             kept.append(head)
+        kept = self._factorise(kept, report)
+        kept = self._licence_order(kept, report)
         previous = {c.signature: c for c in self.constructions}
         for construction in kept:
             older = previous.get(construction.signature)
@@ -990,10 +1794,211 @@ class Grammar:
         self.rejected = list(report.reasons)
         return report
 
+    # -- the paradigm axis --------------------------------------------------- #
+    @staticmethod
+    def _feature_map(construction: Construction) -> Dict[str, str]:
+        """Everything a shape asserts that no slot of it holds, in one dict."""
+        out = {"temporal": construction.temporal or "", "modality": construction.modality or "",
+               "negated": "true" if construction.negated else ""}
+        out.update(dict(construction.features))
+        return {name: value for name, value in out.items() if value}
+
+    @staticmethod
+    def _extends(item: Slot, base: Tuple[str, str]) -> bool:
+        """Is this slot's material the base's material with more added outside it?"""
+        return item.prefix.endswith(base[0]) and item.suffix.startswith(base[1])
+
+    @staticmethod
+    def _common(values: Sequence[str], *, end: bool) -> str:
+        """The longest string every one of these ends with (or starts with)."""
+        if not values:
+            return ""
+        shared = values[0]
+        for value in values[1:]:
+            while shared and not (value.endswith(shared) if end else value.startswith(shared)):
+                shared = shared[1:] if end else shared[:-1]
+            if not shared:
+                break
+        return shared
+
+    def _factorise(self, kept: List[Construction], report: "Learned") -> List[Construction]:
+        """Turn a family of near-identical shapes into one shape with detachable markers.
+
+        This is the axis, and it is the difference between a paradigm and a list. Shapes that
+        share a skeleton and differ in *one* piece of material carrying *one* feature are not
+        three facts about a language, they are one fact and two markers — and two markers of
+        different dimensions attach independently, which is how a cell nobody demonstrated becomes
+        reachable.
+
+        It refuses wherever the evidence does not separate the pieces: a member differing in two
+        features at once, or in material on two slots, leaves the family unfactorised, because
+        which piece carries which feature is then a guess. And a dimension **every** member of the
+        family marks is recorded as *required* — no lesson showed the shape without it, so a
+        sentence lacking it is not a sentence of this language and must not be read as one.
+        """
+        groups: Dict[Tuple[Any, ...], List[Construction]] = {}
+        for construction in kept:
+            groups.setdefault(construction.skeleton, []).append(construction)
+        out: List[Construction] = []
+        for group in groups.values():
+            if len(group) < 2:
+                out.extend(group)
+                continue
+            merged = self._merge(group)
+            if merged is None:
+                out.extend(group)
+                continue
+            report.reasons.append(
+                f"{merged.shape!r}: {len(group)} shapes folded into one paradigm with "
+                f"{len(merged.markers)} marker(s)")
+            out.append(merged)
+        return out
+
+    def _merge(self, group: Sequence[Construction]) -> Optional[Construction]:
+        slots = [index for index, item in enumerate(group[0].pattern) if isinstance(item, Slot)]
+        features = [self._feature_map(c) for c in group]
+
+        # The base is the **least marked** member, not the intersection of all of them. With the
+        # intersection, a family whose every member says something — three verbs each marking a
+        # different combination of person — has no member that is plain, so every one of them
+        # differs from the base in two things at once and the family is refused. Measured, that
+        # is a verb marking both its arguments: 0/8, and the shape that would have read it was
+        # thrown away for being ambiguous about which ending meant what.
+        order = sorted(range(len(group)),
+                       key=lambda i: (len(features[i]),
+                                      sum(item.bound_chars for item in group[i].pattern
+                                          if isinstance(item, Slot))))
+        base_at = order[0]
+        shared: Dict[int, Tuple[str, str]] = {
+            index: (group[base_at].pattern[index].prefix, group[base_at].pattern[index].suffix)
+            for index in slots}
+        base_features = dict(features[base_at])
+        if not all(self._extends(group[i].pattern[index], shared[index])
+                   for i in range(len(group)) for index in slots):
+            # The members do not extend one base — two different endings in one place, neither of
+            # them the plain form. Then the shared part is whatever they all have in common, and
+            # every member is a marker.
+            shared = {index: (self._common([c.pattern[index].prefix for c in group], end=False),
+                              self._common([c.pattern[index].suffix for c in group], end=True))
+                      for index in slots}
+            base_features = {name: value for name, value in features[0].items()
+                             if all(other.get(name) == value for other in features[1:])}
+
+        markers: List[Marker] = []
+        dimensions_seen: List[Set[str]] = []
+        for construction, feature_map in zip(group, features):
+            delta = {name: value for name, value in feature_map.items()
+                     if base_features.get(name) != value}
+            extras: List[Tuple[int, str, str]] = []
+            for index in slots:
+                item = construction.pattern[index]
+                head = item.prefix[: len(item.prefix) - len(shared[index][0])]
+                tail = item.suffix[len(shared[index][1]):]
+                if head or tail:
+                    extras.append((index, head, tail))
+            if not delta and not extras:
+                dimensions_seen.append(set())
+                continue
+            if len(delta) != 1 or len(extras) > 1:
+                return None                     # which piece carries which feature is a guess
+            (name, value), = delta.items()
+            index, head, tail = extras[0] if extras else (-1, "", "")
+            markers.append(Marker(slot=index, prefix=head, suffix=tail, name=name, value=value))
+            dimensions_seen.append({name})
+        if not markers:
+            return None
+        # A dimension every single member marks is one no lesson ever showed the shape without.
+        dimensions = {marker.name for marker in markers}
+        required = tuple(sorted(name for name in dimensions
+                                if all(name in seen for seen in dimensions_seen)))
+        pattern = list(group[0].pattern)
+        for index in slots:
+            item = pattern[index]
+            pattern[index] = Slot(role=item.role, prefix=shared[index][0],
+                                  suffix=shared[index][1])
+        head = group[0]
+        return Construction(
+            tongue=head.tongue, pattern=tuple(pattern), kind=head.kind, focus=head.focus,
+            negated=base_features.get("negated") == "true",
+            temporal=base_features.get("temporal", ""),
+            modality=base_features.get("modality", ""),
+            features=tuple(sorted((name, value) for name, value in base_features.items()
+                                  if name not in _MEANING_FEATURES)),
+            markers=tuple(markers),
+            required=required,
+            fillers=_pool_fillers(group),
+            support=sum(c.support for c in group),
+            source=head.source)
+
+    # -- the free-order axis -------------------------------------------------- #
+    #: The most slots a free-order family may have. Four, because the orders are enumerated and
+    #: five slots is a hundred and twenty shapes for one sentence — at which point the search is
+    #: paying more than the generalisation is worth.
+    max_free_slots = 4
+
+    def _licence_order(self, kept: List[Construction],
+                       report: "Learned") -> List[Construction]:
+        """Where case says the roles, order does not have to, and every order is licensed.
+
+        Shown a case-marked language in two of its six orders, a grammar made of shapes holds two
+        and refuses the other four — measured, **0 / 8** on exactly the orders that were not
+        demonstrated, all of them refusals. But the case markers say the roles unambiguously in
+        all six, and *that* is a property of the family rather than of any one member of it.
+
+        The precondition is what keeps this from destroying refusal, and it is checked rather than
+        assumed: every slot must carry material **distinct** from every other slot's, and at most
+        one may carry none. Then a token names its own role and the order genuinely cannot change
+        the meaning. A family with two unmarked slots gets nothing, because there the order is the
+        only thing telling the two apart and licensing a permutation would be inventing a reading.
+
+        Two demonstrated orders, not one: one order is not evidence that order is free.
+        """
+        import itertools
+        groups: Dict[Tuple[Any, ...], List[Construction]] = {}
+        for construction in kept:
+            if construction.literals or construction.markers:
+                continue
+            slots = [item for item in construction.pattern if isinstance(item, Slot)]
+            if len(slots) != len(construction.pattern) or len(slots) > self.max_free_slots:
+                continue
+            key = (construction.tongue, construction.kind, construction.focus,
+                   construction.negated, construction.temporal, construction.modality,
+                   construction.features,
+                   tuple(sorted((item.role, item.prefix, item.suffix) for item in slots)))
+            groups.setdefault(key, []).append(construction)
+        extra: List[Construction] = []
+        for key, group in groups.items():
+            if len(group) < 2:
+                continue
+            slots = [item for item in group[0].pattern if isinstance(item, Slot)]
+            material = [(item.prefix, item.suffix) for item in slots]
+            if len(set(material)) != len(material):
+                continue                        # two slots marked alike: order is the only cue
+            if sum(1 for pair in material if not pair[0] and not pair[1]) > 1:
+                continue                        # two bare slots: same problem
+            seen = {tuple(item.role for item in c.pattern) for c in group}
+            support = min(c.support for c in group)
+            for order in itertools.permutations(slots):
+                roles = tuple(item.role for item in order)
+                if roles in seen:
+                    continue
+                seen.add(roles)
+                head = group[0]
+                extra.append(Construction(
+                    tongue=head.tongue, pattern=tuple(order), kind=head.kind,
+                    negated=head.negated, focus=head.focus, modality=head.modality,
+                    temporal=head.temporal, features=head.features,
+                    fillers=_pool_fillers(group),
+                    support=support, source=f"{head.source} (order licensed by case)"))
+            report.reasons.append(
+                f"{group[0].shape!r}: {len(group)} orders shown, every order licensed — "
+                f"each slot carries its own marking")
+        return kept + extra
+
     @staticmethod
     def _varies(fillings: Sequence[Dict[str, str]]) -> bool:
         """Did any slot ever hold two different words? If not, this is one sentence twice."""
-        for role in ROLES:
+        for role in {role for filling in fillings for role in filling}:
             seen = {filling.get(role, "") for filling in fillings}
             if len(seen - {""}) > 1:
                 return True
@@ -1033,15 +2038,19 @@ class Grammar:
 
     @staticmethod
     def _agrees(got: Meaning, want: Meaning) -> bool:
-        """Same sentence, same reading — on the fields a construction is responsible for."""
+        """Same sentence, same reading — on every field a construction is responsible for.
+
+        Every role, not the legacy three: a reading that recovered the agent and the theme and
+        dropped the recipient is a different claim about the sentence, and scoring it as a match
+        would let the one thing this module was extended to do go unmeasured.
+        """
         def norm(value: Any) -> str:
             return " ".join(str(value or "").strip().lower().split())
         return (got.kind == (want.kind or "assertion")
                 and bool(got.negated) == bool(want.negated)
                 and norm(got.focus) == norm(want.focus)
-                and norm(got.subject) == norm(want.subject)
-                and norm(got.object) == norm(want.object)
-                and norm(got.relation) == norm(want.relation))
+                and norm(got.temporal) == norm(want.temporal)
+                and _fills_of(got) == _fills_of(want))
 
     # -- reading ------------------------------------------------------------ #
     def candidates(self, surface: str) -> List[Reading]:
@@ -1051,13 +2060,30 @@ class Grammar:
             return []
         out: List[Reading] = []
         for construction in self.constructions:
-            for fills in construction.match(tokens):
-                anchor = float(construction.literals) + construction.bound_chars / 2.0
+            for fills, features, material in construction.readings(tokens):
+                # A marker that matched is material the sentence actually contains, so it counts
+                # as evidence exactly as a literal or a case ending does. Without that, a reading
+                # that recognised a tense ending would score the same as one that swallowed it.
+                anchor = (float(construction.literals)
+                          + (construction.bound_chars + material) / 2.0)
                 slack = sum(len(value.split()) - 1 for value in fills.values())
+                # A reading whose fillers are words she has actually met is better supported than
+                # one whose are not. It decides nothing on its own — it is worth less than a
+                # literal — and it is the only evidence there is for where a **compound** divides:
+                # two novel words written together have a boundary nothing can see, and one novel
+                # word written against a known one has a boundary that is simply where the known
+                # word starts.
+                familiar = 0
+                if self.known is not None:
+                    familiar = sum(1 for value in fills.values() if self.known(value))
+                # And a word that has stood in *this* role before is stronger evidence still.
+                fitted = sum(1 for role, value in fills.items()
+                             if value in construction.fillers.get(role, ()))
                 score = (anchor - 0.5 * slack + 0.25 * min(construction.support, 8)
-                         + construction.record)
-                out.append(Reading(meaning=self._meaning(construction, fills, anchor, tokens),
-                                   construction=construction, score=score, anchor=anchor))
+                         + 0.5 * familiar + 0.4 * fitted + construction.record)
+                out.append(Reading(
+                    meaning=self._meaning(construction, fills, anchor, tokens, features),
+                    construction=construction, score=score, anchor=anchor))
         out.sort(key=lambda reading: -reading.score)
         return out
 
@@ -1102,16 +2128,24 @@ class Grammar:
         return readings[0].anchor > 0.0
 
     def _meaning(self, construction: Construction, fills: Dict[str, str],
-                 anchor: float, tokens: Sequence[str]) -> Meaning:
+                 anchor: float, tokens: Sequence[str],
+                 features: Optional[Dict[str, str]] = None) -> Meaning:
         meaning = Meaning(
             kind=construction.kind, negated=construction.negated, focus=construction.focus,
             modality=construction.modality, temporal=construction.temporal,
             frame=f"learned:{construction.tongue}", language=construction.tongue,
         )
-        meaning.subject = fills.get("subject", "")
-        meaning.object = fills.get("object", "")
-        meaning.relation = fills.get("verb", "")
-        meaning.verb = meaning.relation
+        carried = dict(construction.features)
+        carried.update(features or {})
+        for name, value in carried.items():
+            if name == "negated":
+                meaning.negated = value == "true"
+            elif name in _MEANING_FEATURES:
+                setattr(meaning, name, value)
+            else:
+                fills = dict(fills)
+                fills[name] = value
+        _write_fills(meaning, fills)
         meaning.confidence = round(min(0.95, 0.55 + 0.05 * anchor
                                        + 0.3 * (construction.record - 0.5)), 4)
         return meaning
@@ -1125,27 +2159,52 @@ class Grammar:
         says nothing at all. There is no best-effort surface here for the same reason there is no
         best-effort program in :mod:`nyxara.njp.coding`: a sentence that nearly says what was
         meant says something else.
+
+        With markers, one construction is a paradigm rather than a sentence shape, so what is
+        searched is every cell of it — and the cell that matches the meaning may be one nobody
+        ever demonstrated.
         """
         try:
             fills = _fills_of(meaning)
             if not fills:
                 return ""
-            wanted = set(fills)
+            wanted = {"temporal": meaning.temporal or "", "modality": meaning.modality or "",
+                      "negated": "true" if meaning.negated else ""}
             ranked = sorted(
                 (c for c in self.constructions
-                 if set(c.roles) == wanted
-                 and c.kind == (meaning.kind or "assertion")
-                 and bool(c.negated) == bool(meaning.negated)
-                 and (c.focus or "") == (meaning.focus or "")
-                 and (c.temporal or "") == (meaning.temporal or "")
-                 and (c.modality or "") == (meaning.modality or "")),
-                key=lambda c: (-c.record, -c.support, -c.literals))
+                 if c.kind == (meaning.kind or "assertion")
+                 and (c.focus or "") == (meaning.focus or "")),
+                key=lambda c: (-sum(1 for role, value in fills.items()
+                                    if value in c.fillers.get(role, ())),
+                               -c.record, -c.support, -c.literals))
             for construction in ranked:
-                surface = construction.render(fills)
-                if not surface:
-                    continue
-                if self._agrees(self.read(surface), meaning):
-                    return surface
+                for pattern, extra, _material in construction.variants():
+                    carried = dict(construction.features)
+                    carried.update(extra)
+                    said = {"temporal": construction.temporal or "",
+                            "modality": construction.modality or "",
+                            "negated": "true" if construction.negated else ""}
+                    roles: Dict[str, str] = {}
+                    for name, value in carried.items():
+                        if name in _MEANING_FEATURES:
+                            said[name] = value
+                        else:
+                            roles[name] = value
+                    if said != wanted:
+                        continue
+                    slots: Set[str] = set()
+                    for item in pattern:
+                        if isinstance(item, Slot):
+                            slots.add(item.role)
+                        elif isinstance(item, Joint):
+                            slots.update(item.roles)
+                    if slots | set(roles) != set(fills):
+                        continue
+                    if any(fills.get(name) != value for name, value in roles.items()):
+                        continue
+                    surface = construction.render(fills, pattern)
+                    if surface and self._agrees(self.read(surface), meaning):
+                        return surface
         except Exception:  # noqa: BLE001
             return ""
         return ""
@@ -1236,7 +2295,12 @@ class Tongue:
         self.morphology = Morphology()
         self.lexicon = Lexicon()
         self.grammar = Grammar(self.name)
+        self.grammar.known = self._met
         self.heard = 0
+
+    def _met(self, word: str) -> bool:
+        """Has this exact word been heard, on its own, in this language?"""
+        return str(word or "").strip().lower() in self.morphology.vocabulary
 
     def hear(self, text: str) -> None:
         """Surface only, with no meaning attached — which is most of what anyone ever hears."""

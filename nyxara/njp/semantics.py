@@ -296,6 +296,20 @@ class Meaning:
     frame: str = ""               # which frame matched, for diagnosis
     language: str = "en"
     tokens: List[Token] = field(default_factory=list)
+    #: Arguments beyond the three this compiler can read, keyed by role name — ``recipient``,
+    #: ``location``, ``instrument``, a modifier on a noun, the inside of a relative clause.
+    #:
+    #: Added for :mod:`nyxara.njp.language`, and empty everywhere else. Three named fields is the
+    #: right shape for what the frames in *this* module can extract, and the wrong shape for a
+    #: sentence with four arguments in it: *"she gave the book to Ravi"* has an agent, a theme and
+    #: a recipient, and nothing here could hold the third without inventing a fourth attribute,
+    #: then a fifth. A dict has no such ceiling and asserts no ontology — a role name is whatever
+    #: a demonstration called it, exactly as a concept id is whatever the clustering found.
+    #:
+    #: ``subject``, ``relation`` and ``object`` stay where they are and stay authoritative. Every
+    #: consumer that reads them is untouched, and a Meaning this compiler produced has an empty
+    #: ``roles`` — so nothing downstream has to learn about this field to keep working.
+    roles: Dict[str, str] = field(default_factory=dict)
 
     @property
     def readable(self) -> bool:
@@ -327,6 +341,8 @@ class Meaning:
             "object": self.object, "negated": self.negated,
             "confidence": round(self.confidence, 4), "frame": self.frame,
         }
+        if self.roles:
+            out["roles"] = dict(self.roles)
         for name in ("modality", "condition", "temporal", "focus", "verb", "evidential"):
             value = getattr(self, name)
             if value:
