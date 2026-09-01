@@ -384,9 +384,10 @@ from nyxara.njp.language import (
     Tongue,
 )
 from nyxara.njp.dialects import Dialect, Utterance, mint_dialect
-# The hard banks are deliberately NOT imported here: `nyxara.njp.hard` carries a `__main__` entry
-# point, and a module a package's `__init__` has already imported emits a RuntimeWarning when it
-# is then run with `python -m`. Same reason `school` and `study` are kept out.
+# The hard banks and the English/Hindi curriculum are deliberately NOT imported here:
+# `nyxara.njp.hard` and `nyxara.njp.lessons` each carry a `__main__` entry point, and a module a
+# package's `__init__` has already imported emits a RuntimeWarning when it is then run with
+# `python -m`. Same reason `school` and `study` are kept out.
 # `nyxara.njp.school` is deliberately NOT imported here. It carries a `__main__` entry point, and
 # a module that a package's `__init__` has already imported emits a RuntimeWarning about
 # unpredictable behaviour when it is then run with `python -m`. `nyxara.njp.study` is kept out for

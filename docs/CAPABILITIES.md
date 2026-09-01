@@ -1644,6 +1644,144 @@ never folded into a paradigm, so it cannot compose with anything.
 
 `python -m nyxara.njp.hard` runs the first bank, `--second` the second, `--all` both.
 
+### NJP V.20 — English and Hindi, and the honest size of what that means
+
+Everything the faculty had learned until now was a language **nobody speaks**. Thirty-eight of
+them, minted per seed, precisely so that a score could not be a table of English in disguise. That
+was the right thing to measure and it left one question unasked: *can it learn a real one?*
+
+Asked plainly, the answer was **no — and not because of the mechanism**. She had no vocabulary at
+all. What ships is a tokeniser that handles every script, 242 closed-class words across English,
+romanised Hinglish and Devanagari, and 88 hand-written extraction patterns. That is grammar
+scaffolding, not a language. A sentence in Spanish came back `('el', 'gato', 'persigue al perro')`
+— confidently wrong, from the positional frame — and one in Japanese came back unreadable.
+
+`nyxara.njp.lessons` is a curriculum for two real languages, written out by hand.
+
+#### What it is, and what it is not
+
+**Not "everything the author knows about English."** It is what could be written down and
+mechanically verified: a few hundred word forms with their real paradigms, a corpus for the
+classes to form from, demonstrations of the constructions both languages actually use, and a
+bilingual glossary. The gap between that and a speaker's competence is enormous and is not closed
+here — no idiom, no register, no pragmatics, no world knowledge, and a vocabulary of **193 English
+forms and 59 Hindi ones** that you can read in a minute.
+
+**Hindi is taught twice**, in Devanagari and in romanised Hinglish, because those are two surfaces
+for one grammar — subject-object-verb, postpositions, the copula last — and holding both is the
+cleanest available check that what she learned is a grammar and not a spelling.
+
+#### What one run reports
+
+167 demonstrations, then 114 held-out items: sentences built from the same words in combinations
+no lesson contains, and inflections of stems no lesson touched.
+
+| | held out | faculty taught nothing | shipped compiler | after the curriculum |
+|---|---|---|---|---|
+| English — read · say · wug | 20 · 20 · 12 | 0 | 9 / 20 read correctly | **20 · 20 · 12** |
+| Hindi (Devanagari) | 12 · 12 · 7 | 0 | 0 / 12 | **12 · 12 · 7** |
+| Hindi (romanised) | 12 · 12 · 7 | 0 | 0 / 12 | **12 · 12 · 7** |
+| **all** | **114** | **0** | **9** | **114 / 114** |
+
+The wug items are the classic test in both languages: `wug` → `wugs`, `blicket` → `blicketed`,
+`gostak` → `gostaking`, and in Hindi nonce stems of **both** inflection classes — the vowel-final
+`टिमा` → `टिमे` and the consonant-final `बलक` → `बलकें`. Ten irregulars are memorised and do not
+leak: `go` → `went` while `wug` → `wuged`.
+
+**Translation works in all six directions**, and it needed one thing the minted banks did not: a
+lexicon. Between two minted dialects both languages use the same content words, so carrying the
+meaning across was carrying the role names alone. Between two real languages the words differ too.
+So a glossary is *taught* — twenty rows, sixty pairs, both directions — and `translate` refuses
+where one is missing: `the goat chases the cat` translates to nothing at all, because `goat` has
+no gloss, rather than to a sentence with a hole in it.
+
+    the farmer chases the cat   → लड़का बिल्ली देखता है
+    लड़का बिल्ली देखता है         → the farmer chases the cat
+    the teacher does not open the book → शिक्षक किताब नहीं पढ़ता है
+
+Reachable as `brain.learn_languages()` and `brain.translate(text, into=…, frm=…)`, and it survives
+a restart with everything else in the sidecar.
+
+#### Three axes the real languages forced, and the minted ones had not
+
+**G · A slot's width is learned, not a constant.** `MAX_SPAN` was a flat 1, because at 3 a
+construction of bare slots swallowed an extra word and stopped refusing. But a flat 1 makes *"the
+big dog"* unreadable, which rules out most of English — so neither constant was right and *the
+constant* was the mistake. Learned per slot from what it was shown holding, the minted languages
+keep refusing every one of their controls (their fillers are all one token, so every slot learns
+width 1) and English gets its noun phrases.
+
+**H · An ending is a fact about the language, not about one construction.** The transitive family
+was shown both `-s` and `-es`, so it reads `pushes`; the possessive family was only ever shown
+`-s`, and read the same word as `pushe` — not a word, in a language where `push` is. The
+morphology holds the whole paradigm, so it corrects a cut that is plainly not a word (`_resolve`)
+and, in production, selects a form she has already met over one the construction would spell
+(`_repair`). It selects and never invents, so a word she has never heard still comes out however
+the construction writes it. **Comprehension ran ahead of production for a while** — reading only
+has to recognise a form, speaking has to pick one — which is the ordinary shape of the thing.
+
+**I · A condition is the most general description that separates the evidence.** Allomorph
+conditions were a list of *characters seen*: a rule witnessed on stems ending in `h` and `d` fired
+on those two letters and abstained on one ending in `m`, though all three are consonants and the
+rule is about consonants. Three descriptions are now induced — whether the stem ends in a vowel,
+which vowel it last had, which character it ends in — and the coarsest that separates the family
+wins. Vowel harmony still lands on the vowel, because there every stem ends in one and the split
+is *which*.
+
+#### Four bugs, and who found each
+
+1. **The tokeniser shattered Devanagari.** `[^\W\d_]+` looks script-neutral and is not: Python's
+   `\w` excludes combining marks, so every matra fell out and `लड़का आम खाता है` tokenised as six
+   fragments, none of them a word. Every Hindi lesson was then a sentence whose own words were not
+   in it, and the Devanagari grammar came back with **0 shapes**. This is the third time this
+   exact failure is recorded here — NYX V.01's `[a-z0-9]` regex, V.09's missing negation, and now
+   this — and the fix is that this module no longer has a tokeniser of its own.
+2. **One ending, two shapes, and no way to count them together.** `khaata` is `kha` + `ata` and
+   `padhta` is `padh` + `ta`, so every allomorph arrived with a single demonstration and every one
+   was rejected as "a sentence, not a shape": romanised Hindi learned **1 construction of 12**.
+   The same course in Devanagari scored 12/12, because there the matra rides inside the stem's own
+   syllable. The grammar was never the problem; the orthography was showing something the grammar
+   had no way to count, and support is now counted per *skeleton*.
+3. **Support outranked a matched literal.** Ranking added everything into one number, so a
+   well-demonstrated shape that matched *nothing in the sentence* tied with a question form that
+   matched the question word — and a tie that disagrees is a refusal: 42 of 480 minted sentences
+   came back `ambiguous`. Material the sentence contains now outranks everything else, and the
+   rest only breaks ties.
+4. **A longer affix outranked a known word.** `chases` is `chase` + `s` or `chas` + `es`, and
+   affix characters counted towards the anchor, so the second won. It then misread its own lesson,
+   `_verify` dropped it, and the whole transitive family went with it. The anchor is whole tokens
+   now; endings are evidence in the tie-break, where a known word can outweigh one more matched
+   character.
+
+And **three flaws in the curriculum**, all of which marked her wrong for being right: paradigms
+regularised to `pushs` and `carrys` while the exam asked for the real forms; a past-tense lemma
+written as `form[:-2]`, which makes `chased` into `chas`, so `_verify` threw away the past tense
+for contradicting a lesson that was itself wrong; and Hindi wug answers that were already in the
+vocabulary, which a **test** caught rather than she did — the second time in this work that the
+flaw she could not surface was the one that flattered the score.
+
+#### What she still cannot do, in a real language
+
+She refuses these, and refusing is correct:
+
+    the quick brown fox jumps over the lazy dog     — words she has not met
+    yesterday I would have preferred the other one  — a shape she has not met
+    the goat does not walk                          — negation was demonstrated on
+                                                      transitive clauses only
+    मैंने कल तुम्हें बताया था कि यह मुश्किल है          — both
+
+The third is the one worth reading. It is *nearly* in her grammar: she has negation, and she has
+intransitives, and she has never seen the two together. Markers compose across dimensions; a
+negator that is a whole token in one construction and absent from another is not a dimension of
+one shape, so it does not. That is a named limit rather than a mystery.
+
+Beyond it: no idiom, no pragmatics, no world knowledge, a two-hundred-word vocabulary, one flat
+clause per construction, a glossary with one sense per word, and no way to acquire any of it from
+running text — a paradigm has to be countable before a rule can come out of it. What is real is
+narrower than "she knows English and Hindi" and is not nothing: **taught 167 sentences of two real
+languages, she reads and says 114 held-out items she was never shown, in three tongues at once,
+and translates between them.**
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,

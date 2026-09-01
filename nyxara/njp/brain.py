@@ -1754,6 +1754,34 @@ class NJPBrain:
             return None
         return self.language.read(surface, tongue=tongue)
 
+    def learn_languages(self, *, courses: Any = None) -> Any:
+        """Sit the English and Hindi curriculum and come back with the report card.
+
+        Deliberately not driven, for the reason :meth:`go_to_school` is not: it changes how every
+        later sentence is read. It is also the only call in this brain that gives her a
+        **vocabulary** — until it runs she knows no content word in any language, which is the
+        honest state of a system that ships a grammar and no dictionary.
+        """
+        try:
+            from nyxara.njp.lessons import enrol
+            if self.language is None:
+                return None
+            _faculty, reports = enrol(self.language,
+                                      **({"courses": courses} if courses else {}))
+            return reports
+        except Exception:  # noqa: BLE001
+            return None
+
+    def translate(self, surface: str, *, into: str, frm: Optional[str] = None) -> str:
+        """Read in one language and say it in another, or say nothing.
+
+        The words cross by a taught glossary and the rest crosses as meaning. One unglossed word
+        and the answer is the empty string rather than a sentence with a hole in it.
+        """
+        if self.language is None:
+            return ""
+        return self.language.translate(surface, into=into, frm=frm)
+
     def say_language(self, meaning: Any, *, tongue: Optional[str] = None) -> str:
         """Put a meaning into words, or return nothing.
 
