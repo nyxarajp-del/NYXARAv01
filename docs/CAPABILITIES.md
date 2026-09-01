@@ -954,11 +954,79 @@ Two subjects moved because a lesson ran, and both are gains on material that was
    an easy thing time out. Cost now leads the ranking; within a cost tier the taught shape still
    leads.
 
-**What this is not.** She writes programs in a first-course subset of Python over integers, lists
-and strings — no user-defined recursion, no mutable state, no I/O, no libraries. Synthesis is
-enumeration over learned shapes under an attempt budget, not a general program synthesiser, and a
-shape she has never seen and cannot reach by one graft is an abstention. Every one of those limits
-is reported as a number by the school rather than described here as a caveat.
+### NJP V.17 — the language grows, and the syllabus grows with it
+
+V.16 taught her a first-course *expression* language. She could read a loop and not write one,
+could not name a function inside itself, and had no mappings, no sets and no local variables.
+That is now closed, and closed on both sides — what she can run, and what she is examined on.
+
+**The language.** Integers, booleans, strings, lists, mappings, sets and `None`. Arithmetic,
+comparison (chained included), the boolean connectives, `in`/`not in`, `is None`. Indexing,
+slicing, the container operations, `map`/`filter`/`fold` and the rest of the higher-order
+vocabulary. Local variables, `if`/`elif`/`else`, `for` with tuple unpacking, `while`, `break`,
+`continue`, parallel assignment (`a, b = b, a % b`), subscript assignment, and **functions that
+call themselves or each other**. `read_python` takes list, dict and set comprehensions, f-strings,
+`sorted(…, key=…)`, `.append()`, and the rest of what a person actually writes.
+
+**Every program still halts, and it is now a budget that makes that true rather than a missing
+feature.** `while True` is something she can write; what she cannot do is run it forever. The step
+counter and the call-depth counter turn non-termination into an `Exhausted` rather than a hung
+process, and the depth limit sits deliberately *below* CPython's own — one level costs about ten
+host frames, so a budget set higher is never reached and the interpreter dies of a `RecursionError`
+that is not a `CodeError` and escapes every guard the searcher has.
+
+**One deliberate divergence from Python, and it is listed rather than discovered.** Containers here
+are values: `xs.append(v)` reads as `xs = xs + [v]` and `d[k] = v` as `d = {**d, k: v}`. For the
+accumulator idiom that is the same answer; for two names pointing at one object it is not. A second
+divergence is smaller and argued for in `_int`: `True + 1` is an error here where Python says `2`,
+because a predicate leaking into arithmetic returns a *plausible wrong number* instead of failing —
+the one outcome a verifier that works by running the program cannot catch. Both are in
+`tasks.EDGE_CASES`, so they stay decisions rather than defects nobody remembers making.
+
+**What teaching buys, measured.** A shape she has been shown is reached three ways before
+enumeration begins: the exact fillings that stood in it before, the same operators with different
+constants, then one hole swept while the others hold. That is what a *family* is — the same
+skeleton with the constants moved — so transfer between instances costs tens of attempts instead
+of tens of thousands. Over the sixty-five families in `nyxara.njp.tasks`, on instances the teacher
+never showed her, with the same attempt budget on both sides:
+
+| | cold | taught |
+|---|---|---|
+| families she can write | **29 / 65** | **65 / 65** |
+| median attempts | — | 26 |
+
+**The syllabus is nineteen subjects now** — six of reasoning, thirteen of coding: reading, tracing,
+one-operator programs, composed ones, loops, recursion, mappings, strings, nested data, the classic
+algorithms, debugging, the awkward inputs, and transfer with the teacher off. Every writing subject
+is the same class over a different bank, so none can be graded more kindly than another by
+accident, and every one is scored on **held-out** pairs.
+
+`python -m nyxara.njp.school --rounds 2 --retention`, seed 7:
+
+| | taught | teacher off, fresh items |
+|---|---|---|
+| subjects mastered | 19 / 19 | 19 / 19 |
+| right / wrong / abstained | 438 / 3 / 3 | 438 / 1 / 5 |
+| accuracy · precision | 0.99 · 0.99 | 0.99 · **1.00** |
+
+Nine subjects moved because a lesson ran: `depth` 0.33→1.00, `mappings` 0.12→1.00, `algorithms`
+0.30→1.00, `code-composites` 0.25→0.88, `strings` 0.25→0.88, `loops` 0.50→1.00, `recursion`
+0.62→1.00, `structures` 0.71→1.00, `code-basics` 0.88→1.00. The other ten read 1.00 or near it
+cold and are printed as `already`.
+
+**Four more bugs the school found, all fixed.** A list comprehension over a set gave back the set
+rather than a list. `_kind_of` returned `"any"` for every mapping, which pruned the function pool
+down to the identity and made every dictionary task unreachable. `abstract` blanked the empty list
+that *builds* a literal, turning `[] + [b]` into a hole no pool could fill — seventeen of
+sixty-five families were unwritable that way, every one of them already taught. And a bare
+statement the reader did not understand was silently dropped rather than refused, so a program
+containing one was read as a different program.
+
+**What this is not.** No classes, no exceptions, no generators, no imports, no closures over
+mutable state, no shared mutation, no floats. Synthesis is enumeration over learned shapes under
+an attempt budget, not a general program synthesiser: a shape she has never seen and cannot reach
+by one graft is an abstention, and cold she writes 29 of 65 families rather than 65. Every one of
+those limits is reported as a number by the school rather than described here as a caveat.
 
 ### Reachable over the wire
 

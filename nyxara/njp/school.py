@@ -7,7 +7,8 @@ of them is one third of a school and none of them is a school: there was nothing
 down, worked out what she *cannot currently do*, taught that, and then examined her on material
 she had never seen.
 
-This is that, over the two subjects the Master asked for — **reasoning** and **coding** — and its
+This is that, over nineteen subjects — six of reasoning and thirteen of coding — and its design is
+one claim repeated in every one of them:
 design is one claim repeated in eleven places:
 
     Teaching is only teaching if a number moved on questions she was never taught.
@@ -34,6 +35,15 @@ scored as a miss rather than as a wrong answer, and both appear in the report. A
 answers everything and a brain that answers nothing produce two very different report cards here,
 which is the entire reason for keeping three counters instead of one.
 
+**The coding half is thirteen subjects because "can she code" is thirteen questions.** Reading a
+program and saying what it gives; saying what happened *inside* it; writing one-operator programs,
+composed ones, loops, recursion, mappings, text, nested data, and the classic algorithms; finding
+and fixing one wrong thing; the awkward inputs; and finally, with the teacher off, unseen tasks on
+a fraction of the budget. Every writing subject is the same class over a different bank
+(:class:`BankSubject`), so none of them can be graded more kindly than the others by accident, and
+every one of them is scored on **held-out** pairs — a program fitted to the examples it was given
+and failing one it was not is a coincidence, and it is named as one.
+
 **Where a ceiling is structural it is named, not learned around.** ``depth`` is the case worth
 reading: a chain of four hops fails cold for two independent reasons — the per-hop confidence
 falls under ``core._MIN_LINK_CONFIDENCE`` because an unproven relation's transitivity prior is
@@ -46,21 +56,31 @@ the roll-back is what keeps that sentence true here rather than aspirational.
 **What one run actually reports**, seed 7 and two rounds, reproducible::
 
                             taught          teacher off, fresh items
-    subjects mastered       11 / 11         11 / 11
-    right / wrong / absent  107 / 0 / 3     109 / 0 / 1
-    accuracy · precision    0.97 · 1.00     0.99 · 1.00
+    subjects mastered       19 / 19         19 / 19
+    right / wrong / absent  438 / 3 / 3     438 / 1 / 5
+    accuracy · precision    0.99 · 0.99     0.99 · 1.00
 
-Two subjects moved because a lesson ran — ``depth`` 0.33 → 1.00 and ``code-composites``
-0.17 → 1.00 — and both are gains on material that was never taught. Nine of the eleven read 1.00
-cold and are printed as ``already``, which is the honest shape of this result: most of what the
-syllabus asks for, she could already do, and the report says which two she could not.
+Nine subjects moved because a lesson ran, every one of them on material nobody demonstrated::
 
-It also found three bugs in the brain, which is the argument for having a school at all: a
-deliberation ladder that answered ``25 + 10`` with ``10`` and out-ranked the calculator; a
-promoted ``shape:p>p>p`` that shadowed the general composition walk at exactly four hops, so a
-lesson that had worked looked like one that had not; and a schema ranking that tried every taught
-composite before the one-attempt seed answering ``sum(xs)``, which made learning a hard thing
-break an easy one. All three are fixed where they were, not worked around here.
+    depth             0.33 → 1.00     four-hop chains, once the relation is proved to chain
+    mappings          0.12 → 1.00     counting, grouping, lookup
+    algorithms        0.30 → 1.00     gcd, primes, binary search, sorting, FizzBuzz
+    code-composites   0.25 → 0.88     two and three operators deep
+    strings           0.25 → 0.88     taking text apart and putting it back
+    loops             0.50 → 1.00     a variable, a loop and a body
+    recursion         0.62 → 1.00     a base case and a step
+    structures        0.71 → 1.00     rows, columns, nesting
+    code-basics       0.88 → 1.00     one operator, from examples
+
+The other ten read 1.00 or near it cold and are printed as ``already`` — reading Python, tracing
+it, repairing it, refusing what it should refuse, and surviving the awkward inputs are things she
+could already do, and saying so is the difference between a report card and an advertisement.
+
+It also found four bugs, which is the argument for having a school at all: a deliberation ladder
+that answered ``25 + 10`` with ``10``; a promoted ``shape:p>p>p`` that shadowed the general
+composition walk at exactly four hops; a schema ranking that tried every taught composite before
+the one-attempt seed answering ``sum(xs)``; and a list comprehension over a set that gave back the
+set. All four are fixed where they were, not worked around here.
 
 Pure standard library, no LLM. ``python -m nyxara.njp.school`` runs the whole school and prints
 the report card.
@@ -309,10 +329,14 @@ class Transcript:
         lines.append(head)
         lines.append("  " + "-" * (len(head) - 2))
         for r in self.results:
-            if r.mastered and r.already and r.gain <= 0.01:
-                verdict = "already"
-            elif r.mastered and r.gain > 0.01:
+            # The same rule the `learned` list uses, and it has to be the same rule: a floor
+            # subject that read 0.92 on one set of generated items and 1.00 on the next has
+            # sampled twice, not learned, and a row that says LEARNED where the list below it
+            # does not is a report card arguing with itself.
+            if r.gain > 0.01 and r.taught > 0:
                 verdict = "LEARNED"
+            elif r.mastered and r.already:
+                verdict = "already"
             elif r.mastered:
                 verdict = "passed"
             else:
@@ -333,6 +357,12 @@ class Transcript:
             lines.append(f"  shapes held   {self.coder_stats.get('taught', 0)} taught, "
                          f"{self.coder_stats.get('grafted', 0)} invented, "
                          f"{self.coder_stats.get('schemas', 0)} total")
+            # The share that says what the teaching is *doing*. High means the lessons are
+            # answering the questions; low would mean the seeds are and the lessons are decoration.
+            lines.append(f"  written by    recall of a taught shape "
+                         f"{self.coder_stats.get('recall_share', 0.0):.0%} of the time "
+                         f"({self.coder_stats.get('recalled', 0)}/"
+                         f"{self.coder_stats.get('written', 0)} programs)")
         lines.append("")
         return "\n".join(lines)
 
@@ -679,181 +709,6 @@ REASONING: Tuple[Subject, ...] = ()  # filled at the bottom, once the coding sub
 # coding
 # --------------------------------------------------------------------------- #
 
-@dataclass(frozen=True)
-class Family:
-    """A *kind* of programming task, and a worked solution for any instance of it.
-
-    Teaching and examining draw from the same families and never from the same instance. That is
-    the whole transfer claim in one sentence: the shape is demonstrated on ``sum of triple the
-    odd ones`` and examined on ``sum of double the even ones``, over different data, and the only
-    thing carried between them is the skeleton :func:`~nyxara.njp.coding.abstract` kept.
-    """
-
-    id: str = ""
-    intent: str = ""
-    build: Any = None          # (rng, name) -> (ref, source)
-    composite: bool = True
-
-
-def _int_data(rng: random.Random, rows: int = 10, size: int = 6,
-              lo: int = 0, hi: int = 20) -> List[Tuple[int, ...]]:
-    return [tuple(rng.randrange(lo, hi) for _ in range(size)) for _ in range(rows)]
-
-
-def _spec_from(name: str, intent: str, ref: Any, rows: Sequence[Tuple[int, ...]]) -> Any:
-    from nyxara.njp.coding import Spec
-    keep = [row for row in rows if _safe(ref, row) is not _FAILED]
-    # Six shown, four held out. Four shown was not enough: `sum(x for x in xs if x > 3)` fitted
-    # four pairs of a task whose threshold was 9 and failed the fifth, which is the coincidence
-    # the split exists to catch — but a split that catches it *often* is a split whose training
-    # half is too small, and catching it is more expensive than not producing it.
-    return Spec.of(name, intent, ["xs"],
-                   [([row], ref(row)) for row in keep[:6]],
-                   [([row], ref(row)) for row in keep[6:]])
-
-
-_FAILED = object()
-
-
-def _safe(ref: Any, row: Tuple[int, ...]) -> Any:
-    """A reference implementation that raises on an unlucky row (``max`` of an empty filter) is
-    not a broken family — it is a row that cannot be an example, and it is dropped."""
-    try:
-        return ref(row)
-    except Exception:  # noqa: BLE001
-        return _FAILED
-
-
-def _f_sum_mapped_filtered(rng: random.Random, name: str) -> Tuple[Any, str]:
-    k, remainder = rng.choice([2, 3, 4]), rng.choice([0, 1])
-    ref = lambda xs: sum(x * k for x in xs if x % 2 == remainder)  # noqa: E731
-    return ref, (f"def {name}(xs):\n"
-                 f"    return sum([x * {k} for x in xs if x % 2 == {remainder}])")
-
-
-def _f_count_over(rng: random.Random, name: str) -> Tuple[Any, str]:
-    threshold = rng.choice([5, 8, 10, 12])
-    ref = lambda xs: len([x for x in xs if x > threshold])  # noqa: E731
-    return ref, (f"def {name}(xs):\n"
-                 f"    return len([x for x in xs if x > {threshold}])")
-
-
-def _f_sum_over(rng: random.Random, name: str) -> Tuple[Any, str]:
-    threshold = rng.choice([4, 7, 9, 11])
-    ref = lambda xs: sum(x for x in xs if x > threshold)  # noqa: E731
-    return ref, (f"def {name}(xs):\n"
-                 f"    return sum([x for x in xs if x > {threshold}])")
-
-
-def _f_max_mapped(rng: random.Random, name: str) -> Tuple[Any, str]:
-    k = rng.choice([2, 3, 5])
-    ref = lambda xs: max(x * k for x in xs)  # noqa: E731
-    return ref, f"def {name}(xs):\n    return max([x * {k} for x in xs])"
-
-
-def _f_sum_mapped(rng: random.Random, name: str) -> Tuple[Any, str]:
-    k = rng.choice([2, 3, 4])
-    ref = lambda xs: sum(x + k for x in xs)  # noqa: E731
-    return ref, f"def {name}(xs):\n    return sum([x + {k} for x in xs])"
-
-
-def _f_nth_smallest(rng: random.Random, name: str) -> Tuple[Any, str]:
-    index = rng.choice([0, 1, 2])
-    ref = lambda xs: sorted(xs)[index]  # noqa: E731
-    return ref, f"def {name}(xs):\n    return sorted(xs)[{index}]"
-
-
-def _f_descending(rng: random.Random, name: str) -> Tuple[Any, str]:
-    ref = lambda xs: tuple(sorted(xs)[::-1])  # noqa: E731
-    return ref, f"def {name}(xs):\n    return sorted(xs)[::-1]"
-
-
-def _f_distinct_count(rng: random.Random, name: str) -> Tuple[Any, str]:
-    ref = lambda xs: len(tuple(dict.fromkeys(xs)))  # noqa: E731
-    return ref, f"def {name}(xs):\n    return len(list(dict.fromkeys(xs)))"
-
-
-#: Shapes she is not seeded with. Every one of them is two or three operators deep, which is
-#: exactly the class :data:`~nyxara.njp.coding.SEED_SHAPES` cannot reach without grafting.
-COMPOSITE_FAMILIES: Tuple[Family, ...] = (
-    Family("sum_mapped_filtered", "add up a multiple of the ones that pass a test",
-           _f_sum_mapped_filtered),
-    Family("count_over", "how many are over a threshold", _f_count_over),
-    Family("sum_over", "add up only the ones over a threshold", _f_sum_over),
-    Family("max_mapped", "the largest after a transform", _f_max_mapped),
-    Family("sum_mapped", "add up a shifted copy of each", _f_sum_mapped),
-    Family("nth_smallest", "the n-th smallest", _f_nth_smallest),
-)
-
-#: One operator deep. She can reach these from :data:`~nyxara.njp.coding.SEED_SHAPES` alone, and
-#: the subject that uses them is a floor rather than a lesson.
-BASIC_FAMILIES: Tuple[Family, ...] = (
-    Family("total", "add them up", lambda rng, n: (sum, f"def {n}(xs):\n    return sum(xs)"),
-           composite=False),
-    Family("count", "how many", lambda rng, n: (len, f"def {n}(xs):\n    return len(xs)"),
-           composite=False),
-    Family("largest", "the biggest one",
-           lambda rng, n: (max, f"def {n}(xs):\n    return max(xs)"), composite=False),
-    Family("ordered", "put them in order",
-           lambda rng, n: ((lambda xs: tuple(sorted(xs))),
-                           f"def {n}(xs):\n    return sorted(xs)"), composite=False),
-    Family("backwards", "reverse them",
-           lambda rng, n: ((lambda xs: tuple(xs[::-1])),
-                           f"def {n}(xs):\n    return xs[::-1]"), composite=False),
-    Family("evens", "keep the even ones",
-           lambda rng, n: ((lambda xs: tuple(x for x in xs if x % 2 == 0)),
-                           f"def {n}(xs):\n    return [x for x in xs if x % 2 == 0]"),
-           composite=False),
-)
-
-
-def _instance(family: Family, rng: random.Random, name: str) -> Tuple[Any, str]:
-    """One task from a family: a spec with a shown/held-out split, and its worked solution."""
-    ref, source = family.build(rng, name)
-    spec = _spec_from(name, family.intent, ref, _int_data(rng))
-    return spec, source
-
-
-#: Human Python, and what it should come back as. The reader is under test here, not the brain —
-#: each entry is a construction a person actually writes, and the expected value is computed by
-#: the reference lambda rather than typed in, because a hand-computed table is a table with a
-#: mistake in it.
-_READING: Tuple[Tuple[str, Any, Tuple[Any, ...]], ...] = (
-    ("def f(xs):\n    return sum(xs) + len(xs)",
-     lambda xs: sum(xs) + len(xs), ((3, 1, 4, 1, 5),)),
-    ("def f(xs):\n    return [x * x for x in xs]",
-     lambda xs: tuple(x * x for x in xs), ((2, 3, 4),)),
-    ("def f(xs):\n    return [x for x in xs if x % 3 == 0]",
-     lambda xs: tuple(x for x in xs if x % 3 == 0), ((3, 4, 9, 10),)),
-    ("def f(xs):\n    return sorted(xs)[::-1]",
-     lambda xs: tuple(sorted(xs)[::-1]), ((5, 2, 9),)),
-    ("def f(xs):\n    return xs[1:]", lambda xs: tuple(xs[1:]), ((7, 8, 9),)),
-    ("def f(xs):\n    return xs[:2]", lambda xs: tuple(xs[:2]), ((7, 8, 9),)),
-    ("def f(n):\n    return n if n > 0 else -n", lambda n: n if n > 0 else -n, (-6,)),
-    ("def f(a, b):\n    return max(a, b) - min(a, b)",
-     lambda a, b: max(a, b) - min(a, b), (4, 11)),
-    ("def f(xs):\n    return len([x for x in xs if x > 2]) * 10",
-     lambda xs: len([x for x in xs if x > 2]) * 10, ((1, 2, 3, 4),)),
-    ("def f(s):\n    return len(s.split())", lambda s: len(s.split()), ("do the thing now",)),
-    ("def f(s):\n    return s.upper()", lambda s: s.upper(), ("nyxara",)),
-    ("def f(xs):\n    return 3 in xs", lambda xs: 3 in xs, ((1, 2, 4),)),
-    ("lambda xs: sum([x % 2 for x in xs])",
-     lambda xs: sum(x % 2 for x in xs), ((1, 2, 3, 4, 5),)),
-    ("def f(xs):\n    return sum(x * 2 for x in xs if x > 1)",
-     lambda xs: sum(x * 2 for x in xs if x > 1), ((1, 2, 3),)),
-)
-
-#: Source a reader must **refuse**. Half of reading code is knowing what you are not going to run.
-_REFUSE: Tuple[str, ...] = (
-    "def f(x):\n    return __import__('os').system('ls')",
-    "def f(x):\n    return open('/etc/passwd').read()",
-    "def f(x):\n    return eval('2+2')",
-    "def f(x):\n    return x.__class__.__bases__",
-    "def f(x):\n    for i in range(x):\n        x += i\n    return x",
-    "def f(x):\n    return {'a': 1}",
-)
-
-
 class CodeReading(Subject):
     """Read a person's Python, run it in her own machine, and say what it produces.
 
@@ -865,26 +720,47 @@ class CodeReading(Subject):
 
     id, title = "code-reading", "reading Python and predicting its result"
     teaches = "what a program says, before anything is written"
-    threshold = 0.9
+    threshold = 0.98
 
     def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
         from nyxara.njp.coding import CodeError, read_python
+        from nyxara.njp.tasks import EVERY_TASK, READING, REFUSALS, instance, normalise
         score, misses = Score(), []
-        for source, ref, args in _READING:
+        # Every worked solution in the syllabus, on its own examples. Sixty-five programs across
+        # loops, recursion, mappings, text, nested data and the classic algorithms — so "she can
+        # read Python" is a number over the whole bank rather than over a table someone chose.
+        for task in EVERY_TASK:
+            spec, source = instance(task, mint.rng, task.id)
+            first = source.strip().splitlines()[0][:44]
+            try:
+                program = read_python(source, name=spec.name)
+            except CodeError as exc:
+                score.add("wrong")
+                misses.append(f"{first} → refused readable code: {exc}")
+                continue
+            for example in (spec.shown + spec.held_out)[:3]:
+                try:
+                    got = coder.run(program, example.args)
+                except CodeError as exc:
+                    score.add("wrong")
+                    misses.append(f"{task.id}: {exc}")
+                    continue
+                score.add("right" if got == example.out else "wrong")
+                if got != example.out:
+                    misses.append(f"{task.id}: got {got!r}, wanted {example.out!r}")
+        for source, ref, args in READING:
             first = source.strip().splitlines()[0][:44]
             try:
                 program = read_python(source)
                 got = coder.run(program, args)
-                want = ref(*args)
-                if isinstance(want, list):
-                    want = tuple(want)
+                want = normalise(ref(*args))
                 score.add("right" if got == want else "wrong")
                 if got != want:
                     misses.append(f"{first} → {got!r}, wanted {want!r}")
             except CodeError as exc:
                 score.add("wrong")
                 misses.append(f"{first} → refused readable code: {exc}")
-        for source in _REFUSE:
+        for source in REFUSALS:
             first = source.strip().splitlines()[0][:44]
             try:
                 read_python(source)
@@ -894,87 +770,6 @@ class CodeReading(Subject):
             score.add("wrong")
             misses.append(f"{first} → accepted source it should refuse")
         return score, misses
-
-
-class WriteBasic(Subject):
-    """One-operator programs from examples. Her floor, and it is meant to read high.
-
-    :data:`~nyxara.njp.coding.SEED_SHAPES` covers these by construction, so a low score here is a
-    broken search rather than a missing lesson — which is precisely why it is examined before the
-    subject that needs teaching, and why its threshold is the highest in the syllabus.
-    """
-
-    id, title = "code-basics", "writing one-operator programs from examples"
-    teaches = "a specification is a set of examples, and a program either matches them or does not"
-    threshold, items = 0.85, 6
-    attempts = 4000
-
-    families = BASIC_FAMILIES
-
-    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
-        score, misses = Score(), []
-        for index, family in enumerate(self.families[:self.items]):
-            spec, _ = _instance(family, mint.rng, f"{family.id}_{mint.word(1)}")
-            written = coder.write(spec, attempts=self.attempts, graft=False)
-            score.add(self._grade(coder, spec, written, misses))
-        return score, misses
-
-    @staticmethod
-    def _grade(coder: Any, spec: Any, written: Any, misses: List[str]) -> str:
-        """Passing the shown examples is not passing. The held-out ones decide.
-
-        A program fitted to four pairs that fails a fifth found a coincidence, and the whole
-        reason the split exists is to call that what it is rather than to count it as a solve.
-        """
-        if not written.ok:
-            misses.append(f"{spec.name}: abstained after {written.attempts} attempts")
-            return "abstain"
-        check = coder.check(written.program, spec.held_out)
-        if check.ok:
-            return "right"
-        misses.append(f"{spec.name}: fitted the shown pairs, failed held-out "
-                      f"({check.passed}/{check.total}) — {written.program.source().splitlines()[-1].strip()}")
-        return "wrong"
-
-
-class WriteComposite(Subject):
-    """Two- and three-operator programs — the subject the whole module is built around.
-
-    Grafting is switched **off** for both the pre-test and the post-test, and the attempt budget
-    is identical across them. So exactly one thing differs between the two numbers: which shapes
-    she holds. That is what makes the gain attributable to the lesson rather than to the budget,
-    and it is why the cold column here is usually zero.
-    """
-
-    id, title = "code-composites", "writing composed programs from examples"
-    teaches = "a shape seen once on one task is worth having on another"
-    threshold, items = 0.6, 6
-    attempts = 30000
-
-    families = COMPOSITE_FAMILIES
-
-    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
-        score, misses = Score(), []
-        for family in self.families[:self.items]:
-            spec, _ = _instance(family, mint.rng, f"{family.id}_{mint.word(1)}")
-            written = coder.write(spec, attempts=self.attempts, graft=False)
-            score.add(WriteBasic._grade(coder, spec, written, misses))
-        return score, misses
-
-    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
-        from nyxara.njp.teacher import Verdict
-        taught, notes = 0, []
-        for family in self.families[:self.items]:
-            spec, source = _instance(family, mint.rng, f"{family.id}_{mint.word(1)}")
-            learned = coder.learn_python(spec, source)
-            if learned.verdict == Verdict.SURVIVED:
-                taught += 1
-            else:
-                notes.append(f"{family.id}: {learned.verdict} — {learned.why}")
-        note = f"{taught} shapes verified by execution"
-        if notes:
-            note += "; " + "; ".join(notes[:2])
-        return Taught(taught, note)
 
 
 class Debugging(Subject):
@@ -987,15 +782,18 @@ class Debugging(Subject):
 
     id, title = "debugging", "finding and fixing one wrong thing"
     teaches = "localise the fault by running it, not by looking at it"
-    threshold, items = 0.6, 6
+    threshold, items = 0.6, 12
     attempts = 20000
 
     def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
         from nyxara.njp.coding import read_python
+        from nyxara.njp.tasks import EVERY_TASK, instance
         rng = mint.rng
         score, misses = Score(), []
-        for family in COMPOSITE_FAMILIES[:self.items]:
-            spec, source = _instance(family, rng, f"{family.id}_{mint.word(1)}")
+        pool = list(EVERY_TASK)
+        rng.shuffle(pool)
+        for family in pool[:self.items]:
+            spec, source = instance(family, rng, f"{family.id}_{mint.word(1)}")
             program = read_python(source, name=spec.name)
             broken = self._corrupt(coder, program, spec, rng)
             if broken is None:
@@ -1037,6 +835,219 @@ class Debugging(Subject):
         return None
 
 
+class BankSubject(Subject):
+    """A writing subject over one bank of :class:`~nyxara.njp.tasks.Task` families.
+
+    Every writing subject in the syllabus is this one class with a different bank, which is the
+    point: loops, recursion, mappings, text and nested data are *the same examination* — she is
+    shown one instance of a family and asked for another — and giving each of them its own bespoke
+    grader would be five chances to grade one of them leniently without noticing.
+
+    Grafting is off and the budget is identical between the pre-test and the post-test, so the
+    only thing that differs across the two numbers is which shapes she holds.
+    """
+
+    bank: Tuple[Any, ...] = ()
+    attempts = 30000
+    threshold = 0.75
+
+    def _instances(self, mint: Mint, tag: str) -> Any:
+        from nyxara.njp.tasks import instance
+        for task in self.bank:
+            yield task, instance(task, mint.rng, f"{task.id}_{tag}{mint.word(1)}")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        score, misses = Score(), []
+        for _task, (spec, _source) in self._instances(mint, "x"):
+            written = coder.write(spec, attempts=self.attempts, graft=False)
+            score.add(self.grade(coder, spec, written, misses))
+        return score, misses
+
+    @staticmethod
+    def grade(coder: Any, spec: Any, written: Any, misses: List[str]) -> str:
+        """Passing the shown examples is not passing. The held-out ones decide.
+
+        A program fitted to the pairs it was given and failing one it was not found a coincidence,
+        and the whole reason the split exists is to call that what it is rather than to count it
+        as a solve. An abstention is scored apart from a wrong answer, because refusing to guess
+        is the behaviour the rest of this package works to guarantee.
+        """
+        if not written.ok:
+            misses.append(f"{spec.name}: abstained after {written.attempts} attempts")
+            return "abstain"
+        check = coder.check(written.program, spec.held_out)
+        if check.ok:
+            return "right"
+        misses.append(f"{spec.name}: fitted the shown pairs, failed held-out "
+                      f"({check.passed}/{check.total})")
+        return "wrong"
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        from nyxara.njp.teacher import Verdict
+        taught, refused = 0, []
+        for task, (spec, source) in self._instances(mint, "t"):
+            learned = coder.learn_python(spec, source)
+            if learned.verdict == Verdict.SURVIVED:
+                taught += 1
+            else:
+                refused.append(f"{task.id}: {learned.verdict}")
+        note = f"{taught} of {len(self.bank)} shapes verified by execution"
+        if refused:
+            note += "; " + "; ".join(refused[:2])
+        return Taught(taught, note)
+
+
+class WriteLoops(BankSubject):
+    """A variable, a loop, and a body. She could read one long before she could write one."""
+
+    id, title = "loops", "writing loops that accumulate, build and count"
+    teaches = "state that survives an iteration is what a loop is for"
+    bank = ()          # filled below, once nyxara.njp.tasks is importable at module scope
+
+
+class WriteRecursion(BankSubject):
+    """A base case and a step — the one thing in the language that can name itself."""
+
+    id, title = "recursion", "writing functions that call themselves"
+    teaches = "a problem that contains a smaller copy of itself"
+    threshold = 0.7
+
+
+class WriteDicts(BankSubject):
+    """Counting, grouping, lookup. Most real programs are mostly this."""
+
+    id, title = "mappings", "counting, grouping and looking things up"
+    teaches = "a key is a question and the value is its answer"
+    threshold = 0.7
+
+
+class WriteStrings(BankSubject):
+    """Text, which is half of what anybody actually writes."""
+
+    id, title = "strings", "taking text apart and putting it back together"
+    teaches = "a string is a sequence, and then it is not"
+    threshold = 0.7
+
+
+class WriteStructures(BankSubject):
+    """Lists of lists. Nesting is where a language either composes or does not."""
+
+    id, title = "structures", "nested data, rows and columns"
+    teaches = "an operation that works on a list works on a list of them"
+    threshold = 0.7
+
+
+class WriteAlgorithms(BankSubject):
+    """gcd, primes, binary search, sorting, FizzBuzz — what a course sets when it wants to know
+    whether you can actually program, rather than whether you can recite a form."""
+
+    id, title = "algorithms", "the classic problems, end to end"
+    teaches = "a method, not a formula"
+    threshold = 0.6
+    attempts = 30000
+
+
+class Tracing(Subject):
+    """Not "what does it return" but "what happened on the way".
+
+    Reading code is two abilities and the exam had only one of them. Running a program to its
+    answer can be done by a machine that understands nothing; saying what each sub-expression took
+    as its value is the part that is understanding, and it is what makes a wrong answer
+    *diagnosable* instead of merely wrong.
+    """
+
+    id, title = "tracing", "saying what happened inside, step by step"
+    teaches = "an answer with its working is a different object from an answer"
+    threshold, items = 0.9, 12
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp.coding import CodeError, read_python
+        from nyxara.njp.tasks import EVERY_TASK, instance
+        score, misses = Score(), []
+        tasks = list(EVERY_TASK)
+        mint.rng.shuffle(tasks)
+        for task in tasks[:self.items]:
+            spec, source = instance(task, mint.rng, task.id)
+            if not spec.shown:
+                continue
+            example = spec.shown[0]
+            try:
+                program = read_python(source, name=spec.name)
+                steps = coder.trace(program, example.args)
+            except CodeError as exc:
+                score.add("wrong")
+                misses.append(f"{task.id}: {exc}")
+                continue
+            # A trace has to have steps, every step has to have been evaluated, and the last one
+            # has to agree with what running it plainly gives. A trace that agreed with nothing
+            # would be a story rather than a record.
+            plain = None
+            try:
+                plain = coder.run(program, example.args)
+            except CodeError:
+                pass
+            if steps and any(step.source for step in steps) and steps[-1].value == plain:
+                score.add("right")
+            else:
+                score.add("wrong")
+                misses.append(f"{task.id}: {len(steps)} steps, ends {steps[-1].value if steps else None!r}, "
+                              f"runs to {plain!r}")
+        return score, misses
+
+
+class EdgeCases(Subject):
+    """The inputs that break a program that was only ever tried on the happy path.
+
+    Empty, one element, all zeros, all negatives, repeats. Every item is a correct program run on
+    an awkward input, and the grade is whether her interpreter gives what Python gives — including
+    when the right answer is an *error*. A language that quietly returns something for
+    ``max([])`` is worse than one that raises, because the something is wrong and looks fine.
+    """
+
+    id, title = "edge-cases", "empty, single, zero, negative, repeated"
+    teaches = "the input you did not think of is the one that decides"
+    threshold = 0.9
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp.coding import CodeError, read_python
+        from nyxara.njp.tasks import EDGE_CASES, normalise
+        score, misses = Score(), []
+        for entry in EDGE_CASES:
+            label, source, args = entry[0], entry[1], entry[2]
+            diverges = len(entry) > 3 and entry[3] == "refuse"
+            want, raised = None, False
+            try:
+                want = normalise(_python_answer(source, args))
+            except Exception:  # noqa: BLE001 - Python itself refusing is the expected answer
+                raised = True
+            if diverges:
+                # A case where this language is *meant* to differ. Graded as a refusal, and named
+                # in the bank so the divergence stays a decision rather than becoming a defect
+                # nobody remembers making.
+                raised = True
+            try:
+                got = coder.run(read_python(source, name="f"), args)
+            except CodeError:
+                score.add("right" if raised else "wrong")
+                if not raised:
+                    misses.append(f"{label}: refused an input Python answers with {want!r}")
+                continue
+            if raised:
+                score.add("wrong")
+                misses.append(f"{label}: answered {got!r} where Python raises")
+            elif got == want:
+                score.add("right")
+            else:
+                score.add("wrong")
+                misses.append(f"{label}: got {got!r}, Python gives {want!r}")
+        return score, misses
+
+
+def _python_answer(source: str, args: Sequence[Any]) -> Any:
+    from nyxara.njp.tasks import reference
+    return reference(source)(*args)
+
+
 class Transfer(Subject):
     """Unseen tasks, a tight budget, and no teaching at all — the teacher-off number.
 
@@ -1049,7 +1060,7 @@ class Transfer(Subject):
 
     id, title = "transfer", "unseen tasks on a budget, teacher off"
     teaches = "nothing — this subject only measures what the earlier ones left behind"
-    threshold, items = 0.5, 6
+    threshold, items = 0.5, 14
     attempts = 8000
 
     def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
@@ -1057,11 +1068,14 @@ class Transfer(Subject):
         return Taught(0, "teacher off — this score is what the earlier subjects left behind")
 
     def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp.tasks import EVERY_TASK, instance
         score, misses = Score(), []
-        for family in COMPOSITE_FAMILIES[:self.items]:
-            spec, _ = _instance(family, mint.rng, f"{family.id}_{mint.word(1)}")
+        pool = list(EVERY_TASK)
+        mint.rng.shuffle(pool)
+        for family in pool[:self.items]:
+            spec, _ = instance(family, mint.rng, f"{family.id}_{mint.word(1)}")
             written = coder.write(spec, attempts=self.attempts, graft=False)
-            score.add(WriteBasic._grade(coder, spec, written, misses))
+            score.add(BankSubject.grade(coder, spec, written, misses))
         return score, misses
 
 
@@ -1069,8 +1083,47 @@ class Transfer(Subject):
 # the syllabus and the school
 # --------------------------------------------------------------------------- #
 
+def _attach_banks() -> None:
+    """Give each writing subject its bank, once :mod:`nyxara.njp.tasks` is importable.
+
+    Assigned here rather than in the class bodies because the class bodies run at import time and
+    an import cycle through ``tasks`` would leave every bank empty — an examination with no
+    questions in it, which reports 0/0 and calls it mastered.
+    """
+    from nyxara.njp import tasks
+    WriteBasic.bank = tasks.BASIC
+    WriteComposite.bank = tasks.COMPOSITE
+    WriteLoops.bank = tasks.LOOPS
+    WriteRecursion.bank = tasks.RECURSION
+    WriteDicts.bank = tasks.DICTS
+    WriteStrings.bank = tasks.STRINGS
+    WriteStructures.bank = tasks.STRUCTURES
+    WriteAlgorithms.bank = tasks.ALGORITHMS
+
+
+class WriteBasic(BankSubject):
+    """One-operator programs. Reachable from the seed shapes, so this is a floor, not a lesson —
+    and a low score here is a broken search rather than a missing shape, which is why it is
+    examined before the subjects that need teaching and why its bar is the highest."""
+
+    id, title = "code-basics", "writing one-operator programs from examples"
+    teaches = "a specification is a set of examples, and a program matches them or does not"
+    threshold, attempts = 0.85, 8000
+
+
+class WriteComposite(BankSubject):
+    """Two and three operators deep — where a lesson first shows up as a number."""
+
+    id, title = "code-composites", "writing composed programs from examples"
+    teaches = "a shape seen once on one task is worth having on another"
+    threshold, attempts = 0.75, 30000
+
+
 REASONING = (Arithmetic, Composition, Inheritance, Shapes, Abstention, Depth)
-CODING = (CodeReading, WriteBasic, WriteComposite, Debugging, Transfer)
+CODING = (CodeReading, Tracing, WriteBasic, WriteComposite, WriteLoops, WriteRecursion,
+          WriteDicts, WriteStrings, WriteStructures, WriteAlgorithms, Debugging, EdgeCases,
+          Transfer)
+_attach_banks()
 
 #: The order is the claim, exactly as it is in :mod:`nyxara.njp.curriculum`. Arithmetic before
 #: composition because a closed value is the simplest thing that can be right; abstention after

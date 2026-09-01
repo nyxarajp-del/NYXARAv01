@@ -90,14 +90,40 @@ def test_a_predicate_cannot_leak_into_arithmetic():
     "def f(x):\n    return __import__('os').system('ls')",
     "def f(x):\n    return open('/etc/passwd').read()",
     "def f(x):\n    return eval('2+2')",
+    "def f(x):\n    return exec('x = 1')",
+    "def f(x):\n    return compile('1', '', 'eval')",
     "def f(x):\n    return x.__class__.__bases__",
-    "def f(x):\n    for i in range(x):\n        x += i\n    return x",
+    "def f(x):\n    return x.__dict__",
+    "def f(x):\n    return getattr(x, 'y')",
+    "def f(x):\n    return globals()",
+    "def f(x):\n    return vars()",
+    "def f(x):\n    return dir(x)",
+    "def f(x):\n    return type(x)",
+    "def f(x):\n    return input()",
+    "def f(x):\n    return print(x)",
     "import os\n",
+    "from os import path\n",
+    "def f(x):\n    import sys\n    return sys",
+    "class A:\n    pass",
+    "def f(x):\n    with open('a') as h:\n        return h.read()",
+    "def f(x):\n    try:\n        return 1\n    except Exception:\n        return 2",
+    "def f(x):\n    global y\n    return x",
+    "def f(x):\n    del x\n    return 1",
+    "def f(x):\n    assert x\n    return 1",
+    "def f(x):\n    yield x",
+    "async def f(x):\n    return x",
+    "def f(x):\n    xs.pop()\n    return x",
 ])
 def test_source_outside_the_whitelist_does_not_parse(source):
     """The refusal is at parse time. Nothing dangerous is ever *handled*, because nothing
     dangerous is ever built — and the accepted set is enumerated rather than the rejected one, so
-    a new Python node type cannot quietly widen it."""
+    a new Python node type cannot quietly widen it.
+
+    ``xs.pop()`` is in the list for a different reason from the rest. It is not dangerous; it is a
+    statement this language cannot *give effect to*, and dropping it silently would mean reading a
+    program as something it is not. A reader that quietly discards a line it does not understand
+    reports a wrong program as a correct one, so an unrecognised statement is refused too.
+    """
     with pytest.raises(CodeError):
         read_python(source)
 
