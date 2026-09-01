@@ -1022,6 +1022,54 @@ sixty-five families were unwritable that way, every one of them already taught. 
 statement the reader did not understand was silently dropped rather than refused, so a program
 containing one was read as a different program.
 
+### What she does with a problem she was never taught
+
+Thirty classic hard algorithms, none of them resembling any of the sixty-five families she was
+taught: edit distance, LCS, LIS, knapsack, coin change, subset sum, word break, N-Queens,
+Dijkstra, topological sort, union-find, KMP, regex matching, longest palindromic substring,
+longest valid parentheses, minimum window, trapping rain water, median of two sorted arrays,
+largest rectangle in a histogram, merge intervals, determinants, Josephus, Catalan, Pascal, convex
+hull, sudoku validity, inversions. She is given the **whole curriculum first**, so a failure is a
+failure with all fifty-four taught shapes in hand.
+
+| | |
+|---|---|
+| reads it and gives the right answer | **76 / 76** |
+| says what happened inside it (trace) | **30 / 30** |
+| repairs it after one node is corrupted | **21 / 24** |
+| **invents it from examples alone** | **1 / 28** |
+
+The single cold solve is `permutation_count`, and only because *n!* is the factorial shape she was
+already taught. Nothing genuinely new was invented, and that is the honest ceiling: synthesis is
+enumeration over shapes she has been shown, so a shape she has never seen and cannot reach by one
+graft is an **abstention** — not a wrong program. That property is what
+`tests/njp/test_unseen_hard.py` asserts, rather than asserting how few she solves, because a test
+that fails when she improves is not a test.
+
+**Shown one worked solution, though, she keeps it.** The inputs are generated once and split — the
+first half demonstrates, the second half examines, and no input appears in both:
+
+| | |
+|---|---|
+| shown once, then asked on unseen data | **22 / 24** |
+| never shown, same budget, same shapes | **5 / 24** |
+
+Edit distance, three attempts after a single demonstration, `kitten` → `sitting` = 3. Dijkstra,
+KMP and the regex matcher likewise. This is retention and reapplication of a shape from one
+demonstration; it is *not* generalisation to a different variant, which is the separate claim the
+school measures over instances that differ.
+
+**Two bugs this found, both fixed.** `min(a, b, c)` was refused past two arguments — the
+expression at the centre of edit distance, so the reader could not read dynamic programming at
+all. `range(n, -1, -1)` was refused — the backwards pass, which is the other half of it.
+
+**And two flaws in the benchmark itself, found and fixed before the numbers were believed.** Short
+example lists were padded by repeating rows, so the held-out set was a subset of the shown set and
+`trapping_rain_water` "solved" as `return n`; and the one-shot lesson and exam were built from the
+same inputs, so a solve in one attempt was the exact program recalled against the exact examples
+it was shown. Fixing the first took cold writing from 5/27 to 1/28; fixing the second took
+one-shot from 27/30 to 22/24. Both first numbers were wrong and neither is quoted.
+
 **What this is not.** No classes, no exceptions, no generators, no imports, no closures over
 mutable state, no shared mutation, no floats. Synthesis is enumeration over learned shapes under
 an attempt budget, not a general program synthesiser: a shape she has never seen and cannot reach
