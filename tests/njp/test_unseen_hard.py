@@ -36,6 +36,7 @@ the held-out split scores that wrong, which is the split doing its job.
 from __future__ import annotations
 
 import random
+import zlib
 
 import pytest
 
@@ -524,11 +525,46 @@ def schooled():
     return coder
 
 
-def _like(value, rng):
-    """A fresh value of the same shape as ``value``, for generating unseen inputs."""
+def _int_pool(arglists):
+    """Every integer the task's own examples contain, per argument position."""
+    pools = []
+    for position in range(len(arglists[0])):
+        found = []
+
+        def walk(value):
+            if isinstance(value, bool):
+                return
+            if isinstance(value, int):
+                if value not in found:
+                    found.append(value)
+            elif isinstance(value, (tuple, list)):
+                for item in value:
+                    walk(item)
+
+        for args in arglists:
+            if position < len(args):
+                walk(args[position])
+        pools.append(found)
+    return pools
+
+
+def _like(value, rng, pool=None, depth=0):
+    """A fresh value of the same shape as ``value``, for generating unseen inputs.
+
+    A **nested** integer is drawn from the values the task itself used; a top-level one is not.
+    Inventing nested integers freely produced instances the problem does not have — a graph with
+    four nodes and an edge leaving node six, which the reference tolerated only because its own
+    loop happened never to look at that edge. No correct shortest-path algorithm reproduces an
+    answer that depends on that, so the problem read as out of reach when the *input* was the
+    thing that was wrong. Constraining top-level integers too was worse in the other direction:
+    a bare ``n`` is a size, and pinning it to the sizes the examples used left four problems with
+    too few distinct inputs to hold any out.
+    """
     if isinstance(value, bool):
         return rng.choice([True, False])
     if isinstance(value, int):
+        if pool and depth > 0:
+            return rng.choice(pool)
         return rng.randint(0, max(2, min(8, abs(value) + 2)))
     if isinstance(value, str):
         if value and all(ch in "IVXLCDM" for ch in value):
@@ -537,7 +573,8 @@ def _like(value, rng):
     if isinstance(value, tuple):
         if not value:
             return ()
-        return tuple(_like(value[rng.randrange(len(value))], rng) for _ in range(len(value)))
+        return tuple(_like(value[rng.randrange(len(value))], rng, pool, depth + 1)
+                     for _ in range(len(value)))
     return value
 
 
@@ -565,7 +602,9 @@ def _distinct(source, arglists, rng, want=12):
     while len(out) < want and tries < 300:
         tries += 1
         base = arglists[rng.randrange(len(arglists))]
-        cand = tuple(_like(a, rng) for a in base)
+        pools = _int_pool(arglists)
+        cand = tuple(_like(a, rng, pools[i] if i < len(pools) else None)
+                     for i, a in enumerate(base))
         if repr(cand) in seen:
             continue
         try:
@@ -742,7 +781,9 @@ def test_she_composes_these_classics_from_examples_with_no_lesson_at_all(name):
     to the next.
     """
     case = {entry[0]: entry for entry in HARD}[name]
-    rng = random.Random(hash(name) % 9973)
+    # `hash` of a str is salted per process, so seeding with it makes the generated pool — and
+    # therefore the whole test — different on every run. A stable digest of the name instead.
+    rng = random.Random(zlib.crc32(name.encode()) % 9973)
     pool = _distinct(case[1], case[2], rng, want=10)
     assert len(pool) >= 6, f"{name}: not enough distinct inputs to hold any out"
     spec = _spec(name, case[1], pool, _params(pool))

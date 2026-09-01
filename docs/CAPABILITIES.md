@@ -1043,63 +1043,109 @@ failure with all fifty-four taught shapes in hand.
 | reads it and gives the right answer | **76 / 76** |
 | says what happened inside it (trace) | **30 / 30** |
 | repairs it after one node is corrupted | **21 / 24** |
-| **writes it from examples alone, cold** | **16 / 28** |
+| **writes it from examples alone, cold** | **25 / 28** |
 
-That last row was **1 / 28** when it was first measured, and the way it moved is the point.
+That last row was **1 / 28** when it was first measured. How it moved matters more than where it
+got to, and the honest version of the story has a failure in the middle of it.
 
 **Adding `Coder.invent` moved it by nothing.** Bottom-up enumerative synthesis with
 observational-equivalence pruning raised the cold baseline on the ordinary families from 29/65 to
 37/65 and changed the hard set from 1/28 to 1/28 — not a rounding, the identical single problem.
 It composes *expressions*, and `sum(map(f, filter(p, xs)))` is an expression while
-`for i: for j: if xs[i] > xs[j]: n += 1` is not. No budget over the first space reaches the second.
+`for i: for j: if xs[i] > xs[j]: n += 1` is not.
 
-**Adding skeletons with a carried variable moved it to 4 / 28.** `Coder.compose` fills an
-imperative sketch — a loop, an accumulator, a test, an update, with a **scope** attached to each
-hole so `xs[i]` is only offered inside a loop that has an `i`. Ten skeletons: accumulate, build a
-list, accumulate under a test, scan by index, running best, countdown, one-dimensional table,
-nested pairs, windows, two variables turning over each other. That reached `count_inversions`,
-`largest_rectangle_histogram` and `longest_palindromic_substring` — the quadratic scans.
+**Skeletons with a carried variable took it to 4 / 28, and skeletons carrying a table to 16 / 28.**
+`Coder.compose` fills an imperative skeleton — a loop, an accumulator, a test, an update, with a
+**scope** attached to each hole so `xs[i]` is only offered inside a loop that has an `i`.
 
-**Adding skeletons that carry a *table* moved it to 16 / 28.** The scalar accumulator was still a
-ceiling: every remaining problem carries a row of answers to smaller instances and reads it back by
-index while building the next one. Twelve more skeletons — a table indexed by position, a table
-over two sequences kept one row at a time, a table over amounts, a table rebuilt once per item, a
-prefix table over a bag of pieces, a two-parameter recurrence, a reachability closure, a
-prefix-and-suffix scan, a whole-row rebuild, a first-position search, a sorted merge, and a
-coalesce — and these fell out cold, from input/output pairs, with no lesson and no shape for them:
+**Skeletons for the control structures still missing took it to 25 / 28** — a relaxation fixpoint,
+a window judged by a scan of its own, a monotonic stack, a worklist that peels, a backtracker, a
+grid read along both axes, cofactor expansion, a two-cursor matcher. Thirty skeletons in all.
 
-`edit_distance` · `longest_common_subsequence` · `longest_increasing_subsequence` · `knapsack` ·
-`coin_change` · `subset_sum` · `word_break` · `kmp_search` · `trapping_rain_water` ·
-`largest_rectangle_histogram` · `longest_palindromic_substring` · `merge_intervals` · `catalan` ·
-`pascal_row` · `count_inversions` · `permutation_count`
+### The result that matters more than the twenty-five
 
-Every one of them is checked on inputs it was **not** fitted on, which is what separates an
-algorithm from a coincidence that agrees with three rows. `tests/njp/test_unseen_hard.py` names
-them one at a time rather than asserting a count, because a regression that swapped one for
-another would pass a count.
+Twenty-eight problems were the ones being measured *while the skeletons were being written*. A
+skeleton written until a bank goes green is fitted to that bank however carefully its docstring is
+phrased. So a **second bank was written afterwards** — twenty-five more hard problems from a
+different corner of the subject, chosen with the skeletons already finished — and measured once.
 
-**The twelve it still cannot write, and why — no hedging.**
-
-| | |
+| second bank, chosen after the skeletons existed | |
 |---|---|
-| `n_queens`, `matrix_determinant` | recursion that **searches**, with a partial solution passed down and undone. Nothing here builds a backtracker. |
-| `dijkstra`, `topological_order`, `connected_components` | a **worklist**: a frontier that is chosen from, removed from, and grown, until it empties. No skeleton has one. |
-| `regex_match`, `longest_valid_parentheses`, `min_window_length` | the window's validity needs a **scan of its own** to decide, and the test holes take expressions, not loops. |
-| `convex_hull_size` | a **monotonic stack** — pop while a three-point orientation fails — and geometry's predicate is not in any pool. |
-| `sudoku_row_valid` | the same property checked along **both axes** of a grid; there is no transpose. |
-| `josephus`, `median_two_sorted` | **it can write both** — `recur_two` finds the Josephus recurrence and `merge_pick` finds the median — but a *simpler* skeleton fits the two or three examples first by coincidence, and the held-out split correctly scores that wrong. With this many examples the problem is genuinely underdetermined; the honest answer is more examples, not a tie-break invented to favour the answer already known. |
+| reads it and gives the right answer | **70 / 70** |
+| **writes it from examples alone, cold** | **0 / 21** |
 
-**This is not 100%, and it will not become 100% this way.** Each family above wants a skeleton
-with a control structure none of the twenty-three has, and adding skeletons until a fixed
-twenty-eight-problem list reads 28/28 would be fitting the benchmark, not the ability — the same
-mistake as padding the held-out set, which this benchmark already made once and had corrected. The
-number that means something is that the *kind* of ceiling moved twice: from "expressions only" to
-"a carried number" to "a carried table", each time measured on problems chosen before the skeleton
-existed.
+Not one. Twenty-one abstentions out of twenty-one. The safety property held perfectly and the
+generalisation claim did not exist: 25/28 was a list of answers.
 
-The safety property is unchanged and is the one asserted: what she cannot write, she **abstains**
-from. Across the whole sweep, every program she wrote cold passed the held-out pairs; not knowing
-shows up as silence, never as a wrong program.
+### What was done about it, and what that bought
+
+The response was deliberately **not** twenty-one more skeletons. Reading what actually blocked each
+problem, the same two gaps came up over and over, and neither was a missing pattern:
+
+* a loop may carry **more than one variable, updated together** — `take, skip = skip + x,
+  max(skip, take)` reads the old value of both on the right-hand side, and no number of one-variable
+  skeletons expresses it;
+* a table may be laid over a **grid** rather than over a sequence — indexed by the grid's own rows
+  and columns, each cell reading the one above, the one to its left, and the one diagonally back.
+
+Those are **axes** of skeletons that already existed. The fillings for them are enumerated over the
+live scope and collapsed by behaviour — the same observational-equivalence pruning `invent` uses,
+applied to a hole instead of to a whole program — rather than written out by hand.
+
+| | first bank | second bank |
+|---|---|---|
+| before the two axes | 25 / 28 | **0 / 21** |
+| after the two axes | 25 / 28 | **6 / 21** |
+
+Six is not a triumph and it is not presented as one. What makes it worth reporting is that one of
+the six — `binary_search_position` — is a problem **neither axis was designed for**; it falls out
+of "two variables updated together in a loop" the same way the two that were. That is the only
+kind of evidence that separates a capability from a lookup table, and it is why the axes stay and
+why the answer to the remaining fifteen is more axes rather than more skeletons.
+
+### What she still cannot write, named
+
+On the first bank, three: `dijkstra` (she composes correct Bellman–Ford on the hand-written
+instance; the benchmark's *generated* instances are malformed graphs — an edge leaving node six of
+a four-node graph — which the reference tolerates only because its own loop never looks at that
+edge, so nothing correct reproduces it), `connected_components` (an earlier expression-level pass
+fits the shown pairs first; the fixpoint skeleton finds the right program when asked directly), and
+`median_two_sorted` (genuinely underdetermined — several programs fit every pair shown).
+
+On the second bank, fifteen, and each names a control structure that is still missing: a stack
+whose pops consult a mapping, a sieve with a strided inner range, a triple-nested scan, a set
+grown to a fixed point, a string built by walking an index up and back down, a breadth-first
+frontier.
+
+**Two oracle-free tie-breaks were tried on the underdetermined cases and both failed**, which is
+worth recording because both sound like they should work. *Consensus* — prefer the behaviour most
+fitting candidates agree on — just counts redundant fillings, and picked the wrong program for
+Josephus. *Stability* — prefer the candidate that survives dropping any one shown pair — called
+Josephus's wrong answer stable and edit distance's **right** answer unstable. With two or three
+examples these problems are underdetermined and no tie-break invented after the fact fixes that;
+the honest answer is more examples.
+
+**Two bugs in the measurement itself, both found and fixed.** A candidate that ran out of step
+budget was scored identically to one shown wrong — so the exactly correct N-Queens backtracker was
+rejected for being expensive, twice: once in search and once in the held-out check. And the
+benchmark's input generator invented integers freely *inside* structures, producing graph
+instances the problem does not have. Neither was a limit of hers.
+
+### What the axes cost
+
+They are not free and the price is reported rather than buried. More search power is more chances
+to fit a coincidence: on the 444-item syllabus one basics item now comes back as a program that
+fits the shown pairs and fails held-out, taking `code-basics` from 1.00 to 0.88 in the taught
+round — 438 right, 4 wrong, 2 abstained, precision 0.99, and 1.00 again on the retention run.
+And the syllabus went from four minutes to over twenty until `compose` was bounded by **evaluated
+nodes** rather than by candidates counted: a fold over three elements and a nested loop over
+thirty are one candidate each and a thousandfold apart in cost, so counting candidates bounds
+nothing that matters. With the step bound it runs in seven minutes and every measured win
+survives.
+
+The safety property is unchanged and is the one asserted, on both banks: what she cannot write,
+she **abstains** from. Across every sweep, at 0/21 and at 25/28 alike, every program she wrote
+cold passed the held-out pairs. Not knowing shows up as silence, never as a wrong program.
 
 
 **Shown one worked solution, though, she keeps it.** The inputs are generated once and split — the
@@ -1128,9 +1174,11 @@ one-shot from 27/30 to 22/24. Both first numbers were wrong and neither is quote
 
 **What this is not.** No classes, no exceptions, no generators, no imports, no closures over
 mutable state, no shared mutation, no floats. Synthesis is enumeration over learned shapes under
-an attempt budget plus twenty-three imperative skeletons, not a general program synthesiser: a
-shape that needs a control structure none of the skeletons has — a backtracker, a worklist, a
-monotonic stack — is an abstention, and twelve of the twenty-eight hard problems are exactly that. Every one of
+an attempt budget plus thirty imperative skeletons over two generalised axes, not a general
+program synthesiser. A shape needing a control structure none of them has is an abstention — and
+on a bank of hard problems chosen after the skeletons were finished that is **fifteen of
+twenty-one**, against three of twenty-eight on the bank they were written against. Both numbers
+are reported because only the pair of them says what the thing can do. Every one of
 those limits is reported as a number by the school rather than described here as a caveat.
 
 ### Reachable over the wire
