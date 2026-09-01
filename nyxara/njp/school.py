@@ -1,4 +1,4 @@
-"""NYXARA · njp/school.py — reasoning and coding, taught and then examined (🎓, NJP V.09).
+"""NYXARA · njp/school.py — reasoning, language, coding: taught then examined (🎓, NJP V.09).
 
 :mod:`nyxara.njp.curriculum` names the nine stages and refuses to report one as reached before it
 is; :mod:`nyxara.njp.study` teaches her from a corpus and grades her on a held-out split;
@@ -7,9 +7,8 @@ of them is one third of a school and none of them is a school: there was nothing
 down, worked out what she *cannot currently do*, taught that, and then examined her on material
 she had never seen.
 
-This is that, over nineteen subjects — six of reasoning and thirteen of coding — and its design is
-one claim repeated in every one of them:
-design is one claim repeated in eleven places:
+This is that, over twenty-six subjects — six of reasoning, seven of language and thirteen of
+coding — and its design is one claim repeated in every one of them:
 
     Teaching is only teaching if a number moved on questions she was never taught.
 
@@ -35,6 +34,17 @@ scored as a miss rather than as a wrong answer, and both appear in the report. A
 answers everything and a brain that answers nothing produce two very different report cards here,
 which is the entire reason for keeping three counters instead of one.
 
+**The language half is examined in a language that did not exist when this file was written.**
+Fresh *vocabulary* is what the reasoning subjects mint, and for language it is not enough: "the
+zorb chases the plag" is still an English sentence, and any shipped subject-verb-object frame reads
+it correctly having learned nothing. So :mod:`nyxara.njp.dialects` mints the **grammar** too — the
+word order, the case markers, the plural, the tense, the negator, the question particle — and
+seven subjects ask what she can do with it. Measured on the compiler she ships with, over 192
+sentences of eight minted dialects: **192 readable, 0 correct**, every one of the 32 denials read
+as an assertion and not one of the 96 questions recognised as a question. That is the floor, and
+it is a floor of confident wrong readings rather than of silence, which is why every language
+subject carries controls only silence can pass.
+
 **The coding half is thirteen subjects because "can she code" is thirteen questions.** Reading a
 program and saying what it gives; saying what happened *inside* it; writing one-operator programs,
 composed ones, loops, recursion, mappings, text, nested data, and the classic algorithms; finding
@@ -56,25 +66,32 @@ the roll-back is what keeps that sentence true here rather than aspirational.
 **What one run actually reports**, seed 7 and two rounds, reproducible::
 
                             taught          teacher off, fresh items
-    subjects mastered       19 / 19         19 / 19
-    right / wrong / absent  438 / 3 / 3     438 / 1 / 5
-    accuracy · precision    0.99 · 0.99     0.99 · 1.00
+    subjects mastered       26 / 26         26 / 26
+    right / wrong / absent  526 / 0 / 2     525 / 1 / 2
+    accuracy · precision    1.00 · 1.00     0.99 · 1.00
 
-Nine subjects moved because a lesson ran, every one of them on material nobody demonstrated::
+Fourteen subjects moved because a lesson ran, every one of them on material nobody
+demonstrated::
 
     depth             0.33 → 1.00     four-hop chains, once the relation is proved to chain
-    mappings          0.12 → 1.00     counting, grouping, lookup
-    algorithms        0.30 → 1.00     gcd, primes, binary search, sorting, FizzBuzz
-    code-composites   0.25 → 0.88     two and three operators deep
-    strings           0.25 → 0.88     taking text apart and putting it back
-    loops             0.50 → 1.00     a variable, a loop and a body
-    recursion         0.62 → 1.00     a base case and a step
-    structures        0.71 → 1.00     rows, columns, nesting
-    code-basics       0.88 → 1.00     one operator, from examples
+    morphology        0.17 → 1.00     the plural of a word that has never been uttered
+    reading           0.33 → 1.00     who did what to whom, in an order nobody wrote code for
+    polarity          0.67 → 1.00     a denial, kept as a denial
+    questions         0.33 → 1.00     which part of the sentence is being asked about
+    saying            0.75 → 1.00     a shape crossing from comprehension into production
+    translation       0.33 → 1.00     the same meaning in a language sharing no word with it
+    mappings          0.25 → 1.00     counting, grouping, lookup
+    algorithms        0.60 → 1.00     gcd, primes, binary search, sorting, FizzBuzz
+    strings           0.38 → 1.00     taking text apart and putting it back
+    loops             0.75 → 1.00     a variable, a loop and a body
+    recursion         0.75 → 1.00     a base case and a step
+    structures        0.86 → 1.00     rows, columns, nesting
+    code-composites   0.75 → 0.88     two and three operators deep
 
-The other ten read 1.00 or near it cold and are printed as ``already`` — reading Python, tracing
-it, repairing it, refusing what it should refuse, and surviving the awkward inputs are things she
-could already do, and saying so is the difference between a report card and an advertisement.
+The other twelve read 1.00 or near it cold and are printed as ``already`` — arithmetic, the
+three reasoning walks, abstention, word classes, reading Python, tracing it, repairing it,
+one-operator programs, the awkward inputs, and transfer are things she could already do, and
+saying so is the difference between a report card and an advertisement.
 
 It also found four bugs, which is the argument for having a school at all: a deliberation ladder
 that answered ``25 + 10`` with ``10``; a promoted ``shape:p>p>p`` that shadowed the general
@@ -95,8 +112,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 __all__ = [
     "Score", "Question", "Result", "Transcript", "Subject", "Taught", "School",
-    "ExamConditions",
-    "REASONING", "CODING", "SUBJECTS",
+    "ExamConditions", "Course", "LanguageSubject",
+    "REASONING", "LANGUAGE", "CODING", "SUBJECTS",
 ]
 
 _CONSONANTS = "bdfgklmnprstvz"
@@ -426,6 +443,22 @@ class Subject:
             if detail:
                 misses.append(detail)
         return score, misses
+
+    @staticmethod
+    def mark(score: Score, misses: List[str], question: Question, reply: str) -> str:
+        """Grade a reply an organ produced directly, by exactly the rule :meth:`ask` uses.
+
+        The coding subjects grade :class:`~nyxara.njp.coding.Coder` output without going through
+        ``brain.think``, and so do the language subjects — an exam that had to phrase every item
+        as an English sentence could not ask anything about a language that is not English. This
+        keeps the three-outcome rule in one place so a subject grading its own organ cannot
+        quietly score an abstention as an error.
+        """
+        verdict = question.grade(reply)
+        score.add(verdict)
+        if verdict != "right":
+            misses.append(f"{question.ask} → {str(reply)[:60]!r}")
+        return verdict
 
 
 # --------------------------------------------------------------------------- #
@@ -1119,7 +1152,497 @@ class WriteComposite(BankSubject):
     threshold, attempts = 0.75, 30000
 
 
+# --------------------------------------------------------------------------- #
+# language
+# --------------------------------------------------------------------------- #
+
+class Course:
+    """The two minted languages every language subject shares, and why they are shared.
+
+    One dialect across the seven subjects because they are seven questions about **one** language:
+    a construction learned in ``reading`` is the construction ``saying`` is asked to run backwards,
+    and giving each subject its own language would examine seven strangers rather than one
+    student. A **second** dialect because translation is the only measurement that separates a
+    meaning from a surface, and it needs a surface she has to reach across.
+
+    Both are minted from the exam's own stream, so they are reproducible from the seed and neither
+    of them existed when this module was written.
+    """
+
+    def __init__(self, rng: random.Random) -> None:
+        from nyxara.njp.dialects import mint_dialect
+        self.first = mint_dialect(rng, "dialect-a")
+        # Drawn to share no form with the first, so "which language is this" has an answer. Two
+        # dialects that happened to pick the same negator would make that item undecidable, and
+        # she would answer `ambiguous` — correctly — and be marked wrong for it.
+        self.second = mint_dialect(rng, "dialect-b", avoid=self.first)
+
+
+class LanguageSubject(Subject):
+    """The half of the syllabus that is examined in a language nobody has ever spoken.
+
+    Every subject below grades an organ directly rather than through ``brain.think``, for the
+    reason :class:`BankSubject` does: an exam that had to phrase its items as English sentences
+    could ask nothing at all about a language that is not English.
+
+    **What makes these scores mean something** is that the language is minted per run. Fresh
+    *vocabulary* — which is what the reasoning subjects mint — is not enough here, because "the
+    zorb chases the plag" is still an English sentence and any shipped subject-verb-object frame
+    reads it correctly having learned nothing. Measured on the shipped compiler over 192 sentences
+    of eight minted dialects: **192 readable, 0 correct**, every one of the 32 denials read as an
+    assertion and not one of the 96 questions recognised as a question. That is the floor these
+    subjects sit on, and it is a floor of confident wrong readings rather than of silence — which
+    is why every one of them carries controls that only silence can pass.
+    """
+
+    kinds: Tuple[str, ...] = ("assertion",)
+    items = 12
+    threshold = 0.8
+
+    # -- the organs under test ---------------------------------------------- #
+    @staticmethod
+    def faculty(brain: Any) -> Any:
+        """Her language faculty, attached to the brain if the brain has not got one.
+
+        Attached rather than created per call, because what a lesson leaves has to still be there
+        for the next subject and for the retention run. A faculty built fresh for each exam would
+        measure nothing but the exam.
+        """
+        from nyxara.njp.language import LanguageFaculty
+        spoken = getattr(brain, "language", None)
+        if spoken is None:
+            spoken = LanguageFaculty()
+            try:
+                brain.language = spoken
+            except Exception:  # noqa: BLE001 — a brain that will not hold one still gets examined
+                pass
+        return spoken
+
+    def course(self, brain: Any, mint: Mint) -> Course:
+        course = getattr(self.faculty(brain), "course", None)
+        if course is None:
+            course = Course(mint.rng)
+            try:
+                self.faculty(brain).course = course
+            except Exception:  # noqa: BLE001
+                pass
+        return course
+
+    # -- shared item shapes -------------------------------------------------- #
+    @staticmethod
+    def _said(meaning: Any) -> str:
+        """One reading, flattened to a string, so :meth:`Question.grade` can judge it.
+
+        Every field a construction is responsible for is in here. Leaving negation out would let a
+        denial score as its own assertion, which is the single failure
+        :mod:`nyxara.njp.semantics` was written for and the one this exam exists to keep closed.
+        """
+        if meaning is None or not getattr(meaning, "readable", False):
+            return ""
+        parts = [meaning.kind]
+        if meaning.negated:
+            parts.append("not")
+        if meaning.temporal:
+            parts.append(meaning.temporal)
+        if meaning.focus:
+            parts.append(f"?{meaning.focus}")
+        parts.append(f"{meaning.subject}|{meaning.relation}|{meaning.object}")
+        return " ".join(parts)
+
+    @staticmethod
+    def _control(surface: str, mint: Mint) -> str:
+        """A sentence with one word too many, which her grammar has no shape for.
+
+        Chosen over the obvious controls after both of those turned out to be readable sentences:
+        a doubled negator is absorbed by the slot beside it, and a sentence with its verb removed
+        is just a shorter sentence that another construction fits. A word too many is refused by
+        every construction of every minted dialect — a slot takes one token, so arity is fixed —
+        and it stays refused after the whole syllabus has been taught, which is what makes it
+        usable in the retention run as well.
+        """
+        return f"{surface} {mint.word()}"
+
+
+class WordShapes(LanguageSubject):
+    """The wug test: an ending she induced, applied to a stem nobody has ever inflected.
+
+    The oldest experiment in the subject and still the sharpest, because it cannot be passed by
+    remembering. She overhears a word list — each form bare, plural and past — and is shown two
+    pairs that say which ending is which. Then she is asked for the plural of a word that was not
+    in the list, was not in a lesson, and has never been uttered by anyone.
+
+    The controls ask for a feature nobody ever demonstrated. The right answer there is the empty
+    string, and a morphology that produced *something* would be one whose rules are not evidence
+    of anything.
+    """
+
+    id, title = "morphology", "the shape of a word she has never met"
+    teaches = "an ending is a rule, and a rule applies to a word that was not in the lesson"
+    threshold, items = 0.85, 12
+
+    stems = 12
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        spoken, dialect = self.faculty(brain), self.course(brain, mint).first
+        from nyxara.njp import dialects
+        forms: List[str] = []
+        shown = [dialects.stem(dialect, mint.word) for _ in range(self.stems)]
+        for base in shown:
+            forms.extend((base, dialect.pluralise(base), dialect.pasten(base)))
+        spoken.hear_words(forms, tongue=dialect.name)
+        # Two pairs per feature, and no more. The claim being tested is that the ending
+        # generalises, so demonstrating it on ten stems would leave the exam unable to tell a
+        # rule from a well-stocked table.
+        bound = 0
+        for base in shown[:2]:
+            bound += int(spoken.bind(base, dialect.pluralise(base), "plural",
+                                     tongue=dialect.name))
+            bound += int(spoken.bind(base, dialect.pasten(base), "past", tongue=dialect.name))
+        affixes = len(spoken.tongue(dialect.name).morphology.affixes)
+        return Taught(len(shown), f"{len(forms)} forms overheard, {affixes} endings induced, "
+                                  f"{bound} of 4 demonstrated pairs bound to a feature")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp import dialects
+        spoken, dialect = self.faculty(brain), self.course(brain, mint).first
+        score, misses = Score(), []
+        for index in range(self.items):
+            fresh = dialects.stem(dialect, mint.word)
+            if index % 6 == 4:
+                # Recognition, which is the other direction and a separate ability: given a word
+                # she has never seen, in a shape she has, say what the shape does.
+                surface = dialect.pluralise(fresh)
+                question = Question(ask=f"what does the ending of {surface!r} do?",
+                                    accept=("plural",), exact=True)
+                self.mark(score, misses, question,
+                          spoken.analyse(surface, tongue=dialect.name).feature)
+            elif index % 6 == 5:
+                question = Question(ask=f"the future of {fresh!r}?", accept=(), silence_ok=True,
+                                    note="control: a feature nobody demonstrated")
+                self.mark(score, misses, question,
+                          spoken.inflect(fresh, "future", tongue=dialect.name))
+            elif index % 2:
+                question = Question(ask=f"the past of {fresh!r}?",
+                                    accept=(dialect.pasten(fresh),), exact=True)
+                self.mark(score, misses, question,
+                          spoken.inflect(fresh, "past", tongue=dialect.name))
+            else:
+                question = Question(ask=f"the plural of {fresh!r}?",
+                                    accept=(dialect.pluralise(fresh),), exact=True)
+                self.mark(score, misses, question,
+                          spoken.inflect(fresh, "plural", tongue=dialect.name))
+        return score, misses
+
+
+class WordClasses(LanguageSubject):
+    """Which words behave alike — found by listening, and answered without naming anything.
+
+    She hears sentences with no meanings attached, which is most of what anyone ever hears, and
+    is then asked whether two words are the same kind of word. She is never asked *which* kind,
+    because the classes she forms have no names and the honest exam is the one that only asks
+    what the evidence can answer.
+
+    The controls pair a word she has met with one she has not. ``None`` — silence — is right
+    there, and "no" is wrong, because a word she has never heard is not a word of a different
+    class.
+
+    **This reads 1.00 cold and is printed as** ``already``, which is the honest result and not a
+    disappointing one. The ability needs *exposure*, not teaching, and an exam about words she has
+    met has to supply its own exposure — so what a lesson adds here is more of the same thing the
+    exam already does. It stays in the syllabus for the reason :class:`Arithmetic` does: a floor
+    that quietly stopped working would show up here rather than three subjects later as an
+    unexplained dip. It has already earned that keep once — the greedy clustering put eight
+    identically-behaving nouns into eight classes of one in a verb-initial language, and this
+    subject is where that surfaced.
+    """
+
+    id, title = "word-classes", "which words behave alike"
+    teaches = "a word's kind is where it occurs, not what it means"
+    threshold, items = 0.75, 12
+
+    heard = 24
+
+    @staticmethod
+    def _chorus(dialect: Any, mint: Mint, count: int,
+                kinds: Sequence[str]) -> Tuple[List[Any], List[str], List[str], List[str]]:
+        """Sentences drawn from a **small pool**, so every word in them occurs more than once.
+
+        :func:`~nyxara.njp.dialects.sample` gives every sentence fresh words, which is exactly
+        right for the subjects that examine a shape and exactly wrong here. A distributional class
+        is built out of the contexts a word was seen in, and one context is not a distribution —
+        :class:`~nyxara.njp.language.Lexicon` says so by refusing to classify a word it has met
+        once, and that refusal is what this corpus has to respect rather than work around. The
+        first version of this exam ignored it, every noun in the corpus was a singleton, and she
+        correctly answered "I have no grounds" to all eight items and scored 0.33.
+        """
+        from nyxara.njp import dialects
+        subjects = [dialects.stem(dialect, mint.word) for _ in range(4)]
+        objects = [dialects.stem(dialect, mint.word) for _ in range(4)]
+        verbs = [dialects.stem(dialect, mint.word) for _ in range(3)]
+        heard = [dialect.utter(subjects[index % len(subjects)], verbs[index % len(verbs)],
+                               objects[index % len(objects)], kind=kinds[index % len(kinds)])
+                 for index in range(count)]
+        return heard, subjects, objects, verbs
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        spoken, dialect = self.faculty(brain), self.course(brain, mint).first
+        heard, _s, _o, _v = self._chorus(dialect, mint, self.heard,
+                                         ("assertion", "negated", "past"))
+        for utterance in heard:
+            spoken.hear(utterance.surface, tongue=dialect.name)
+        classes = spoken.classify(tongue=dialect.name)
+        return Taught(len(heard), f"{len(heard)} sentences overheard, {classes} classes formed")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp import dialects
+        spoken, dialect = self.faculty(brain), self.course(brain, mint).first
+        # The exam's own corpus, heard before it is asked about — a distributional class is a fact
+        # about words she has met, so asking about words she has not is the control, not the item.
+        heard, subjects, objects, verbs = self._chorus(dialect, mint, 12,
+                                                       ("assertion", "past"))
+        for utterance in heard:
+            spoken.hear(utterance.surface, tongue=dialect.name)
+        spoken.classify(tongue=dialect.name)
+        score, misses = Score(), []
+
+        def word_for(role: str, index: int) -> str:
+            pool = subjects if role == "subject" else objects
+            return dialect.noun(pool[index % len(pool)], role=role)
+
+        for index in range(self.items):
+            if index % 3 == 0:
+                left, right = word_for("subject", index), word_for("subject", index + 1)
+                answer, note = "yes", "two words in the same position"
+            elif index % 3 == 1:
+                left = word_for("object", index)
+                right = dialect.verb(verbs[index % len(verbs)])
+                answer, note = "no", "a word from each position"
+            else:
+                left, right = word_for("subject", index), dialects.stem(dialect, mint.word)
+                answer, note = "", "control: a word she has never heard"
+            question = Question(ask=f"are {left!r} and {right!r} the same kind of word?",
+                                accept=(answer,) if answer else (), exact=True,
+                                silence_ok=not answer, note=note)
+            verdict = spoken.same_class(left, right, tongue=dialect.name)
+            self.mark(score, misses, question,
+                      "" if verdict is None else ("yes" if verdict else "no"))
+        return score, misses
+
+
+class Reading(LanguageSubject):
+    """Who did what to whom, in a language whose word order she was never told.
+
+    This is the subject the module exists for. She is shown sixteen sentences with their meanings,
+    and examined on sentences built from words that were not in any of them. What can carry across
+    is the **shape** — which position is the subject, what marks the object, where the verb
+    goes — and a shape is exactly what a fresh word cannot help with.
+
+    Cold, this scores nothing at all, and it scores nothing in the honest way: with no
+    construction, every item is an abstention rather than a guess.
+    """
+
+    id, title = "reading", "who did what to whom, in an unfamiliar grammar"
+    teaches = "the order and the markers are the meaning, and they generalise to new words"
+    threshold, items = 0.8, 12
+
+    lesson = 16
+    kinds = ("assertion",)
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        from nyxara.njp import dialects
+        spoken, dialect = self.faculty(brain), self.course(brain, mint).first
+        shown = dialects.sample(dialect, mint.word, self.lesson, kinds=self.kinds)
+        for utterance in shown:
+            spoken.show(utterance.surface, utterance.meaning, tongue=dialect.name)
+        report = spoken.learn(tongue=dialect.name)
+        return Taught(len(shown), f"{report.kept} shapes kept, {report.rejected} rejected "
+                                  f"from {report.demonstrations} demonstrations")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp import dialects
+        spoken, dialect = self.faculty(brain), self.course(brain, mint).first
+        score, misses = Score(), []
+        for index, utterance in enumerate(
+                dialects.sample(dialect, mint.word, self.items, kinds=self.kinds)):
+            if index % 3 == 2:
+                surface = self._control(utterance.surface, mint)
+                question = Question(ask=surface, accept=(), silence_ok=True,
+                                    note="control: a shape her grammar has not got")
+            else:
+                surface = utterance.surface
+                question = Question(ask=surface, accept=(self._said(utterance.meaning),),
+                                    exact=True)
+            self.mark(score, misses, question,
+                      self._said(spoken.read(surface, tongue=dialect.name)))
+        return score, misses
+
+
+class Polarity(Reading):
+    """A denial is not its own assertion, in a language whose negator she had to find.
+
+    Kept apart from :class:`Reading` because reading a sentence and reading its denial are not one
+    ability, and the failure mode is specific and severe: an extractor that drops the negator does
+    not return less, it returns **the opposite**. Measured on the shipped compiler over minted
+    dialects, forty denials out of forty came back as assertions — so this is the subject that
+    says whether learning the shape fixed the thing the shape was for.
+    """
+
+    id, title = "polarity", "denial, and not storing it as its opposite"
+    teaches = "the word that means *not* is part of the shape"
+    threshold, items = 0.8, 12
+
+    lesson = 18
+    kinds = ("assertion", "negated")
+
+
+class Questions(Reading):
+    """Asking is a shape too — a particle, or a word standing in the hole.
+
+    Two forms and they make different claims. A polar question keeps every slot filled and adds a
+    marker; a content question **removes** a slot and puts a question word where it was, so what
+    has to be read off it is not only what was said but *which part is being asked about*. That is
+    :attr:`~nyxara.njp.semantics.Meaning.focus`, and a reading that filled the missing slot with
+    the question word would be answering a question with its own hole.
+    """
+
+    id, title = "questions", "asking, and knowing which part is being asked"
+    teaches = "a question is a shape with a hole in a named place"
+    threshold, items = 0.8, 12
+
+    lesson = 24
+    kinds = ("polar", "content", "content_subject")
+
+
+class Saying(LanguageSubject):
+    """Producing a sentence in that language, and refusing to produce one she cannot read back.
+
+    Nothing is taught here, and the report says so: generation is the constructions from the three
+    subjects above, run backwards. What it adds is the one thing reading cannot test — every
+    sentence she utters is **parsed again before it leaves**, and unless the parse gives back the
+    meaning it started from the sentence is discarded and the next candidate tried.
+
+    So the controls are the whole point. Asked for a meaning carrying a modality nobody ever
+    demonstrated, the right output is nothing at all. A faculty that reached for the nearest shape
+    it had would be fluent, wrong, and indistinguishable from fluent and right.
+    """
+
+    id, title = "saying", "putting a meaning into that language, or saying nothing"
+    teaches = "a shape learned by reading is a shape she can speak, without a second lesson"
+    threshold, items = 0.8, 12
+
+    lesson = 14
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        """A **reading** lesson, and that is the point of it.
+
+        The exam asks for past-tense sentences among the others, and the past is the one shape the
+        three subjects above never demonstrate — so cold, she says the two tenses she has and
+        stays silent on the third, which is 0.75 and is the correct 0.75. What is taught here is
+        the past tense *as sentences with their meanings*, exactly as ``reading`` is taught, and
+        nothing about production is demonstrated at all. If the number moves, what moved it is a
+        construction crossing from comprehension into production on its own.
+        """
+        from nyxara.njp import dialects
+        spoken, dialect = self.faculty(brain), self.course(brain, mint).first
+        shown = dialects.sample(dialect, mint.word, self.lesson, kinds=("past",))
+        for utterance in shown:
+            spoken.show(utterance.surface, utterance.meaning, tongue=dialect.name)
+        report = spoken.learn(tongue=dialect.name)
+        return Taught(len(shown), f"{len(shown)} past-tense sentences read to her; "
+                                  f"{report.kept} shapes held in all, none of them a lesson "
+                                  f"in speaking")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp import dialects
+        spoken, dialect = self.faculty(brain), self.course(brain, mint).first
+        score, misses = Score(), []
+        wanted = dialects.sample(dialect, mint.word, self.items,
+                                 kinds=("assertion", "negated", "past"))
+        for index, utterance in enumerate(wanted):
+            meaning = utterance.meaning
+            if index % 4 == 3:
+                meaning = dialect.meaning(utterance.meaning.subject, utterance.meaning.relation,
+                                          utterance.meaning.object)
+                meaning.modality = "necessary"
+                question = Question(ask=f"say it, but as something that *must* be so",
+                                    accept=(), silence_ok=True,
+                                    note="control: a modality nobody demonstrated")
+            else:
+                question = Question(ask=f"say {self._said(meaning)}",
+                                    accept=(utterance.surface,), exact=True)
+            self.mark(score, misses, question, spoken.say(meaning, tongue=dialect.name))
+        return score, misses
+
+
+class Translation(LanguageSubject):
+    """The same meaning, in a second language that shares no word with the first.
+
+    A translation here is not a mapping between two surfaces — there is no phrase table and
+    nothing is aligned. She reads the sentence into a
+    :class:`~nyxara.njp.semantics.Meaning` and says that meaning in the other grammar, so what
+    crosses is only what was never in either language to begin with. It is the sharpest test of
+    the claim the whole module rests on, because a faculty that had really learned surface
+    patterns rather than meanings has nothing at all to carry across.
+
+    Two items ask which language a sentence was in, and they are deliberately built from the forms
+    that differ — the particles. Two bare three-word grammars are genuinely indistinguishable on
+    one sentence, and she returns ``ambiguous`` for them rather than a coin toss, which is right
+    and would make a poor exam question.
+    """
+
+    id, title = "translation", "the same meaning in a language that shares no word"
+    teaches = "a meaning belongs to no language, which is why it can be said in another"
+    threshold, items = 0.75, 12
+
+    lesson = 18
+    kinds = ("assertion", "negated", "polar")
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        from nyxara.njp import dialects
+        spoken, course = self.faculty(brain), self.course(brain, mint)
+        taught = 0
+        for dialect in (course.first, course.second):
+            shown = dialects.sample(dialect, mint.word, self.lesson, kinds=self.kinds)
+            for utterance in shown:
+                spoken.show(utterance.surface, utterance.meaning, tongue=dialect.name)
+            taught += len(shown)
+            spoken.learn(tongue=dialect.name)
+        first = len(spoken.tongue(course.first.name).grammar.constructions)
+        second = len(spoken.tongue(course.second.name).grammar.constructions)
+        return Taught(taught, f"two grammars held at once: {first} shapes and {second}")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp import dialects
+        spoken, course = self.faculty(brain), self.course(brain, mint)
+        source, target = course.first, course.second
+        score, misses = Score(), []
+        for index, utterance in enumerate(
+                dialects.sample(source, mint.word, self.items, kinds=self.kinds)):
+            if index % 6 == 4:
+                # Which language was that? Asked only of the forms that carry a particle, because
+                # the answer to a bare sentence genuinely is "either".
+                marked = source.utter(utterance.meaning.subject, utterance.meaning.relation,
+                                      utterance.meaning.object, kind="negated")
+                question = Question(ask=f"which language is {marked.surface!r}?",
+                                    accept=(source.name,), exact=True)
+                self.mark(score, misses, question, spoken.read(marked.surface).language)
+                continue
+            if index % 6 == 5:
+                surface = self._control(utterance.surface, mint)
+                question = Question(ask=f"translate {surface!r}", accept=(), silence_ok=True,
+                                    note="control: unreadable in the source")
+            else:
+                surface = utterance.surface
+                want = target.express(utterance.meaning.subject, utterance.meaning.relation,
+                                      utterance.meaning.object, kind=utterance.kind)
+                question = Question(ask=f"translate {surface!r}", accept=(want,), exact=True)
+            self.mark(score, misses, question,
+                      spoken.translate(surface, into=target.name, frm=source.name))
+        return score, misses
+
+
 REASONING = (Arithmetic, Composition, Inheritance, Shapes, Abstention, Depth)
+LANGUAGE = (WordShapes, WordClasses, Reading, Polarity, Questions, Saying, Translation)
 CODING = (CodeReading, Tracing, WriteBasic, WriteComposite, WriteLoops, WriteRecursion,
           WriteDicts, WriteStrings, WriteStructures, WriteAlgorithms, Debugging, EdgeCases,
           Transfer)
@@ -1130,7 +1653,15 @@ _attach_banks()
 #: the subjects that reward "yes", so a brain that learned to say yes is caught by the next
 #: subject rather than flattered by the previous one; transfer last, because it is the only
 #: subject whose score is entirely a consequence of the ones before it.
-SUBJECTS = REASONING + CODING
+#:
+#: Language sits between the two halves, and the position is argued for. It is after reasoning
+#: because a shape carries a *meaning* and there has to be something for a meaning to be made of;
+#: it is before coding because the discipline the coding half runs on — a lesson leaves a shape,
+#: never an answer — is the same discipline, and it is easier to believe about programs once it
+#: has been watched working on sentences. Within it the order is likewise the claim: the shape of
+#: a word, then which words behave alike, then a whole clause, then its denial, then its question
+#: forms, then producing one, then producing one in a second language.
+SUBJECTS = REASONING + LANGUAGE + CODING
 
 
 class ExamConditions:

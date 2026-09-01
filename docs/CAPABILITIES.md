@@ -868,6 +868,8 @@ was actually asked, including ordering constraints like *"pehle test chala"*.
 rather than letting a fallback babble in her name. `nyxara.njp.prove` is the proof core (z3 /
 sympy) — it returns a verdict only where a claim is formally expressible and reports
 `INEXPRESSIBLE` otherwise, which is the most-tested behaviour in the file.
+`nyxara.njp.language` is the grammar she **learns** rather than the one she ships — see NJP V.18
+below — and it is empty until somebody teaches it.
 
 ### NJP V.16 — she writes programs, and she is examined on what she was never taught
 
@@ -1180,6 +1182,264 @@ on a bank of hard problems chosen after the skeletons were finished that is **fi
 twenty-one**, against three of twenty-eight on the bank they were written against. Both numbers
 are reported because only the pair of them says what the thing can do. Every one of
 those limits is reported as a number by the school rather than described here as a caveat.
+
+### NJP V.18 — the grammar she learns, and the languages she is examined in
+
+V.16 and V.17 taught her a *coding* language and then grew it. This is the other kind. Three
+organs already stood between a sentence and a belief — `nyxara.njp.tongue` tokenises any script,
+`nyxara.njp.semantics` tags the closed class and matches frames over the tag sequence,
+`nyxara.njp.grounding` turns the result into beliefs — and between them there was one thing that
+did not exist: **a way for her to acquire a construction she was not shipped with.**
+
+The frames in `semantics.py` are written by a person: `_q_fronted_wh`, `_q_polar`, `_q_hinglish`
+and six more. They are good frames and they are the whole of the grammar. A sentence whose shape
+is not one of them is `unreadable`, and it stays unreadable however many times it is said to her,
+because nothing turned *a sentence she was shown the meaning of* into *a shape she can read the
+next sentence with*.
+
+#### How the gap was measured, and why it is worse than a gap
+
+Minting fresh **vocabulary** — what the school already does for reasoning — cannot measure this.
+*"The zorb chases the plag"* is still an English sentence, and any shipped subject-verb-object
+frame reads it correctly having learned nothing. So `nyxara.njp.dialects` mints the **grammar**:
+a whole small language drawn at random per seed — which of the six orders its subject, verb and
+object come in, what marks its subject and object if anything, its plural, its past, the word
+that means *not* and where in the clause it sits, how a yes-or-no question is marked and at which
+end, and which words stand in the hole of a *what* question and of a *who* question.
+
+Measured on the compiler she ships with, over 192 sentences of eight minted dialects:
+
+| shipped `semantics.compile_meaning`, minted languages | |
+|---|---|
+| sentences it declared **readable** | **192 / 192** |
+| sentences it got **right** | **0 / 192** |
+| subjects identified correctly | 0 / 192 |
+| denials still marked as denials | **0 / 32** |
+| questions recognised as questions | **0 / 96** |
+
+That is not a gap, it is a **confident wrong reading**. It never abstains: every three-token
+string is read positionally as subject-verb-object, and every one of the thirty-two denials is
+stored as its own assertion — the exact failure `semantics.py` was written to close, reappearing
+the moment the language changes. It is also why every language subject below carries controls that
+only silence can pass: a floor of wrong answers cannot be told from a floor of right ones by
+looking at the coverage.
+
+#### What was built
+
+**`nyxara.njp.language` — the language faculty.** Four things are learned and they are kept apart
+because they are four claims:
+
+* **Affixes are induced**, paradigmatically: a suffix counts once for every stem that appears in
+  the vocabulary *both bare and with the suffix attached*. English `-ing` scores because *walk*,
+  *talk* and *read* are words; `-ea` scores nothing because *r*, *t* and *br* are not. No suffix
+  list ships.
+* **An affix *means* something only where a lesson said so.** Induction finds the shape `-ik`; it
+  cannot find that `-ik` is a plural. `Morphology.bind` takes a demonstrated pair and **refuses to
+  bind an affix that was never independently induced** — otherwise the wug test is one memorised
+  pair with a rule's name on it. A pair it refuses is kept as an *irregular*, and an irregular
+  never generalises to a stem it was not shown on.
+* **Word classes are discovered from where words occur** and are given **no names**. `class:0` is
+  a set of words that behave alike; calling it "noun" would be the ontology this package refuses
+  everywhere else, sneaking back in through the grammar.
+* **Constructions are generalised from demonstrations.** A demonstration is a surface and the
+  `Meaning` it carries. What is retained is that sentence with its content words replaced by
+  **slots**, and everything else — word order, case markers, particles, the negator, the question
+  word — kept as fixed material. That asymmetry *is* the generalisation.
+
+Four refusals define the rest of it:
+
+* **Two demonstrations, not one, and they have to disagree.** A shape supported by one sentence is
+  that sentence. It is kept only when two demonstrations produce it with different fillers in at
+  least one slot. Measured: one demonstration of a shape reads **0/240** held-out sentences, two
+  reads **240/240**. The threshold is visible in the data rather than asserted in a docstring.
+* **A grammar answers to its own lessons.** Every kept construction is re-run over the whole
+  demonstration corpus, and one that reads any demonstration into a *different* meaning than it
+  arrived with is dropped. Not for failing to be chosen — several shapes may read one sentence —
+  but for **winning and being wrong**, which is the only failure that puts a false meaning into
+  the rest of the brain.
+* **Every candidate is tried; the winner is chosen on evidence, never on order** — the rule
+  `semantics.py` and `compile.py` both state. With one further consequence: when the two best
+  constructions score *equal* and disagree, the sentence comes back `unreadable` with the frame
+  `ambiguous`.
+* **She says only what she can read back.** A rendered sentence is **parsed again**, and unless
+  the parse gives back the meaning it started from it is discarded and the next candidate tried.
+  If none survives she returns the empty string. This is the condition `nyxara.njp.voice` has
+  always insisted on before she is allowed a fluent surface, met mechanically instead of by an
+  apology.
+
+**And a meaning is not a language.** A faculty holds many tongues. Reading with none named lets
+the evidence say which language a sentence was in, and `translate` reads in one and says in
+another — no phrase table, nothing aligned, the only thing crossing being what was never in
+either language to begin with.
+
+Over 24 minted languages, on sentences built from words that appeared in no lesson:
+
+| | |
+|---|---|
+| held-out sentences read correctly | **480 / 480** |
+| meanings said back correctly | **480 / 480** |
+| controls — one word too many — refused | **480 / 480** |
+| readings that were confidently **wrong** | **0** |
+
+#### The syllabus is twenty-six subjects now
+
+Seven of language, sitting between the six of reasoning and the thirteen of coding. The position
+is argued for: after reasoning because a shape carries a *meaning* and there has to be something
+for a meaning to be made of, and before coding because *a lesson leaves a shape, never an answer*
+is the same discipline in both halves.
+
+`python -m nyxara.njp.school --rounds 2 --retention`, seed 7, the language half:
+
+| | taught | teacher off, fresh items |
+|---|---|---|
+| subjects mastered | 7 / 7 | 7 / 7 |
+| right / wrong / abstained | 84 / 0 / 0 | 84 / 0 / 0 |
+| accuracy · precision | 1.00 · 1.00 | 1.00 · 1.00 |
+
+Six of the seven moved because their own lesson ran, every one of them on material nobody
+demonstrated:
+
+    morphology     0.17 → 1.00   the plural of a word that has never been uttered
+    reading        0.33 → 1.00   who did what to whom, in an order nobody wrote code for
+    polarity       0.67 → 1.00   a denial, kept as a denial
+    questions      0.33 → 1.00   which part of the sentence is being asked about
+    saying         0.75 → 1.00   a shape crossing from comprehension into production
+    translation    0.33 → 1.00   the same meaning in a language sharing no word with the first
+
+`word-classes` reads 1.00 cold and is printed as `already`. That is the honest result and not a
+disappointing one: the ability needs *exposure*, not teaching, and an exam about words she has met
+has to supply its own exposure. It stays in the syllabus for the reason `arithmetic` does — a
+floor that quietly stopped working shows up there rather than three subjects later as an
+unexplained dip — and it has already earned that keep once, below.
+
+The whole syllabus, with the language half in it, is twenty-six subjects and reads:
+
+| seed 7, two rounds | taught | teacher off, fresh items |
+|---|---|---|
+| subjects mastered | **26 / 26** | **26 / 26** |
+| right / wrong / abstained | 526 / **0** / 2 | 525 / 1 / 2 |
+| accuracy · precision | 1.00 · **1.00** | 0.99 · **1.00** |
+
+Fourteen subjects moved because their own lesson ran: the six language ones above, plus the eight
+in the other two halves — `depth`, `code-composites`, `loops`, `recursion`, `mappings`, `strings`,
+`structures` and `algorithms`. Nothing in the coding half moved because of anything here and
+nothing in it regressed, which is what the two halves being independent looks like when it is
+measured rather than asserted: the seven language subjects add **0.03 s** to a run that takes
+eleven minutes, and they touch no organ the coding half reads.
+
+**And it is not one lucky language.** Every seed mints a different word order, different case
+markers, a different negator in a different position and different question particles. Swept over
+forty of them, each taught and then re-examined with the teacher off:
+
+| 40 minted languages × (taught + retention) | |
+|---|---|
+| subjects mastered | **560 / 560** |
+| right / wrong / abstained | **6720 / 0 / 0** |
+
+**`saying` is the one worth reading twice.** Its lesson is a *reading* lesson: fourteen past-tense
+sentences with their meanings, and not one word about producing anything. Cold it scores 0.75 and
+the 0.75 is correct — she speaks the two tenses she has constructions for and stays silent on the
+third. What moves it to 1.00 is a shape learned by comprehension becoming available to production
+with no production lesson at all.
+
+#### Five things this found, and what each cost
+
+Two were in the faculty and three were in the examination, and all three of the examination's were
+found from *her* side of it — by a refusal or by a rejection notice — rather than by anybody
+inspecting the generator.
+
+1. **A filler may span one token, and that is a measurement.** It was three, which reads "the
+   black dog" as one subject and looks like the more capable setting. What it actually buys is a
+   grammar that cannot refuse: three bare slots match a four-word sentence by letting one slot
+   swallow two words, so *a sentence with one word too many comes back read instead of refused*.
+   Over six minted languages, twenty controls each — at three, two of the six refused only 12 and
+   16 of their 20; at one, all six refuse all twenty. The cost is named rather than hidden: a
+   two-word noun phrase is now **unreadable**, not mis-cut.
+2. **A word's context is better described by the *kind* of its neighbours than by their
+   identity.** In a verb-subject-object clause the subject touches neither edge of the sentence,
+   so two subjects sharing no verb and no object share *no context at all* — measured, eight
+   identically-behaving nouns in eight classes of one, and `word-classes` at 0.67. One further
+   pass, describing each neighbour by the class the first pass put it in, puts all eight together.
+   It stops at two passes deliberately: each further pass describes a word by a description that
+   was itself inferred, and an induction run to a fixed point is one whose later passes are
+   agreeing with themselves rather than with the corpus.
+3. **A minted language that is ambiguous on its own terms grades a right answer as wrong.** The
+   affixes were drawn distinct from each other and the particles distinct from each other, and
+   nothing compared the two sets — so one language minted the object marker `-za` and the wh-word
+   `nuza`, and `<subject>gu <verb> nuza` is *both* "who does she V" and "she V's a nu". She
+   returned `ambiguous` on all four such sentences rather than picking one. Four correct refusals
+   scored as misses until somebody looked at the language rather than at her.
+4. **The same shape again, in the vocabulary.** A verb drawn as `tudubo` in a language whose past
+   tense is `-bo` **is** a past-tense verb by that language's own rules, so the present-tense
+   sentence built from it is genuinely ambiguous and her past reading of it was not wrong. One
+   item in four hundred and eighty. Fixed in the generator rather than tolerated, because a
+   benchmark that mints undecidable items reports a ceiling belonging to the benchmark.
+5. **Exactly one slot is empty in a content question, and it is the one being asked about.** The
+   generator emptied *both* for a subject-question, so the object word sat in the surface with
+   nothing accounting for it, was kept as fixed material, and every sentence became its own shape.
+   The faculty said so immediately and in the right words — eight demonstrations, eight
+   signatures, every one of them rejected as *"one demonstration is a sentence, not a shape"*.
+   The rejection notices named the defect; nothing had to be guessed at. That is the argument for
+   a learner that reports what it threw away instead of only what it kept.
+
+#### The one edge into what she believes
+
+`nyxara.njp.grounding` will now read a sentence with a learned construction. It was written as a
+pure fallback and that was **dead code**: the shipped core never returns nothing for a well-formed
+sentence — the positional frame reads any three tokens — so a fallback waiting for silence waits
+forever.
+
+So precedence is decided on evidence, and the rule is one sentence: **a learned construction
+outranks the positional frame when it matched fixed material — a literal particle, a case marker,
+a tense ending — because that is a fact about the words in front of it, and order alone is a guess
+about which language this is.** It never outranks a shipped *pattern*: those name their relation
+lexically and are the more specific reading by the same argument. Four refusals hold whatever the
+precedence says: it invents no language (a faculty nobody taught returns nothing, and a test
+asserts that attaching one to a grounder leaves twenty-five varied sentences — English, Hinglish,
+minted — grounding to byte-identical triples); it reads
+assertions and nothing else, because *"what does a zorbin eat"* is not the claim that a zorbin
+eats something called *what*; it is confident about nothing, carrying the construction's own
+capped confidence and labelled `learned-grammar` so an audit can tell a lesson's work from the
+shipped core's; and an unanchored learned reading of a sentence the core already read is
+discarded, because two positional guesses disagreeing is not evidence for either.
+
+End to end, through every organ between the two — four sentences of a language nobody wrote code
+for, then a question in a language she shipped with:
+
+    >>> for s, v, o in (("cat","chase","dog"), ("bird","chase","fish"),
+    ...                 ("frog","eat","worm"), ("goat","eat","leaf")):
+    ...     brain.show_language(f"{o}ni {s}ta {v}", Meaning(kind="assertion", subject=s,
+    ...                                                     relation=v, object=o), tongue="zz")
+    >>> brain.learn_language(tongue="zz")
+    >>> brain.think("stoneni horseta eat").answer
+    'noted: horse eat stone'
+    >>> brain.think("what does horse eat?").answer
+    'stone'
+
+Reachable as `brain.hear_language`, `show_language`, `learn_language`, `read_language`,
+`say_language`, and over the wire at `/v1/njp/language`.
+
+**And it wakes up as the faculty that went to sleep.** The tongue goes into the `njp.json` sidecar
+with every other organ — but what is written is the **lessons**, not the conclusions.
+Constructions, affixes and word classes are all re-derived from the demonstrations and the
+vocabulary on the way in, rather than read out of the file. It costs a fraction of a second on
+load and it buys one guarantee: a sidecar can make her *forget* a language, and it cannot make her
+believe a shape nobody ever showed her — not if it is truncated, not if it is hand-edited, and not
+if an older version wrote it. Only the two things that could not be recovered by re-deriving are
+stored as facts: which affix a lesson bound to which feature, and each construction's held-out
+record, since that is evidence from outside the lessons.
+
+#### What this is not
+
+Not a parser for English. No dictionary, no syntax theory, no recursion into subordinate clauses;
+one construction is one flat sentence and a filler is one token, so a two-word noun phrase is
+unreadable rather than mis-cut. Affix induction is concatenative — suffixes and prefixes only, no
+stem changes, no infixes, no reduplication — so an irregular is a memorised pair and never a rule.
+Nothing here decides truth or relevance: it produces a `Meaning` and stops. Nothing drives it —
+no pulse, no evolver — because everything it learns comes from a demonstration, and a
+demonstration is something a caller makes rather than something a clock produces. And on a brain
+nobody has taught, every entry point returns the empty answer, which is the correct day-one
+behaviour rather than a gap being apologised for.
 
 ### Reachable over the wire
 

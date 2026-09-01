@@ -432,6 +432,17 @@ class NJPBrain:
         # because the gate should be able to switch it off without disturbing anything that runs
         # before it.
         self.coder = self._build_coder(c)
+        # The language faculty, and the one edge from it into what she believes. After the
+        # grounder because it is handed to the grounder, and it is handed over rather than
+        # consulted from here so that the *reading* of a sentence stays in one place: a brain
+        # that parsed a turn twice, once for structure and once for the grammar, would have two
+        # answers to "what did he just say" and no rule for which one wins.
+        self.language = self._build_language(c)
+        if self.grounder is not None and self.language is not None:
+            try:
+                self.grounder.grammar = self.language
+            except Exception:  # noqa: BLE001 — she grounds exactly as before without it
+                pass
         # Truth is not relevance, and reasoning is not always what a turn calls for.
         self._speech, self._policy, self.gate = self._build_relevance(c)
         # Last, because it registers repairs against organs built above it and reads them on
@@ -1687,6 +1698,72 @@ class NJPBrain:
                          graft=bool(self._cfg("coder_graft", True)))
         except Exception:  # noqa: BLE001 — a brain that cannot program still thinks
             return None
+
+    def _build_language(self, c: Any) -> Any:
+        """The organ that can acquire a grammar she was not shipped with.
+
+        Empty on day one and that is the honest default: it holds no construction, no affix and
+        no word class until somebody has shown it a sentence with its meaning, so a brain that is
+        never taught behaves exactly as it did before this organ existed. Nothing drives it — no
+        pulse, no evolver — because everything it learns comes from a demonstration, and a
+        demonstration is something a caller makes rather than something a clock produces.
+        """
+        if not self._gate("language", True):
+            return None
+        try:
+            from nyxara.njp.language import LanguageFaculty
+            return LanguageFaculty(default=str(self._cfg("language_default", "en")))
+        except Exception:  # noqa: BLE001 — a brain with no grammar organ still reads English
+            return None
+
+    # ---- language --------------------------------------------------------- #
+    def hear_language(self, text: str, *, tongue: Optional[str] = None) -> None:
+        """Overhear a sentence: no meaning attached, and nothing asserted from it.
+
+        This feeds the two organs that need only exposure — the affix induction and the word
+        classes — and it feeds neither the grammar nor the fact store. Hearing a sentence is not
+        being told a fact, and a faculty that treated it as one would be inventing beliefs out of
+        overheard strings.
+        """
+        if self.language is not None:
+            self.language.hear(text, tongue=tongue)
+
+    def show_language(self, surface: str, meaning: Any, *,
+                      tongue: Optional[str] = None) -> bool:
+        """One demonstration: a sentence, and the meaning it carries. Generalised by
+        :meth:`learn_language` and by nothing before it."""
+        if self.language is None:
+            return False
+        return self.language.show(surface, meaning, tongue=tongue)
+
+    def learn_language(self, *, tongue: Optional[str] = None) -> Any:
+        """Generalise the demonstrations into constructions, and report what was thrown away.
+
+        Deliberately not driven, for the reason :meth:`go_to_school` is not: this is the call that
+        changes how every later sentence is read, and a thing that changes how she reads is a
+        thing a caller should have to ask for by name.
+        """
+        if self.language is None:
+            return None
+        return self.language.learn(tongue=tongue)
+
+    def read_language(self, surface: str, *, tongue: Optional[str] = None) -> Any:
+        """Parse with the learned grammar alone, returning a
+        :class:`~nyxara.njp.semantics.Meaning`. Unreadable is a real answer here."""
+        if self.language is None:
+            return None
+        return self.language.read(surface, tongue=tongue)
+
+    def say_language(self, meaning: Any, *, tongue: Optional[str] = None) -> str:
+        """Put a meaning into words, or return nothing.
+
+        Every sentence this produces has been parsed again and checked to give back the meaning it
+        started from. That is the condition :mod:`nyxara.njp.voice` has always insisted on before
+        she is allowed a fluent surface, met mechanically instead of by an apology.
+        """
+        if self.language is None:
+            return ""
+        return self.language.say(meaning, tongue=tongue)
 
     # ---- programming ------------------------------------------------------ #
     def read_code(self, source: str) -> Any:
@@ -4140,7 +4217,8 @@ class NJPBrain:
                             ("index", self.index),
                             ("society", self.society),
                             ("evolution", self.evolution),
-                            ("epistemic", self.epistemic), ("coding", self.coder)):
+                            ("epistemic", self.epistemic), ("coding", self.coder),
+                            ("language", self.language)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -4309,7 +4387,8 @@ class NJPBrain:
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),
                             ("compiler", self.compiler),
-                            ("epistemic", self.epistemic), ("coding", self.coder)):
+                            ("epistemic", self.epistemic), ("coding", self.coder),
+                            ("language", self.language)):
             if organ is None:
                 continue
             try:
@@ -4340,6 +4419,11 @@ class NJPBrain:
                 self.soul.load_dict(d["soulsync"])
             if d.get("grounding") and self.grounder is not None:
                 self.grounder.load_dict(d["grounding"])
+            # The grammar she was taught. Re-derived from its demonstrations on the way in, so a
+            # sidecar can make her forget a language and cannot make her believe a shape nobody
+            # ever showed her.
+            if d.get("language") and self.language is not None:
+                self.language.load_dict(d["language"])
             if d.get("world") and self.world is not None:
                 self.world.load_dict(d["world"])
             if d.get("predict") and self.predictor is not None:
