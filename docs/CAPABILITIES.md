@@ -1043,20 +1043,64 @@ failure with all fifty-four taught shapes in hand.
 | reads it and gives the right answer | **76 / 76** |
 | says what happened inside it (trace) | **30 / 30** |
 | repairs it after one node is corrupted | **21 / 24** |
-| **invents it from examples alone** | **1 / 28** |
+| **writes it from examples alone, cold** | **16 / 28** |
 
-That last row did **not** move when `Coder.invent` was added, and the fact is worth more than the
-improvement would have been: invention raised the cold baseline on the ordinary families from
-29/65 to 37/65 and changed the hard set by nothing at all — 1/28 before, 1/28 after. It composes
-expressions; every problem on this list needs a loop with a carried state, and that is a different
-space which no budget over this one reaches.
+That last row was **1 / 28** when it was first measured, and the way it moved is the point.
 
-The single cold solve is `permutation_count`, and only because *n!* is the factorial shape she was
-already taught. Nothing genuinely new was invented, and that is the honest ceiling: synthesis is
-enumeration over shapes she has been shown, so a shape she has never seen and cannot reach by one
-graft is an **abstention** — not a wrong program. That property is what
-`tests/njp/test_unseen_hard.py` asserts, rather than asserting how few she solves, because a test
-that fails when she improves is not a test.
+**Adding `Coder.invent` moved it by nothing.** Bottom-up enumerative synthesis with
+observational-equivalence pruning raised the cold baseline on the ordinary families from 29/65 to
+37/65 and changed the hard set from 1/28 to 1/28 — not a rounding, the identical single problem.
+It composes *expressions*, and `sum(map(f, filter(p, xs)))` is an expression while
+`for i: for j: if xs[i] > xs[j]: n += 1` is not. No budget over the first space reaches the second.
+
+**Adding skeletons with a carried variable moved it to 4 / 28.** `Coder.compose` fills an
+imperative sketch — a loop, an accumulator, a test, an update, with a **scope** attached to each
+hole so `xs[i]` is only offered inside a loop that has an `i`. Ten skeletons: accumulate, build a
+list, accumulate under a test, scan by index, running best, countdown, one-dimensional table,
+nested pairs, windows, two variables turning over each other. That reached `count_inversions`,
+`largest_rectangle_histogram` and `longest_palindromic_substring` — the quadratic scans.
+
+**Adding skeletons that carry a *table* moved it to 16 / 28.** The scalar accumulator was still a
+ceiling: every remaining problem carries a row of answers to smaller instances and reads it back by
+index while building the next one. Twelve more skeletons — a table indexed by position, a table
+over two sequences kept one row at a time, a table over amounts, a table rebuilt once per item, a
+prefix table over a bag of pieces, a two-parameter recurrence, a reachability closure, a
+prefix-and-suffix scan, a whole-row rebuild, a first-position search, a sorted merge, and a
+coalesce — and these fell out cold, from input/output pairs, with no lesson and no shape for them:
+
+`edit_distance` · `longest_common_subsequence` · `longest_increasing_subsequence` · `knapsack` ·
+`coin_change` · `subset_sum` · `word_break` · `kmp_search` · `trapping_rain_water` ·
+`largest_rectangle_histogram` · `longest_palindromic_substring` · `merge_intervals` · `catalan` ·
+`pascal_row` · `count_inversions` · `permutation_count`
+
+Every one of them is checked on inputs it was **not** fitted on, which is what separates an
+algorithm from a coincidence that agrees with three rows. `tests/njp/test_unseen_hard.py` names
+them one at a time rather than asserting a count, because a regression that swapped one for
+another would pass a count.
+
+**The twelve it still cannot write, and why — no hedging.**
+
+| | |
+|---|---|
+| `n_queens`, `matrix_determinant` | recursion that **searches**, with a partial solution passed down and undone. Nothing here builds a backtracker. |
+| `dijkstra`, `topological_order`, `connected_components` | a **worklist**: a frontier that is chosen from, removed from, and grown, until it empties. No skeleton has one. |
+| `regex_match`, `longest_valid_parentheses`, `min_window_length` | the window's validity needs a **scan of its own** to decide, and the test holes take expressions, not loops. |
+| `convex_hull_size` | a **monotonic stack** — pop while a three-point orientation fails — and geometry's predicate is not in any pool. |
+| `sudoku_row_valid` | the same property checked along **both axes** of a grid; there is no transpose. |
+| `josephus`, `median_two_sorted` | **it can write both** — `recur_two` finds the Josephus recurrence and `merge_pick` finds the median — but a *simpler* skeleton fits the two or three examples first by coincidence, and the held-out split correctly scores that wrong. With this many examples the problem is genuinely underdetermined; the honest answer is more examples, not a tie-break invented to favour the answer already known. |
+
+**This is not 100%, and it will not become 100% this way.** Each family above wants a skeleton
+with a control structure none of the twenty-three has, and adding skeletons until a fixed
+twenty-eight-problem list reads 28/28 would be fitting the benchmark, not the ability — the same
+mistake as padding the held-out set, which this benchmark already made once and had corrected. The
+number that means something is that the *kind* of ceiling moved twice: from "expressions only" to
+"a carried number" to "a carried table", each time measured on problems chosen before the skeleton
+existed.
+
+The safety property is unchanged and is the one asserted: what she cannot write, she **abstains**
+from. Across the whole sweep, every program she wrote cold passed the held-out pairs; not knowing
+shows up as silence, never as a wrong program.
+
 
 **Shown one worked solution, though, she keeps it.** The inputs are generated once and split — the
 first half demonstrates, the second half examines, and no input appears in both:
@@ -1084,8 +1128,9 @@ one-shot from 27/30 to 22/24. Both first numbers were wrong and neither is quote
 
 **What this is not.** No classes, no exceptions, no generators, no imports, no closures over
 mutable state, no shared mutation, no floats. Synthesis is enumeration over learned shapes under
-an attempt budget, not a general program synthesiser: a shape she has never seen and cannot reach
-by one graft is an abstention, and cold she writes 29 of 65 families rather than 65. Every one of
+an attempt budget plus twenty-three imperative skeletons, not a general program synthesiser: a
+shape that needs a control structure none of the skeletons has — a backtracker, a worklist, a
+monotonic stack — is an abstention, and twelve of the twenty-eight hard problems are exactly that. Every one of
 those limits is reported as a number by the school rather than described here as a caveat.
 
 ### Reachable over the wire

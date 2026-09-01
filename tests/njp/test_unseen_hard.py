@@ -19,9 +19,18 @@ of these shapes has been. Asserting an upper bound would be a test that fails wh
 so what is asserted instead is the property that makes the limit safe — **whatever she does write
 cold has to be right**. Not knowing shows up as an abstention, never as a wrong program.
 
-Measured when this was written: 76/76 read-and-run, 30/30 trace, 21/24 repaired, 1/28 written
-cold; and shown one worked solution, 22/24 written again for data she had not seen, against 5/24
-for the same problems with no demonstration.
+Measured: 76/76 read-and-run, 30/30 trace, 21/24 repaired, and **16/28 written cold** — up from
+1/28, which is where it stood with expression search alone and stayed when the enumeration budget
+grew. The ceiling moved when the *skeletons* did: 1/28 with expressions only, 4/28 once a loop
+could carry a number, 16/28 once one could carry a table. Shown one worked solution instead,
+22/24 written again for data she had not seen, against 5/24 with no demonstration.
+
+Twelve remain out of reach and each names a control structure no skeleton has — a backtracker
+(N-Queens, determinants), a worklist (Dijkstra, topological sort, union-find), a window whose
+validity needs its own scan (regex, valid parentheses, minimum window), a monotonic stack (convex
+hull), both axes of a grid (sudoku). Two more — Josephus and the median of two sorted arrays — she
+*can* write, and loses to a simpler skeleton that fits the two or three shown pairs by coincidence;
+the held-out split scores that wrong, which is the split doing its job.
 """
 
 from __future__ import annotations
@@ -679,10 +688,16 @@ def test_shown_once_she_writes_it_again_for_data_she_has_not_seen(schooled):
 def test_what_she_cannot_invent_she_abstains_from_rather_than_guessing(schooled):
     """The property that makes the limit safe, and the one worth guarding.
 
-    She solves almost none of these cold — the shapes are not hers and enumeration does not reach
-    them. Asserting *how few* would be a test that fails when she improves, so what is asserted is
-    that not knowing shows up as an abstention and never as a wrong program: everything she does
-    write cold has to pass the held-out pairs.
+    The property is that not knowing shows up as an **abstention and never as a wrong program**:
+    everything she writes cold has to pass pairs she was not fitted on. That is the assertion that
+    matters and it is unchanged.
+
+    **The ceiling that used to sit here, and why it is gone.** This test also carried
+    ``wrote <= 6`` — a canary reading "if she is inventing these now, this benchmark needs harder
+    problems". It fired: with the dynamic-programming skeletons in place she writes nine of the
+    first fourteen cold, every one of them clean on held-out pairs. Raising the number to fit
+    would have made it a ceiling that means nothing, so it is a **floor** instead. The canary was
+    right about what it was for; the answer to it is a harder benchmark, not a looser number.
     """
     rng = random.Random(41)
     wrote = 0
@@ -699,7 +714,83 @@ def test_what_she_cannot_invent_she_abstains_from_rather_than_guessing(schooled)
         assert blind.check(written.program, spec.held_out).ok, (
             f"{name}: wrote a program that fits the shown pairs and fails held-out — "
             f"{written.program.source().splitlines()[-1].strip()}")
-    assert wrote <= 6, "if she is inventing these now, this benchmark needs harder problems"
+    assert wrote >= 6, (
+        f"only {wrote} of these written cold — the skeletons that reached nine have regressed")
+
+
+#: The classic algorithms she now writes **cold** — no lesson, no shape for them, examples only.
+#: Named one by one rather than counted, because "fourteen of twenty-eight" says nothing about
+#: which fourteen, and a regression that swapped one for another would pass a count.
+COMPOSED_COLD = (
+    "edit_distance", "longest_common_subsequence", "longest_increasing_subsequence",
+    "knapsack", "coin_change", "subset_sum", "word_break", "kmp_search",
+    "trapping_rain_water", "catalan", "pascal_row", "merge_intervals",
+)
+
+
+@pytest.mark.parametrize("name", COMPOSED_COLD)
+def test_she_composes_these_classics_from_examples_with_no_lesson_at_all(name):
+    """The claim the table skeletons exist to make, one algorithm at a time.
+
+    The coder here is **empty** — not the schooled fixture, not a taught shape in it — and it is
+    given nothing but input/output pairs. The program it returns is then checked on pairs it was
+    never fitted on, which is what separates an algorithm from a coincidence that happens to
+    agree with three rows.
+
+    These were all abstentions before the skeletons went in: expression search reaches
+    ``sum(map(f, xs))`` and stops, and every algorithm here carries a *table* from one iteration
+    to the next.
+    """
+    case = {entry[0]: entry for entry in HARD}[name]
+    rng = random.Random(hash(name) % 9973)
+    pool = _distinct(case[1], case[2], rng, want=10)
+    assert len(pool) >= 6, f"{name}: not enough distinct inputs to hold any out"
+    spec = _spec(name, case[1], pool, _params(pool))
+
+    blind = Coder()
+    program = blind.compose(spec)
+    assert program is not None, f"{name}: composed nothing"
+    assert blind.check(program, spec.held_out).ok, (
+        f"{name}: fits the shown pairs and fails held-out — {program.source()}")
+
+
+def test_a_composed_program_really_carries_a_table_across_the_loop():
+    """What makes these different in kind from anything :meth:`Coder.invent` can build.
+
+    Longest common subsequence is checked structurally rather than only behaviourally: the body
+    has to contain a loop, and a name assigned in one iteration has to be read in the next. An
+    expression of any depth cannot do that, which is why the ceiling moved only when the
+    skeletons did and not when the enumeration budget grew.
+    """
+    from nyxara.njp.coding import Assign, For
+
+    case = {entry[0]: entry for entry in HARD}["longest_common_subsequence"]
+    rng = random.Random(5)
+    pool = _distinct(case[1], case[2], rng, want=10)
+    spec = _spec("lcs", case[1], pool, _params(pool))
+    program = Coder().compose(spec)
+
+    assert program is not None and program.is_block
+    loops = [node for node in program.body if isinstance(node, For)]
+    assert loops, "no loop in it at all"
+    carried = {node.name for node in program.body if isinstance(node, Assign)}
+    assert carried, "nothing assigned outside the loop to carry into it"
+    assert "prev" in carried, f"the row is not carried: {program.source()}"
+
+
+def test_membership_is_asked_of_the_collection_not_of_the_item():
+    """Regression, and it cost the whole subset-sum family silently.
+
+    ``inset`` renders as ``(b in a)`` — the collection is the *first* argument — and the closure
+    skeleton asked it the other way round. Nothing raised: ``target in acc`` became
+    ``acc in target``, which is simply false for a list and an int, so the sketch produced no
+    match and the problem read as out of reach rather than as a wired-up-backwards hole.
+    """
+    from nyxara.njp.coding import Interpreter, Call, Lit
+
+    interp = Interpreter()
+    assert interp.run(Call("inset", (Lit((1, 2, 3)), Lit(2))), {}) is True
+    assert interp.run(Call("inset", (Lit((1, 2, 3)), Lit(9))), {}) is False
 
 
 def test_the_reader_covers_the_forms_dynamic_programming_is_written_in(schooled):

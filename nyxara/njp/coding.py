@@ -102,7 +102,7 @@ __all__ = [
     "OPS", "render", "read_python", "arity_of",
     "TraceStep", "Interpreter",
     "Example", "Spec", "Program", "Schema", "Demonstration", "Learned", "Check", "Written",
-    "Coder", "SEED_SHAPES",
+    "Coder", "SEED_SHAPES", "Sketch", "SKETCHES",
 ]
 
 
@@ -324,6 +324,31 @@ def _keep_text(original: Any, items: Tuple[Any, ...]) -> Any:
     return "".join(items) if isinstance(original, str) else items
 
 
+#: The largest container or string any operator may produce. "Every program halts" was true of
+#: *time* and quietly false of *space*: a loop whose body is ``s = s + s`` doubles its value every
+#: iteration and exhausts the machine's memory in about thirty of them, long before a step budget
+#: counted in tens of thousands notices. A synthesiser that offers exactly that program by the
+#: hundred does not get a failed candidate back — it gets the process killed, which is what
+#: happened, twice, silently. A budget that bounds one dimension and not the other is not a budget.
+_MAX_SIZE = 100000
+
+
+def _big(value: int) -> int:
+    """An integer that has run away is refused too. Repeated squaring in a loop reaches numbers
+    with millions of digits, and arithmetic on those is slow rather than impossible — which is
+    worse, because it does not fail, it just stops finishing."""
+    if value.bit_length() > 4096:
+        raise CodeError("a number grew past what these tasks can need")
+    return value
+
+
+def _bounded(value: Any) -> Any:
+    """Refuse a value that has grown past what any answer to these tasks could need."""
+    if isinstance(value, (tuple, str, frozenset, dict)) and len(value) > _MAX_SIZE:
+        raise CodeError(f"a value grew past {_MAX_SIZE} items")
+    return value
+
+
 def _plus(a: Any, b: Any) -> Any:
     """Python's ``+``, dispatched on what the values actually are.
 
@@ -338,11 +363,11 @@ def _plus(a: Any, b: Any) -> Any:
     if isinstance(a, int) and isinstance(b, int):
         return a + b
     if isinstance(a, str) and isinstance(b, str):
-        return a + b
+        return _bounded(a + b)
     if isinstance(a, tuple) and isinstance(b, tuple):
-        return a + b
+        return _bounded(a + b)
     if isinstance(a, frozenset) and isinstance(b, frozenset):
-        return a | b
+        return _bounded(a | b)
     raise CodeError(f"cannot add {type(a).__name__} and {type(b).__name__}")
 
 
@@ -431,8 +456,8 @@ def _reduce_num(xs: Any, fn: Callable[[Iterable[int]], int], what: str) -> int:
 
 def _cat(a: Any, b: Any) -> Any:
     if isinstance(a, str) and isinstance(b, str):
-        return a + b
-    return _seq(a) + _seq(b)
+        return _bounded(a + b)
+    return _bounded(_seq(a) + _seq(b))
 
 
 def _range1(n: Any) -> Tuple[int, ...]:
@@ -602,7 +627,7 @@ OPS: Dict[str, Tuple[int, Callable[..., Any], str]] = {
     "plus":     (2, _plus, "({0} + {1})"),
     "minus":    (2, _minus, "({0} - {1})"),
     "sub":      (2, lambda a, b: _int(a) - _int(b), "({0} - {1})"),
-    "mul":      (2, lambda a, b: _int(a) * _int(b), "({0} * {1})"),
+    "mul":      (2, lambda a, b: _big(_int(a) * _int(b)), "({0} * {1})"),
     "div":      (2, _div, "({0} // {1})"),
     "mod":      (2, _mod, "({0} % {1})"),
     "neg":      (1, lambda a: -_int(a), "(-{0})"),
@@ -657,8 +682,8 @@ OPS: Dict[str, Tuple[int, Callable[..., Any], str]] = {
     "chr":      (1, lambda n: chr(_int(n) % 0x110000), "chr({0})"),
     "ord":      (1, lambda c: ord(_text(c)[:1] or "\0"), "ord({0})"),
     # sequences, continued — every one of these RETURNS A NEW CONTAINER; see `_dict_set`
-    "append":   (2, lambda xs, v: _seq(xs) + (v,), "({0} + [{1}])"),
-    "extend":   (2, lambda xs, ys: _seq(xs) + _seq(ys), "({0} + {1})"),
+    "append":   (2, lambda xs, v: _bounded(_seq(xs) + (v,)), "({0} + [{1}])"),
+    "extend":   (2, lambda xs, ys: _bounded(_seq(xs) + _seq(ys)), "({0} + {1})"),
     "setat":    (3, _replace_in, "setat({0}, {1}, {2})"),
     "slice":    (3, _slice3, "{0}[{1}:{2}]"),
     "find":     (2, _index_of, "find({0}, {1})"),
@@ -1991,6 +2016,783 @@ def _fn2_library() -> Tuple[Lambda, ...]:
 
 
 # --------------------------------------------------------------------------- #
+# sketches — imperative skeletons with holes that know their own scope
+# --------------------------------------------------------------------------- #
+
+def _v(name: str) -> Var:
+    return Var(name)
+
+
+def _c(op: str, *args: Any) -> Call:
+    return Call(op, tuple(args))
+
+
+def _num_ops(a: Term, b: Term) -> List[Term]:
+    """The arithmetic a running variable is updated with."""
+    return [_c("plus", a, b), _c("mul", a, b), _c("max2", a, b), _c("min2", a, b),
+            _c("plus", a, Lit(1)), _c("minus", a, b), a, b]
+
+
+def _tests(a: Term, b: Term) -> List[Term]:
+    """The comparisons a loop body branches on."""
+    return [_c("gt", a, b), _c("lt", a, b), _c("ge", a, b), _c("le", a, b),
+            _c("eq", a, b), _c("ne", a, b)]
+
+
+@dataclass(frozen=True)
+class Sketch:
+    """An imperative skeleton, its holes, and what may go in each of them.
+
+    ``holes`` names each hole's *kind* — ``value``, ``test``, ``seed`` — and ``fill`` is asked for
+    that hole's candidates given the task, so a hole inside a two-index loop is offered
+    comparisons between the two indexed elements while a hole outside it is not. Attaching the
+    scope to the hole rather than to the sketch is the whole reason the product stays countable.
+    """
+
+    id: str = ""
+    arity: int = 1
+    holes: Tuple[str, ...] = ()
+    build: Any = None                 # (params, fillings) -> block
+    fill: Any = None                  # (index, spec, ints) -> [Term]
+
+    def fillings(self, index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+        return list(self.fill(index, spec, ints))
+
+
+def _seeds(ints: Sequence[int]) -> List[Term]:
+    """What an accumulator starts at."""
+    return [Lit(0), Lit(1), Lit(-1), Lit(())] + [Lit(v) for v in _pick_constants(ints, 4)]
+
+
+# --- one pass over the items, carrying an accumulator ---------------------- #
+
+def _accumulate(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    xs = params[0]
+    return (Assign("acc", f[0]),
+            For(("x",), _v(xs), (Assign("acc", f[1]),)),
+            Return(_v("acc")))
+
+
+def _accumulate_if(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    xs = params[0]
+    return (Assign("acc", f[0]),
+            For(("x",), _v(xs), (If(f[1], (Assign("acc", f[2]),), ()),)),
+            Return(_v("acc")))
+
+
+# --- one pass by index, so the position is available ----------------------- #
+
+def _by_index(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    xs = params[0]
+    return (Assign("acc", f[0]),
+            For(("i",), _c("range", _c("len", _v(xs))),
+                (Assign("acc", f[1]),)),
+            Return(_v("acc")))
+
+
+# --- two nested indices, the shape of every quadratic scan ----------------- #
+
+def _pairs(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    xs = params[0]
+    inner = If(f[1], (Assign("acc", f[2]),), ())
+    return (Assign("acc", f[0]),
+            For(("i",), _c("range", _c("len", _v(xs))),
+                (For(("j",), _c("range2", _c("plus", _v("i"), Lit(1)),
+                                _c("len", _v(xs))), (inner,)),)),
+            Return(_v("acc")))
+
+
+def _windows(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """Every contiguous slice, and the best of them by some measure."""
+    xs = params[0]
+    part = _c("slice", _v(xs), _v("i"), _c("plus", _v("j"), Lit(1)))
+    inner = (Assign("part", part), If(f[1], (Assign("best", f[2]),), ()))
+    return (Assign("best", f[0]),
+            For(("i",), _c("range", _c("len", _v(xs))),
+                (For(("j",), _c("range2", _v("i"), _c("len", _v(xs))), inner),)),
+            Return(_v("best")))
+
+
+# --- two variables turning over each other -------------------------------- #
+
+def _two_var_while(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    a, b = params[0], params[1]
+    return (Assign("p", _v(a)), Assign("q", _v(b)),
+            While(f[0], (Unpack(("p", "q"), _c("append", _c("append", Lit(()), f[1]), f[2])),)),
+            Return(_v("p")))
+
+
+def _countdown_while(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    n = params[0]
+    return (Assign("acc", f[0]), Assign("k", _v(n)),
+            While(_c("gt", _v("k"), Lit(0)),
+                  (Assign("acc", f[1]), Assign("k", _c("minus", _v("k"), Lit(1))))),
+            Return(_v("acc")))
+
+
+# --- one-dimensional dynamic programming ---------------------------------- #
+
+def _dp_row(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """``dp = [seed]; for i in 1..n: dp = dp + [f(dp, i)]; return dp[n]`` — the table that
+    Catalan numbers, a Fibonacci by table and a coin count are all written on."""
+    n = params[0]
+    return (Assign("dp", _c("append", Lit(()), f[0])),
+            For(("i",), _c("range2", Lit(1), _c("plus", _v(n), Lit(1))),
+                (Assign("dp", _c("append", _v("dp"), f[1])),)),
+            Return(_c("at", _v("dp"), _v(n))))
+
+
+def _build_list(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    xs = params[0]
+    return (Assign("out", Lit(())),
+            For(("x",), _v(xs), (If(f[0], (Assign("out", _c("append", _v("out"), f[1])),), ()),)),
+            Return(_v("out")))
+
+
+def _running_best(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """A best-so-far and a current-so-far, which is the shape of every one-pass optimum."""
+    xs = params[0]
+    body = (Assign("cur", f[1]), Assign("best", f[2]))
+    return (Assign("best", _c("head", _v(xs))), Assign("cur", f[0]),
+            For(("x",), _c("tail", _v(xs)), body),
+            Return(_v("best")))
+
+
+def _fill_accumulate(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    if index == 0:
+        return _seeds(ints)
+    return _num_ops(_v("acc"), _v("x")) + [_c("plus", _v("acc"), _c("len", _v("x"))),
+                                           _c("cat", _v("acc"), _v("x"))]
+
+
+def _fill_accumulate_if(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    if index == 0:
+        return _seeds(ints)
+    if index == 1:
+        out = [_c("eq", _c("mod", _v("x"), Lit(2)), Lit(0)),
+               _c("eq", _c("mod", _v("x"), Lit(2)), Lit(1))]
+        for k in _pick_constants(ints, 8):
+            out += [_c("gt", _v("x"), Lit(k)), _c("lt", _v("x"), Lit(k)),
+                    _c("eq", _v("x"), Lit(k))]
+        return out
+    return _num_ops(_v("acc"), _v("x"))
+
+
+def _fill_by_index(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    xs = _v(spec.params[0])
+    at_i = _c("at", xs, _v("i"))
+    if index == 0:
+        return _seeds(ints)
+    return (_num_ops(_v("acc"), at_i) + _num_ops(_v("acc"), _v("i"))
+            + [_c("plus", _v("acc"), _c("mul", at_i, _v("i")))])
+
+
+def _fill_pairs(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    xs = _v(spec.params[0])
+    a, b = _c("at", xs, _v("i")), _c("at", xs, _v("j"))
+    if index == 0:
+        return _seeds(ints)
+    if index == 1:
+        return _tests(a, b) + _tests(_c("plus", a, b), Lit(0))
+    return [_c("plus", _v("acc"), Lit(1)), _c("plus", _v("acc"), a),
+            _c("plus", _v("acc"), b), _c("max2", _v("acc"), _c("plus", a, b)),
+            _c("max2", _v("acc"), _c("mul", a, b))]
+
+
+def _fill_windows(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    part = _v("part")
+    if index == 0:
+        return [Lit(""), Lit(0), Lit(())]
+    if index == 1:
+        return [_c("and", _c("eq", part, _c("rev", part)),
+                  _c("gt", _c("len", part), _c("len", _v("best")))),
+                _c("gt", _c("len", part), _c("len", _v("best"))),
+                _c("gt", _c("sum", part), _v("best")),
+                _c("gt", _c("mul", _c("minof", part), _c("len", part)), _v("best"))]
+    return [part, _c("len", part), _c("sum", part),
+            _c("mul", _c("minof", part), _c("len", part))]
+
+
+def _fill_two_var(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    p, q = _v("p"), _v("q")
+    if index == 0:
+        return [q, _c("gt", q, Lit(0)), _c("ne", q, Lit(0)), _c("gt", p, q)]
+    if index == 1:
+        return [q, _c("mod", p, q), _c("minus", p, q), _c("plus", p, q)]
+    return [_c("mod", p, q), _c("minus", p, q), _c("minus", q, p), _c("plus", p, q), p]
+
+
+def _fill_countdown(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    if index == 0:
+        return _seeds(ints)
+    return _num_ops(_v("acc"), _v("k"))
+
+
+def _fill_dp_row(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    dp, i = _v("dp"), _v("i")
+    prev = _c("at", dp, _c("minus", i, Lit(1)))
+    if index == 0:
+        return [Lit(0), Lit(1)]
+    return [_c("plus", prev, i), _c("mul", prev, i), _c("plus", prev, Lit(1)),
+            _c("mul", prev, Lit(2)), _c("plus", prev, _c("at", dp, _c("minus", i, Lit(2)))),
+            _c("plus", _c("sum", dp), i), _c("sum", dp)]
+
+
+def _fill_build_list(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    if index == 0:
+        out: List[Term] = [Lit(True), _c("eq", _c("mod", _v("x"), Lit(2)), Lit(0)),
+                           _c("eq", _c("mod", _v("x"), Lit(2)), Lit(1))]
+        for k in _pick_constants(ints, 6):
+            out += [_c("gt", _v("x"), Lit(k)), _c("lt", _v("x"), Lit(k))]
+        return out
+    out = [_v("x"), _c("mul", _v("x"), _v("x"))]
+    for k in _pick_constants(ints, 6):
+        out += [_c("mul", _v("x"), Lit(k)), _c("plus", _v("x"), Lit(k))]
+    return out
+
+
+def _fill_running_best(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    best, cur, x = _v("best"), _v("cur"), _v("x")
+    if index == 0:
+        return [_c("head", _v(spec.params[0])), Lit(0)]
+    if index == 1:
+        return [_c("max2", x, _c("plus", cur, x)), _c("plus", cur, x),
+                _c("min2", x, _c("plus", cur, x)), x]
+    return [_c("max2", best, cur), _c("min2", best, cur), best, cur]
+
+
+# --------------------------------------------------------------------------- #
+# the dynamic-programming skeletons
+#
+# Everything above carries a *scalar* across an iteration — a running sum, a best so far, a
+# pair of variables turning over each other. That is one rung, and it is not the rung the
+# classic hard problems sit on. Every one of edit distance, longest common subsequence,
+# longest increasing subsequence, coin change and Catalan carries a **table**: a row of
+# answers to smaller instances, read back by index while the next row is being built. No
+# depth of expression search reaches it and no scalar accumulator expresses it, so it is its
+# own family of skeletons rather than a wider filling of the ones above.
+#
+# The vocabulary offered for each hole is deliberately the vocabulary a first course uses in
+# that position, not an enumeration to depth: a table lookup one step back, a comparison
+# between the two indexed elements, a minimum of the three neighbours. That is a real
+# restriction and it is why these reach some of these problems and not others.
+# --------------------------------------------------------------------------- #
+
+def _rename(term: Term, was: str, now: str) -> Term:
+    """``term`` with every occurrence of the variable ``was`` renamed to ``now``."""
+    if isinstance(term, Var):
+        return Var(now) if term.name == was else term
+    if isinstance(term, Call):
+        return Call(term.op, tuple(_rename(a, was, now) for a in term.args))
+    if isinstance(term, Lambda):
+        if was in term.params:
+            return term
+        return Lambda(term.params, _rename(term.body, was, now))
+    return term
+
+
+def _dp_scan(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """``tab[i] = best over j < i``, then one aggregate over the table.
+
+    The shape of longest-increasing-subsequence and of every other "answer at each position,
+    computed from the answers before it" problem.
+    """
+    xs = params[0]
+    inner = If(f[1], (Assign("cur", f[2]),), ())
+    return (Assign("tab", Lit(())),
+            For(("i",), _c("range", _c("len", _v(xs))),
+                (Assign("cur", f[0]),
+                 For(("j",), _c("range", _v("i")), (inner,)),
+                 Assign("tab", _c("append", _v("tab"), _v("cur"))))),
+            If(_c("eq", _c("len", _v("tab")), Lit(0)), (Return(Lit(0)),), ()),
+            Return(f[3]))
+
+
+def _dp_row_inner(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """``tab[i] = fold over j < i of the earlier entries``, answer at ``tab[n]``.
+
+    Catalan numbers are the canonical member: each entry is a sum of products of two entries
+    that both sit behind it in the same table.
+    """
+    n = params[0]
+    return (Assign("tab", _c("append", Lit(()), f[0])),
+            For(("i",), _c("range2", Lit(1), _c("plus", _v(n), Lit(1))),
+                (Assign("cur", f[1]),
+                 For(("j",), _c("range", _v("i")), (Assign("cur", f[2]),)),
+                 Assign("tab", _c("append", _v("tab"), _v("cur"))))),
+            Return(_c("at", _v("tab"), _v(n))))
+
+
+def _dp_two_seq(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """The two-sequence table, kept one row at a time.
+
+    ``prev`` is the finished row above, ``cur`` the row being built; a cell branches on whether
+    the two characters under it agree. Edit distance and longest common subsequence are the
+    same skeleton with different fillings, which is exactly the claim a sketch makes.
+    """
+    a, b = params[0], params[1]
+    inner = If(f[2], (Assign("cur", _c("append", _v("cur"), f[3])),),
+               (Assign("cur", _c("append", _v("cur"), f[4])),))
+    return (Assign("prev", Lit(())),
+            For(("j",), _c("range2", Lit(0), _c("plus", _c("len", _v(b)), Lit(1))),
+                (Assign("prev", _c("append", _v("prev"), f[0])),)),
+            For(("i",), _c("range2", Lit(1), _c("plus", _c("len", _v(a)), Lit(1))),
+                (Assign("cur", _c("append", Lit(()), f[1])),
+                 For(("j",), _c("range2", Lit(1), _c("plus", _c("len", _v(b)), Lit(1))),
+                     (inner,)),
+                 Assign("prev", _v("cur")))),
+            Return(_c("at", _v("prev"), _c("len", _v(b)))))
+
+
+def _dp_amounts(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """``tab[amount]`` built from ``tab[amount - item]`` over a bag of items.
+
+    Coin change is the canonical member. The final hole exists because this family answers
+    with a sentinel — "no way to make it" — as often as with the table entry itself.
+    """
+    items, limit = params[0], params[1]
+    inner = If(f[2], (Assign("cur", f[3]),), ())
+    return (Assign("tab", _c("append", Lit(()), f[0])),
+            For(("i",), _c("range2", Lit(1), _c("plus", _v(limit), Lit(1))),
+                (Assign("cur", f[1]),
+                 For(("w",), _v(items), (inner,)),
+                 Assign("tab", _c("append", _v("tab"), _v("cur"))))),
+            Return(f[4]))
+
+
+def _row_rebuild(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """A whole row rebuilt from the row above it, ``n`` times, and returned.
+
+    Pascal's triangle: the answer is the row itself rather than one cell of it, which is a
+    different ending from every other table skeleton here.
+    """
+    n = params[0]
+    return (Assign("row", _c("append", Lit(()), f[0])),
+            For(("i",), _c("range", _v(n)),
+                (Assign("nxt", _c("append", Lit(()), f[1])),
+                 For(("j",), _c("range", _c("minus", _c("len", _v("row")), Lit(1))),
+                     (Assign("nxt", _c("append", _v("nxt"), f[2])),)),
+                 Assign("nxt", _c("append", _v("nxt"), f[3])),
+                 Assign("row", _v("nxt")))),
+            Return(_v("row")))
+
+
+def _prefix_suffix(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """For each position, a scan of everything to its left and everything to its right.
+
+    Trapping rain water is written on this: what a column holds depends on the tallest wall
+    on each side of it, and neither side is known from a single pass.
+    """
+    xs = params[0]
+    left = For(("j",), _c("range2", Lit(0), _c("plus", _v("i"), Lit(1))),
+               (Assign("left", f[1]),))
+    # The two scans are the same update run over different ranges, so the right-hand one is the
+    # left-hand one with its carried name renamed. Offering the hole twice would square the
+    # search for a pair that is never usefully different.
+    right = For(("j",), _c("range2", _v("i"), _c("len", _v(xs))),
+                (Assign("right", _rename(f[1], "left", "right")),))
+    return (Assign("acc", f[0]),
+            For(("i",), _c("range", _c("len", _v(xs))),
+                (Assign("left", Lit(0)), left,
+                 Assign("right", Lit(0)), right,
+                 Assign("acc", f[2]))),
+            Return(_v("acc")))
+
+
+def _pairwise(terms: Sequence[Term], ops: Sequence[str]) -> List[Term]:
+    """Every ordered pair of ``terms`` under every operator in ``ops``."""
+    out: List[Term] = []
+    for a, b in itertools.permutations(terms, 2):
+        for op in ops:
+            out.append(_c(op, a, b))
+    return out
+
+
+_CMP = ("lt", "le", "gt", "ge", "eq")
+
+
+def _fill_dp_scan(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    xs = _v(spec.params[0])
+    xi, xj = _c("at", xs, _v("i")), _c("at", xs, _v("j"))
+    tab, cur = _v("tab"), _v("cur")
+    tj = _c("at", tab, _v("j"))
+    tj1 = _c("plus", tj, Lit(1))
+    if index == 0:
+        return [Lit(1), Lit(0), xi]
+    if index == 1:
+        # A test between the two elements, a test between the two running numbers, or both.
+        elems = _pairwise((xi, xj), _CMP)
+        accs = _pairwise((cur, tj, tj1), _CMP)
+        both = [_c("and", e, a) for e in elems for a in accs]
+        return elems + accs + both
+    if index == 2:
+        return [tj1, tj, _c("plus", cur, Lit(1)), _c("max2", cur, tj1),
+                xj, _c("plus", cur, xj), _c("max2", cur, tj)]
+    return [_c("maxof", tab), _c("sum", tab), _c("minof", tab), _c("len", tab)]
+
+
+def _fill_dp_row_inner(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    tab, cur, i, j = _v("tab"), _v("cur"), _v("i"), _v("j")
+    tj = _c("at", tab, j)
+    mirror = _c("at", tab, _c("minus", _c("minus", i, Lit(1)), j))
+    prev = _c("at", tab, _c("minus", i, Lit(1)))
+    if index == 0:
+        return [Lit(1), Lit(0)]
+    if index == 1:
+        return [Lit(0), Lit(1)]
+    return [_c("plus", cur, _c("mul", tj, mirror)), _c("plus", cur, tj),
+            _c("plus", cur, Lit(1)), _c("plus", cur, mirror),
+            _c("max2", cur, tj), _c("plus", cur, _c("mul", tj, i)),
+            _c("mul", cur, _c("plus", j, Lit(1))), _c("plus", cur, prev)]
+
+
+def _fill_dp_two_seq(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    a, b = _v(spec.params[0]), _v(spec.params[1])
+    i, j = _v("i"), _v("j")
+    ai = _c("at", a, _c("minus", i, Lit(1)))
+    bj = _c("at", b, _c("minus", j, Lit(1)))
+    p_j = _c("at", _v("prev"), j)
+    p_j1 = _c("at", _v("prev"), _c("minus", j, Lit(1)))
+    c_j1 = _c("at", _v("cur"), _c("minus", j, Lit(1)))
+    if index == 0:
+        return [Lit(0), j]
+    if index == 1:
+        return [Lit(0), i]
+    if index == 2:
+        return [_c("eq", ai, bj), _c("ne", ai, bj)]
+    three_min = _c("min2", _c("plus", p_j, Lit(1)), _c("plus", c_j1, Lit(1)))
+    return [_c("plus", p_j1, Lit(1)), p_j1,
+            _c("max2", p_j, c_j1), _c("plus", _c("max2", p_j, c_j1), Lit(1)),
+            _c("min2", p_j, c_j1), _c("plus", _c("min2", p_j, c_j1), Lit(1)),
+            _c("min2", p_j1, three_min),
+            _c("min2", _c("plus", p_j1, Lit(1)), three_min)]
+
+
+def _fill_dp_amounts(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    tab, cur, i, w = _v("tab"), _v("cur"), _v("i"), _v("w")
+    limit = _v(spec.params[1])
+    back = _c("at", tab, _c("minus", i, w))
+    back1 = _c("plus", back, Lit(1))
+    big = _c("plus", limit, Lit(1))
+    if index == 0:
+        return [Lit(0), Lit(1), Lit(True), Lit(False)]
+    if index == 1:
+        return [big, Lit(0), Lit(False), Lit(True)]
+    if index == 2:
+        guard = _c("le", w, i)
+        return [_c("and", guard, _c("lt", back1, cur)),
+                _c("and", guard, _c("gt", back1, cur)),
+                _c("and", guard, back),
+                _c("and", guard, _c("not", back)),
+                guard]
+    if index == 3:
+        return [back1, back, _c("plus", cur, back), Lit(True), Lit(False),
+                _c("min2", cur, back1), _c("max2", cur, back1)]
+    at_limit = _c("at", tab, limit)
+    return [at_limit,
+            _c("if", _c("eq", at_limit, _c("plus", limit, Lit(1))), Lit(-1), at_limit),
+            _c("sum", tab), _c("maxof", tab)]
+
+
+def _fill_row_rebuild(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    row, j = _v("row"), _v("j")
+    rj = _c("at", row, j)
+    rj1 = _c("at", row, _c("plus", j, Lit(1)))
+    if index in (0, 1, 3):
+        return [Lit(1), Lit(0)]
+    return [_c("plus", rj, rj1), _c("mul", rj, rj1), _c("max2", rj, rj1),
+            _c("minus", rj1, rj), _c("plus", _c("plus", rj, rj1), Lit(1))]
+
+
+def _fill_prefix_suffix(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    xs = _v(spec.params[0])
+    xi, xj = _c("at", xs, _v("i")), _c("at", xs, _v("j"))
+    acc, left, right = _v("acc"), _v("left"), _v("right")
+    side = _v("left")  # the scan body is shared, so it is written over whichever side is live
+    if index == 0:
+        return [Lit(0)]
+    if index == 1:
+        # The same update runs on both sides; ``left`` is the name bound by the block builder,
+        # so the two scans differ only in what they range over.
+        return [_c("max2", side, xj), _c("min2", side, xj), _c("plus", side, xj)]
+    return [_c("plus", acc, _c("minus", _c("min2", left, right), xi)),
+            _c("plus", acc, _c("min2", left, right)),
+            _c("max2", acc, _c("minus", _c("min2", left, right), xi)),
+            _c("plus", acc, _c("minus", _c("max2", left, right), xi))]
+
+
+# --------------------------------------------------------------------------- #
+# recurrences, searches and closures
+# --------------------------------------------------------------------------- #
+
+def _conjunctions(atoms: Sequence[Term], *, upto: int = 3) -> List[Term]:
+    """Every conjunction of up to ``upto`` of ``atoms``, and each atom on its own.
+
+    A guarded table step — "the piece fits **and** the table says the rest is reachable **and**
+    the piece is actually there" — is three atoms deep, and writing that conjunction out as one
+    candidate would be writing the answer down. Offering the *atoms* and letting every subset of
+    them be tried is the honest version of the same reach: the sketch supplies a vocabulary of
+    conditions, not a condition.
+    """
+    out: List[Term] = []
+    for size in range(1, min(upto, len(atoms)) + 1):
+        for combo in itertools.combinations(atoms, size):
+            term = combo[0]
+            for extra in combo[1:]:
+                term = _c("and", term, extra)
+            out.append(term)
+    return out
+
+
+def _recur_two(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """``g(1) = seed; g(i) = step(g(i-1), i, k)`` for a recurrence in two parameters.
+
+    The Josephus recurrence is the classic: where the survivor stands in a circle of ``i`` people
+    is where they stood in a circle of ``i - 1``, shifted by ``k`` and wrapped. Nothing about the
+    skeleton is specific to it — it is the general "one number carried up from the base case,
+    with a second parameter along for the ride".
+    """
+    n = params[0]
+    return (Assign("tab", _c("append", Lit(()), f[0])),
+            For(("i",), _c("range2", Lit(1), _v(n)),
+                (Assign("tab", _c("append", _v("tab"), f[1])),)),
+            Return(f[2]))
+
+
+def _fill_recur_two(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    tab, i = _v("tab"), _v("i")
+    k, n = _v(spec.params[1]), _v(spec.params[0])
+    back = _c("at", tab, _c("minus", i, Lit(1)))
+    if index == 0:
+        return [Lit(0), Lit(1)]
+    if index == 1:
+        return [_c("mod", _c("plus", back, k), _c("plus", i, Lit(1))),
+                _c("mod", _c("plus", back, k), i),
+                _c("mod", _c("plus", back, _c("minus", k, Lit(1))), _c("plus", i, Lit(1))),
+                _c("plus", back, k), _c("mul", back, k), _c("plus", back, i),
+                _c("mul", back, i), _c("plus", back, Lit(1))]
+    last = _c("last", tab)
+    return [last, _c("plus", last, Lit(1)), _c("at", tab, _c("minus", n, Lit(1))), tab]
+
+
+def _scan_find(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """The first position that satisfies something, or a miss value.
+
+    Every "where does this occur" answer is written on it, including substring search: the fast
+    algorithms differ from this one in cost, not in what they return, and cost is not what an
+    example set can distinguish.
+    """
+    a = params[0]
+    return (For(("i",), _c("range", _c("len", _v(a))),
+                (If(f[0], (Return(f[1]),), ()),)),
+            Return(f[2]))
+
+
+def _fill_scan_find(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    a = _v(spec.params[0])
+    b = _v(spec.params[1]) if spec.arity > 1 else None
+    i = _v("i")
+    at_i = _c("at", a, i)
+    if index == 0:
+        out = [_c("eq", at_i, Lit(0)), _c("gt", at_i, Lit(0)), _c("lt", at_i, Lit(0))]
+        if b is not None:
+            piece = _c("slice", a, i, _c("plus", i, _c("len", b)))
+            out = [_c("eq", piece, b), _c("eq", at_i, b), _c("inset", b, at_i),
+                   _c("ne", at_i, b)] + out
+        return out
+    if index == 1:
+        return [i, _c("plus", i, Lit(1)), at_i]
+    return [Lit(-1), Lit(0), Lit(None), _c("len", a)]
+
+
+def _merge_pick(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """Put two sequences together, sort, and read one place off the result.
+
+    The median of two sorted lists is this and nothing more, once the linear-time trick is set
+    aside; what has to be found is *which* place, and that the even case reads two.
+    """
+    a, b = params[0], params[1]
+    return (Assign("m", _c("sort", _c("cat", _c("tolist", _v(a)), _c("tolist", _v(b))))),
+            Assign("n", _c("len", _v("m"))),
+            If(f[0], (Return(f[1]),), ()),
+            Return(f[2]))
+
+
+def _fill_merge_pick(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    m, n = _v("m"), _v("n")
+    half = _c("div", n, Lit(2))
+    below = _c("at", m, _c("minus", half, Lit(1)))
+    at_half = _c("at", m, half)
+    if index == 0:
+        return [_c("eq", _c("mod", n, Lit(2)), Lit(1)), _c("eq", _c("mod", n, Lit(2)), Lit(0))]
+    return [at_half, below, _c("div", _c("plus", below, at_half), Lit(2)),
+            _c("head", m), _c("last", m), _c("div", _c("sum", m), n)]
+
+
+def _set_closure(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """Everything reachable by using each item at most once, then a question about that set.
+
+    Subset sum is exactly this and so is every other "can these pieces make that", which is why
+    the skeleton asks a *question* of the closure at the end rather than returning it.
+    """
+    xs, = params[0],
+    grow = For(("r",), _v("acc"), (Assign("add", _c("append", _v("add"), f[1])),))
+    return (Assign("acc", _c("append", Lit(()), f[0])),
+            For(("x",), _v(xs),
+                (Assign("add", Lit(())), grow,
+                 Assign("acc", _c("uniq", _c("cat", _v("acc"), _v("add")))))),
+            Return(f[2]))
+
+
+def _fill_set_closure(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    acc, r, x = _v("acc"), _v("r"), _v("x")
+    if index == 0:
+        return [Lit(0), Lit(1), Lit("")]
+    if index == 1:
+        return [_c("plus", r, x), _c("mul", r, x), _c("max2", r, x), _c("cat", r, x)]
+    target = _v(spec.params[1]) if spec.arity > 1 else Lit(0)
+    return [_c("inset", acc, target), _c("not", _c("inset", acc, target)),
+            _c("len", acc), _c("maxof", acc), _c("sum", acc)]
+
+
+def _dp_prefix(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """``tab[i]`` is the answer for the first ``i`` characters, built from a bag of pieces.
+
+    Word break is the member of this family everyone meets first: whether a prefix can be spelled
+    depends on whether some shorter prefix can be, plus one piece.
+    """
+    text, items = params[0], params[1]
+    inner = If(f[2], (Assign("cur", f[3]),), ())
+    return (Assign("tab", _c("append", Lit(()), f[0])),
+            For(("i",), _c("range2", Lit(1), _c("plus", _c("len", _v(text)), Lit(1))),
+                (Assign("cur", f[1]),
+                 For(("w",), _v(items), (inner,)),
+                 Assign("tab", _c("append", _v("tab"), _v("cur"))))),
+            Return(_c("at", _v("tab"), _c("len", _v(text)))))
+
+
+def _fill_dp_prefix(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    text = _v(spec.params[0])
+    tab, cur, i, w = _v("tab"), _v("cur"), _v("i"), _v("w")
+    back = _c("minus", i, _c("len", w))
+    if index == 0:
+        return [Lit(True), Lit(0), Lit(1)]
+    if index == 1:
+        return [Lit(False), Lit(0), Lit(-1)]
+    if index == 2:
+        atoms = [_c("le", _c("len", w), i),
+                 _c("at", tab, back),
+                 _c("eq", _c("slice", text, back, i), w),
+                 _c("gt", _c("len", w), Lit(0))]
+        return _conjunctions(atoms)
+    return [Lit(True), _c("plus", cur, Lit(1)),
+            _c("max2", cur, _c("plus", _c("at", tab, back), Lit(1))),
+            _c("plus", _c("at", tab, back), Lit(1))]
+
+
+def _dp_grid_items(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """A whole row of amounts rebuilt once per item — the shape of 0/1 knapsack.
+
+    The row has to be rebuilt rather than updated in place, because an item used once must not
+    be seen again by the same row; that is the entire difference between this and
+    :func:`_dp_amounts`, and it is why they are separate skeletons.
+    """
+    cap = params[2]
+    span = _c("range2", Lit(0), _c("plus", _v(cap), Lit(1)))
+    inner = (Assign("cur", f[1]), If(f[2], (Assign("cur", f[3]),), ()),
+             Assign("nxt", _c("append", _v("nxt"), f[4])))
+    return (Assign("tab", Lit(())),
+            For(("c",), span, (Assign("tab", _c("append", _v("tab"), f[0])),)),
+            For(("i",), _c("range", _c("len", _v(params[0]))),
+                (Assign("nxt", Lit(())), For(("c",), span, inner),
+                 Assign("tab", _v("nxt")))),
+            Return(_c("at", _v("tab"), _v(cap))))
+
+
+def _fill_dp_grid_items(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    weights, values = _v(spec.params[0]), _v(spec.params[1])
+    tab, cur, i, c = _v("tab"), _v("cur"), _v("i"), _v("c")
+    wi, vi = _c("at", weights, i), _c("at", values, i)
+    room = _c("at", tab, _c("minus", c, wi))
+    if index == 0:
+        return [Lit(0), Lit(False)]
+    if index == 1:
+        return [Lit(0), Lit(False)]
+    if index == 2:
+        return [_c("le", wi, c), _c("lt", wi, c), _c("ge", c, wi)]
+    if index == 3:
+        return [_c("plus", vi, room), _c("plus", wi, room), room, _c("plus", room, Lit(1))]
+    return [_c("max2", _c("at", tab, c), cur), _c("min2", _c("at", tab, c), cur),
+            _c("plus", _c("at", tab, c), cur), cur]
+
+
+def _coalesce(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
+    """Walk a sorted sequence, either **extending the last thing produced** or starting a new one.
+
+    Merging overlapping intervals is the member everyone meets, but the pattern is the general
+    one for collapsing runs: whether the item joins what is already there is a question about the
+    output built so far, which is why this cannot be a filter or a map.
+    """
+    xs = params[0]
+    last = _c("at", _v("out"), _c("minus", _c("len", _v("out")), Lit(1)))
+    joins = _c("and", _c("gt", _c("len", _v("out")), Lit(0)), f[0])
+    return (Assign("out", Lit(())),
+            For(("it",), _c("sort", _v(xs)),
+                (If(joins,
+                    (Assign("out", _c("setat", _v("out"),
+                                      _c("minus", _c("len", _v("out")), Lit(1)), f[1])),),
+                    (Assign("out", _c("append", _v("out"), f[2])),)),)),
+            Return(_v("out")))
+
+
+def _fill_coalesce(index: int, spec: Spec, ints: Sequence[int]) -> List[Term]:
+    it, out = _v("it"), _v("out")
+    last = _c("at", out, _c("minus", _c("len", out), Lit(1)))
+    lo, hi = _c("at", it, Lit(0)), _c("at", it, Lit(1))
+    lo_last, hi_last = _c("at", last, Lit(0)), _c("at", last, Lit(1))
+    if index == 0:
+        return [_c("le", lo, hi_last), _c("lt", lo, hi_last), _c("eq", lo, hi_last),
+                _c("le", lo, _c("plus", hi_last, Lit(1)))]
+    if index == 1:
+        return [_c("pair", lo_last, _c("max2", hi_last, hi)),
+                _c("pair", lo_last, hi), _c("pair", _c("min2", lo_last, lo), hi),
+                _c("pair", lo_last, _c("plus", hi_last, hi))]
+    return [_c("pair", lo, hi), it]
+
+
+#: The imperative patterns, in the order a course teaches them. Every one of them carries a
+#: variable across an iteration, which is the thing :meth:`Coder.invent` cannot build at any depth.
+SKETCHES: Tuple[Sketch, ...] = (
+    Sketch("accumulate", 1, ("seed", "value"), _accumulate, _fill_accumulate),
+    Sketch("build_list", 1, ("test", "value"), _build_list, _fill_build_list),
+    Sketch("accumulate_if", 1, ("seed", "test", "value"), _accumulate_if, _fill_accumulate_if),
+    Sketch("by_index", 1, ("seed", "value"), _by_index, _fill_by_index),
+    Sketch("running_best", 1, ("seed", "value", "value"), _running_best, _fill_running_best),
+    Sketch("countdown", 1, ("seed", "value"), _countdown_while, _fill_countdown),
+    Sketch("dp_row", 1, ("seed", "value"), _dp_row, _fill_dp_row),
+    Sketch("pairs", 1, ("seed", "test", "value"), _pairs, _fill_pairs),
+    Sketch("windows", 1, ("seed", "test", "value"), _windows, _fill_windows),
+    Sketch("two_var_while", 2, ("test", "value", "value"), _two_var_while, _fill_two_var),
+    Sketch("dp_row_inner", 1, ("seed", "seed", "value"), _dp_row_inner, _fill_dp_row_inner),
+    Sketch("row_rebuild", 1, ("seed", "seed", "value", "seed"), _row_rebuild, _fill_row_rebuild),
+    Sketch("prefix_suffix", 1, ("seed", "value", "value"), _prefix_suffix, _fill_prefix_suffix),
+    Sketch("dp_scan", 1, ("seed", "test", "value", "value"), _dp_scan, _fill_dp_scan),
+    Sketch("dp_two_seq", 2, ("seed", "seed", "test", "value", "value"),
+           _dp_two_seq, _fill_dp_two_seq),
+    Sketch("dp_amounts", 2, ("seed", "seed", "test", "value", "value"),
+           _dp_amounts, _fill_dp_amounts),
+    Sketch("merge_pick", 2, ("test", "value", "value"), _merge_pick, _fill_merge_pick),
+    Sketch("scan_find", 2, ("test", "value", "seed"), _scan_find, _fill_scan_find),
+    Sketch("recur_two", 2, ("seed", "value", "value"), _recur_two, _fill_recur_two),
+    Sketch("set_closure", 2, ("seed", "value", "value"), _set_closure, _fill_set_closure),
+    Sketch("dp_prefix", 2, ("seed", "seed", "test", "value"), _dp_prefix, _fill_dp_prefix),
+    Sketch("dp_grid_items", 3, ("seed", "seed", "test", "value", "value"),
+           _dp_grid_items, _fill_dp_grid_items),
+    Sketch("coalesce", 1, ("test", "value", "value"), _coalesce, _fill_coalesce),
+)
+
+
+# --------------------------------------------------------------------------- #
 # the coder
 # --------------------------------------------------------------------------- #
 
@@ -2045,6 +2847,10 @@ class Coder:
         #: produce something genuinely new, and it is reported separately from `written` for
         #: exactly that reason.
         self.invented = 0
+        #: How many programs came from :meth:`compose` — an imperative skeleton with a carried
+        #: variable, filled and run. Counted apart from `invented` because they are different
+        #: abilities: one composes expressions, the other builds a loop.
+        self.composed = 0
         self.attempts_spent = 0
         self.lessons = 0
         self.refusals = 0
@@ -2313,7 +3119,27 @@ class Coder:
                     if self.matches(candidate, spec.shown):
                         return self._won(spec, candidate, composite, tried, started,
                                          self.check(candidate, spec.shown), True)
-        # ---- pass three: invent ----------------------------------------- #
+        # ---- pass three: compose a loop --------------------------------- #
+        # Before the expression search, because the thing it builds is strictly outside what the
+        # expression search can reach: a variable that survives an iteration.
+        if invent:
+            looped = self.compose(spec)
+            if looped is not None:
+                self.composed += 1
+                # Kept, like anything else that ran. A composed loop that worked is evidence of
+                # the same kind a demonstration is, and not keeping it meant the next task of the
+                # same shape paid for the whole search again instead of recalling it.
+                shape = abstract(looped)
+                shape.origin = "composed"
+                shape.confirmed += 1
+                shape.remember(_fillings_of(shape.skeleton, looped.body))
+                self.schemas.setdefault(shape.key, shape)
+                self.written += 1
+                return Written(program=looped, schema=shape.key, attempts=tried,
+                               seconds=time.time() - started,
+                               shown=self.check(looped, spec.shown), grafted=True,
+                               note="composed from a loop sketch, not from a shape she held")
+        # ---- pass four: invent ------------------------------------------ #
         # Nothing she holds fits. Rather than abstain on that, build one out of the grammar —
         # the only pass here that can produce a shape nobody ever showed her.
         if invent:
@@ -2409,6 +3235,79 @@ class Coder:
         for outer in outers:
             for inner in inners:
                 yield outer, inner
+
+    # -- composition: inventing a loop --------------------------------------- #
+    def compose(self, spec: Spec, *, cap: int = 60000) -> Optional[Program]:
+        """Build a program with a **loop and a carried variable**, having no shape for it.
+
+        :meth:`invent` composes expressions, and that is a real ceiling rather than a soft one:
+        measured over thirty classic hard algorithms it changed nothing at all, 1 of 28 before and
+        1 of 28 after, because every one of them needs a running variable that survives an
+        iteration. ``sum(map(f, xs))`` is an expression; ``for i: for j: if xs[i] > xs[j]: n += 1``
+        is not, and no depth of expression search reaches it.
+
+        This is *sketch-based synthesis*, and the pieces are worth naming plainly:
+
+        * a :class:`Sketch` is an imperative skeleton with typed holes — a loop, an accumulator, a
+          test, an update — and a **scope** attached to each hole saying which names are live
+          there. ``xs[i]`` is only a candidate inside a loop that has an ``i``;
+        * each hole is filled from a small set of expressions built over *its own scope*, not from
+          a global pool, which is what keeps the product of holes countable;
+        * the filled sketch is run against the shown examples like anything else, and nothing is
+          returned that does not reproduce all of them.
+
+        **Why the filling sets are small and curated rather than enumerated to depth.** A hole in
+        scope of four names over twenty operators has thousands of depth-two fillings, and three
+        such holes is a product nothing finishes. What is offered instead is the vocabulary a
+        first course actually uses in that position: comparisons between the two indexed elements,
+        an accumulator plus one, an accumulator plus the element. That is a real restriction and
+        it is the reason this reaches some of these problems and not others. Where a real answer
+        needs a *deep* condition — "the piece fits and the table says the rest is reachable and the
+        piece is actually there" — the pool holds the three **atoms** and :func:`_conjunctions`
+        offers every subset of them, so the sketch supplies a vocabulary of conditions rather than
+        a condition.
+
+        **Measured, on twenty-eight classic algorithms chosen before any of this existed.** With
+        expression search alone: 1 of 28. With the ten scalar skeletons — a running sum, a best so
+        far, a nested pair scan: 4 of 28, which reached the quadratic scans and nothing else. With
+        the thirteen that carry a **table** — a row of answers to smaller instances, read back by
+        index while the next row is built: **16 of 28**, including edit distance, longest common
+        subsequence, knapsack, coin change, subset sum, word break and trapping rain water, each
+        checked on inputs it was not fitted on.
+
+        **What is still out of reach, named rather than glossed.** A backtracker that passes a
+        partial solution down and undoes it; a worklist that is chosen from, removed from and
+        grown until it empties; a window whose validity needs a scan of its own to decide; a
+        monotonic stack; a grid read along both axes. Twelve of the twenty-eight are one of those,
+        and adding skeletons until that list reads 28 of 28 would be fitting the benchmark rather
+        than the ability. :meth:`write` abstains, which is the property that makes the limit safe.
+        """
+        rng_free = [sk for sk in SKETCHES if sk.arity == spec.arity]
+        if not rng_free:
+            return None
+        ints, texts = spec.constants()
+        tried = 0
+        for sketch in rng_free:
+            choices = [sketch.fillings(index, spec, ints) for index in range(len(sketch.holes))]
+            if any(not group for group in choices):
+                continue
+            room = 1
+            for group in choices:
+                room *= len(group)
+            if room > cap:
+                continue
+            for fillings in itertools.product(*choices):
+                if tried >= cap:
+                    return None
+                tried += 1
+                try:
+                    block = sketch.build(spec.params, fillings)
+                except CodeError:
+                    break
+                candidate = Program(spec.name or "f", spec.params, block)
+                if self.matches(candidate, spec.shown):
+                    return candidate
+        return None
 
     # -- invention ---------------------------------------------------------- #
     def invent(self, spec: Spec, *, max_terms: int = 4000, max_level: int = 3,
@@ -2817,6 +3716,7 @@ class Coder:
             "written": self.written,
             "recalled": self.recalled,
             "invented": self.invented,
+            "composed": self.composed,
             "recall_share": (round(self.recalled / self.written, 4) if self.written else 0.0),
             "abstained": self.abstained,
             "write_rate": round(self.written / asked, 4) if asked else 0.0,

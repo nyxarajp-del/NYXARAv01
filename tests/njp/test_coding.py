@@ -243,7 +243,10 @@ def test_a_composite_nobody_taught_is_reached_by_invention_not_by_grafting():
 
     inventor = Coder()
     quick = inventor.write(spec, attempts=1200, graft=True)
-    assert quick.ok and inventor.invented == 1, quick.note
+    # Either building pass may answer — `compose` reaches it as a loop and `invent` as an
+    # expression, and which one gets there first is a fact about their order, not about her. What
+    # is asserted is that it was *built* rather than instantiated from a shape she held.
+    assert quick.ok and (inventor.invented + inventor.composed) == 1, quick.note
     assert inventor.check(quick.program, spec.held_out).ok
 
     # The old route, on its own: grafting reaches it, and pays for it.

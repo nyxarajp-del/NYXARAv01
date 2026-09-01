@@ -172,14 +172,34 @@ def test_a_promoted_same_predicate_shape_no_longer_shadows_composition():
 
 def test_a_coding_shape_taught_on_one_task_carries_to_another():
     """The coding half's acquisition claim. Grafting is off and the budget is identical on both
-    sides, so the only thing that differs between the two numbers is which shapes she holds."""
+    sides, so the only thing that differs between the two numbers is which shapes she holds.
+
+    **What this test used to assert, and why it does not any more.** It demanded that teaching
+    add more than 0.3 to the score, and that held while the untaught side could only instantiate
+    shapes: cold, composites were out of reach. Once :meth:`Coder.compose` and :meth:`Coder.invent`
+    went in, the untaught side started *building* them — 0.75 on this subject with nothing taught
+    at all — and there is no honest 0.3 left to gain above that. Loosening the number to fit would
+    have been the wrong repair; the measurement moved because the faculty moved.
+
+    So the claim is restated to what teaching still buys on a subject she can search her way
+    through, which is **cost**. Both sides are measured on fresh nonsense vocabulary, and the
+    taught side answers by recall in a small fraction of the attempts the cold side spends
+    enumerating — an order of magnitude, measured — while scoring no worse and abstaining less.
+    That is what a lesson is for once the search can reach the answer on its own.
+    """
     coder, subject = Coder(), WriteComposite()
     before, _ = subject.exam(None, _mint(61), coder=coder)
+    cold_cost = coder.attempts_spent
     lesson = subject.teach(None, _mint(62), coder=coder)
+    coder.attempts_spent, coder.recalled = 0, 0
     after, misses = subject.exam(None, _mint(63), coder=coder)
 
     assert lesson.items >= 5, lesson.note
-    assert after.accuracy > before.accuracy + 0.3, misses
+    assert after.accuracy >= before.accuracy, misses
+    assert after.abstained <= before.abstained, misses
+    assert coder.recalled >= 5, "teaching that is never recalled from taught nothing"
+    assert coder.attempts_spent * 5 < cold_cost, (
+        f"taught {coder.attempts_spent} attempts vs cold {cold_cost}")
     # Not asserted: that no program ever fits the shown pairs and fails a held-out one. That does
     # happen — search over examples finds coincidences — and the split exists to *catch* it, which
     # it did: the item is scored wrong and named in `misses`. Demanding it never occur would be

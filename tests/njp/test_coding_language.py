@@ -337,7 +337,7 @@ def test_invention_runs_after_the_enumeration_budget_is_spent_not_instead_of_it(
     coder = Coder()
     written = coder.write(spec, attempts=400, graft=False)   # a budget far too small to enumerate
     assert written.ok, written.note
-    assert coder.invented == 1, "the answer should have come from invention, not enumeration"
+    assert (coder.invented + coder.composed) == 1, "the answer came from building, not enumeration"
     assert coder.check(written.program, spec.held_out).ok
 
 
@@ -352,9 +352,9 @@ def test_what_she_invents_she_keeps_as_a_shape():
 
     coder = Coder()
     assert coder.write(first, attempts=600, graft=False).ok
-    assert coder.invented >= 1
-    held = [s for s in coder.schemas.values() if s.origin == "invented"]
-    assert held, "an invention that worked should be kept"
+    assert (coder.invented + coder.composed) >= 1
+    held = [s for s in coder.schemas.values() if s.origin in ("invented", "composed")]
+    assert held, "something she built and that worked should be kept"
 
     rng2 = random.Random(11)
     rows2 = [(tuple(rng2.randrange(0, 20) for _ in range(5)),) for _ in range(12)]
