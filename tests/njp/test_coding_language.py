@@ -151,6 +151,40 @@ def test_containers_and_text_agree_with_python(source, args):
     assert agrees(source, *args)
 
 
+@pytest.mark.parametrize("source,args", [
+    # Both of these were found by asking her to read algorithms nobody had shown her, and both
+    # ruled out a whole class of program rather than one line: `min(a, b, c)` is the centre of
+    # edit distance, and `range(n, -1, -1)` is how the backwards pass of a dynamic program is
+    # written. A reader that stops at two arguments cannot read dynamic programming.
+    ("def f(a, b, c):\n    return min(a, b, c)", (5, 2, 9)),
+    ("def f(a, b, c):\n    return max(a, b, c)", (5, 2, 9)),
+    ("def f(a, b, c, d):\n    return min(a, b, c, d)", (5, 2, 9, 1)),
+    ("def f(n):\n    return [i for i in range(n, -1, -1)]", (5,)),
+    ("def f(n):\n    return [i for i in range(0, n, 2)]", (7,)),
+    ("def f(xs):\n    out = []\n    for i in range(len(xs) - 1, -1, -1):\n"
+     "        out.append(xs[i])\n    return out", ((1, 2, 3),)),
+])
+def test_the_forms_that_dynamic_programming_is_written_in(source, args):
+    assert agrees(source, *args)
+
+
+def test_she_reads_and_runs_an_algorithm_nobody_showed_her():
+    """Edit distance, in full, with the three-way minimum. She has never been taught it, there is
+    no shape for it, and reading it is a different ability from writing it."""
+    source = ("def f(a, b):\n"
+              "    prev = [j for j in range(len(b) + 1)]\n"
+              "    for i in range(1, len(a) + 1):\n"
+              "        cur = [i]\n"
+              "        for j in range(1, len(b) + 1):\n"
+              "            c = 0 if a[i-1] == b[j-1] else 1\n"
+              "            cur.append(min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + c))\n"
+              "        prev = cur\n"
+              "    return prev[len(b)]")
+    assert run(source, "kitten", "sitting") == 3
+    assert run(source, "flaw", "lawn") == 2
+    assert run(source, "", "abc") == 3
+
+
 def test_a_slice_of_a_string_is_a_string():
     """Returning a tuple of characters is the kind of nearly-right that shows up three operations
     later as a type error in unrelated code."""

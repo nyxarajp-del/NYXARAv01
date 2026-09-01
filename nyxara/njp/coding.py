@@ -555,6 +555,16 @@ def _fold_plus(items: Tuple[Any, ...]) -> Any:
     return total
 
 
+def _range3(a: Any, b: Any, step: Any) -> Tuple[int, ...]:
+    lo, hi, by = _int(a), _int(b), _int(step)
+    if by == 0:
+        raise CodeError("range step of zero")
+    span = abs(hi - lo)
+    if span // abs(by) > 4096:
+        raise CodeError("range out of bounds")
+    return tuple(range(lo, hi, by))
+
+
 def _pow(base: Any, exponent: Any) -> int:
     a, b = _int(base), _int(exponent)
     if b < 0:
@@ -624,6 +634,7 @@ OPS: Dict[str, Tuple[int, Callable[..., Any], str]] = {
     "uniq":     (1, lambda xs: tuple(dict.fromkeys(_seq(xs))), "list(dict.fromkeys({0}))"),
     "range":    (1, _range1, "list(range({0}))"),
     "range2":   (2, _range2, "list(range({0}, {1}))"),
+    "range3":   (3, _range3, "list(range({0}, {1}, {2}))"),
     # strings
     "upper":    (1, lambda s: _text(s).upper(), "{0}.upper()"),
     "lower":    (1, lambda s: _text(s).lower(), "{0}.lower()"),
@@ -3140,9 +3151,16 @@ def _call(node: ast.Call) -> Term:  # noqa: C901 - one arm per accepted builtin
             return Call(f"{stem}by", (key, args[0]))
         if len(args) == 1:
             return Call(f"{stem}of", (args[0],))
-        if len(args) == 2:
-            return Call(f"{stem}2", tuple(args))
-        raise CodeError(f"{fname}() takes one or two arguments here")
+        if len(args) >= 2:
+            # `min(a, b, c)` folds into nested two-argument minimums, which is what it means.
+            # Two was the limit, and the line it made unreadable is the one at the centre of edit
+            # distance: `min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + cost)`. A reader that stops at
+            # two arguments cannot read dynamic programming.
+            folded = args[0]
+            for extra in args[1:]:
+                folded = Call(f"{stem}2", (folded, extra))
+            return folded
+        raise CodeError(f"{fname}() needs at least one argument")
     if fname == "sorted":
         if len(args) != 1:
             raise CodeError("sorted() takes one sequence")
@@ -3152,7 +3170,12 @@ def _call(node: ast.Call) -> Term:  # noqa: C901 - one arm per accepted builtin
             return Call("range", (args[0],))
         if len(args) == 2:
             return Call("range2", tuple(args))
-        raise CodeError("range() takes one or two arguments here")
+        if len(args) == 3:
+            # `range(len(xs) - 1, -1, -1)` is how a descending loop is written, and a language
+            # that stops at two arguments cannot express one — which ruled out the backwards pass
+            # that half of dynamic programming is made of.
+            return Call("range3", tuple(args))
+        raise CodeError("range() takes one to three arguments here")
     if fname == "sum":
         if len(args) == 1:
             return Call("sum", (args[0],))
