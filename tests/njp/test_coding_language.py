@@ -21,9 +21,13 @@ from __future__ import annotations
 import pytest
 
 from nyxara.njp.coding import (
+    Call,
     Coder,
     CodeError,
     Exhausted,
+    Lambda,
+    Program,
+    Var,
     Spec,
     abstract,
     read_python,
@@ -285,3 +289,87 @@ def test_what_she_writes_can_be_read_back():
         again = read_python(written.program.source(), name=spec.name)
         for example in spec.shown:
             assert coder.run(again, example.args) == coder.run(written.program, example.args)
+
+
+# --------------------------------------------------------------------------- #
+# invention: building a shape nobody showed her
+# --------------------------------------------------------------------------- #
+
+def _from_examples(name, ref, rows, params=("xs",), shown=6):
+    frozen = [(tuple(r), ref(*r)) for r in rows]
+    return Spec.of(name, "", params,
+                   [(a, o) for a, o in frozen[:shown]],
+                   [(a, o) for a, o in frozen[shown:]])
+
+
+def test_she_builds_a_composition_out_of_the_grammar_with_no_shape_for_it():
+    """Bottom-up enumeration with observational equivalence — the one pass that can produce a
+    skeleton she was never taught and never seeded with.
+
+    ``sum(filter(p, xs))`` is two operators deep, which is exactly the class the seed shapes
+    cannot reach: a seed is one operator, and reaching a composition from seeds needs grafting,
+    which is combinatorial. Here it is built rather than instantiated.
+    """
+    import random
+
+    rng = random.Random(3)
+    rows = [(tuple(rng.randrange(0, 20) for _ in range(5)),) for _ in range(12)]
+    spec = _from_examples("over_seven", lambda xs: sum(x for x in xs if x > 7), rows)
+
+    coder = Coder()
+    built = coder.invent(spec)
+    assert built is not None, "nothing invented"
+    assert coder.check(built, spec.held_out).ok, built.source()
+    assert not coder.taught_shapes(), "it was invented, not taught — no lesson has run"
+
+
+def test_invention_runs_after_the_enumeration_budget_is_spent_not_instead_of_it():
+    """A task no held shape fits is exactly a task whose enumeration runs to the end of its
+    budget. Returning on exhaustion made invention unreachable for every task that needed it —
+    it was only ever called for the tasks that had already given up cheaply, which is almost
+    none of them."""
+    import random
+
+    rng = random.Random(5)
+    rows = [(tuple(rng.randrange(0, 20) for _ in range(5)),) for _ in range(12)]
+    spec = _from_examples("biggest_doubled", lambda xs: max(x * 2 for x in xs), rows)
+
+    coder = Coder()
+    written = coder.write(spec, attempts=400, graft=False)   # a budget far too small to enumerate
+    assert written.ok, written.note
+    assert coder.invented == 1, "the answer should have come from invention, not enumeration"
+    assert coder.check(written.program, spec.held_out).ok
+
+
+def test_what_she_invents_she_keeps_as_a_shape():
+    """An invented skeleton that worked is evidence of the same kind a demonstration is — it ran —
+    so it is recorded, and the next task of that shape is a recollection rather than a search."""
+    import random
+
+    rng = random.Random(7)
+    rows = [(tuple(rng.randrange(0, 20) for _ in range(5)),) for _ in range(12)]
+    first = _from_examples("evens_total", lambda xs: sum(x for x in xs if x % 2 == 0), rows)
+
+    coder = Coder()
+    assert coder.write(first, attempts=600, graft=False).ok
+    assert coder.invented >= 1
+    held = [s for s in coder.schemas.values() if s.origin == "invented"]
+    assert held, "an invention that worked should be kept"
+
+    rng2 = random.Random(11)
+    rows2 = [(tuple(rng2.randrange(0, 20) for _ in range(5)),) for _ in range(12)]
+    again = _from_examples("odds_total", lambda xs: sum(x for x in xs if x % 2 == 1), rows2)
+    second = coder.write(again, attempts=4000, graft=False)
+    assert second.ok and coder.check(second.program, again.held_out).ok
+    assert coder.recalled >= 1, "the shape it invented should be recalled, not re-invented"
+
+
+def test_the_interpreter_never_lets_a_host_exception_escape():
+    """``sorted(items, key=f)`` raises a bare TypeError when the key returns values the host
+    cannot order, and that escaped past every guard the searcher has. An enumerative search
+    offers exactly those combinations by the thousand, so the leak turned "this candidate does
+    not work" into "the search crashed"."""
+    coder = Coder()
+    mixed = Program("f", ("xs",), Call("sortby", (Lambda(("x",), Var("x")), Var("xs"))))
+    with pytest.raises(CodeError):
+        coder.run(mixed, ((1, "a", (2,)),))

@@ -1001,6 +1001,26 @@ class Interpreter:
 
     def _higher(self, op: str, args: Tuple[Term, ...], env: Dict[str, Any], depth: int,
                 trace: Optional[List[TraceStep]]) -> Any:
+        """Every higher-order operator, with the host held at arm's length.
+
+        ``sorted(items, key=f)`` raises a bare :class:`TypeError` when the key returns values the
+        host cannot order against each other, and that escaped as a *host* exception — past every
+        guard the searcher has, out of the interpreter, and into the caller. An enumerative search
+        offers exactly those combinations by the thousand, so the leak turned "a candidate does
+        not work" into "the search crashed". Nothing may leave here except a
+        :class:`CodeError`.
+        """
+        try:
+            return self._apply(op, args, env, depth, trace)
+        except (CodeError, Exhausted):
+            raise
+        except RecursionError as exc:
+            raise Exhausted("the host stack gave out inside a higher-order call") from exc
+        except Exception as exc:  # noqa: BLE001 — any host failure is a failed candidate
+            raise CodeError(f"{op} failed: {exc}") from exc
+
+    def _apply(self, op: str, args: Tuple[Term, ...], env: Dict[str, Any], depth: int,
+               trace: Optional[List[TraceStep]]) -> Any:
         fn = args[0]
         if not isinstance(fn, Lambda):
             fn = self._eval(fn, env, depth + 1, trace)
@@ -1970,6 +1990,16 @@ def _fn2_library() -> Tuple[Lambda, ...]:
 #: expensive enough that it cannot run over every shape she has ever been shown.
 _RECALL_WIDTH = 12
 
+#: How many pairings one binary operator may contribute per level of :meth:`Coder.invent`. The
+#: binary layer is the bank squared; without a cap it consumes the budget that the level above it
+#: — where the compositions actually live — still needs.
+_BINARY_WIDTH = 200
+
+#: How many terms of one kind a level may build on. The bank keeps every distinct behaviour, but
+#: a level that ranged over all of them would spend its budget on breadth at the depth it already
+#: has rather than on reaching the next one.
+_BANK_WIDTH = 220
+
 
 class Coder:
     """The organ that reads programs, writes them, checks them, and learns their shapes.
@@ -2001,6 +2031,11 @@ class Coder:
         #: it is the number that says what teaching is doing: a high share means the lessons are
         #: answering the questions, a low one means the seeds are and the lessons are decoration.
         self.recalled = 0
+        #: How many programs came from :meth:`invent` — built out of the grammar rather than
+        #: instantiated from any shape she held. This is the counter that says whether she can
+        #: produce something genuinely new, and it is reported separately from `written` for
+        #: exactly that reason.
+        self.invented = 0
         self.attempts_spent = 0
         self.lessons = 0
         self.refusals = 0
@@ -2178,7 +2213,7 @@ class Coder:
 
     # -- writing ------------------------------------------------------------ #
     def write(self, spec: Spec, *, attempts: Optional[int] = None,
-              graft: Optional[bool] = None) -> Written:
+              graft: Optional[bool] = None, invent: bool = True) -> Written:
         """Search for a program that reproduces every **shown** example, or abstain.
 
         Shapes are tried in order of posterior and then of cost, so what she has been taught is
@@ -2191,6 +2226,12 @@ class Coder:
         started = time.time()
         pools = self._pools(spec)
         tried = 0
+        #: Running out of attempts stops the *enumeration*; it does not end the search. Returning
+        #: on it did, and that quietly made invention unreachable on every task that needed it:
+        #: a task no held shape fits is exactly a task whose enumeration runs to the end of its
+        #: budget, so `invent` was only ever called for tasks the enumeration had already given
+        #: up on cheaply — which is almost none of them.
+        exhausted = False
         # ---- pass one: recall ------------------------------------------- #
         # Every taught shape, with only the fillings that have actually stood in it. Bounded and
         # tiny — a couple of dozen candidates per shape — and it goes first because it is the
@@ -2200,9 +2241,12 @@ class Coder:
         # were both *taught* and both timed out behind them.
         recallable = self._recallable(spec.arity)
         for schema in recallable:
+            if exhausted:
+                break
             for candidate, fillings in self._remembered(schema, spec, pools):
                 if tried >= budget:
-                    return self._abstain(spec, tried, started, "attempt budget exhausted")
+                    exhausted = True
+                    break
                 tried += 1
                 if self.matches(candidate, spec.shown):
                     self.recalled += 1
@@ -2222,9 +2266,12 @@ class Coder:
         for pass_over, width in ((self._same_operators, len(recallable)),
                                  (self._one_changed, _RECALL_WIDTH)):
             for schema in recallable[:width]:
+                if exhausted:
+                    break
                 for candidate, fillings in pass_over(schema, spec, pools):
                     if tried >= budget:
-                        return self._abstain(spec, tried, started, "attempt budget exhausted")
+                        exhausted = True
+                        break
                     tried += 1
                     if self.matches(candidate, spec.shown):
                         self.recalled += 1
@@ -2232,26 +2279,51 @@ class Coder:
                                          self.check(candidate, spec.shown), False)
         # ---- pass two: enumerate ---------------------------------------- #
         for schema in self._ranked(spec.arity):
+            if exhausted:
+                break
             for candidate, fillings in self._candidates(schema, spec, pools):
                 if tried >= budget:
-                    return self._abstain(spec, tried, started, "attempt budget exhausted")
+                    exhausted = True
+                    break
                 tried += 1
                 if self.matches(candidate, spec.shown):
                     return self._won(spec, candidate, schema, tried, started,
                                      self.check(candidate, spec.shown), False)
-        if allow_graft:
+        if allow_graft and not exhausted:
             for outer, inner in self._grafts(spec.arity):
+                if exhausted:
+                    break
                 composite = _graft(outer, inner)
                 if composite is None:
                     continue
                 for candidate, fillings in self._candidates(composite, spec, pools):
                     if tried >= budget:
-                        return self._abstain(spec, tried, started, "attempt budget exhausted")
+                        exhausted = True
+                        break
                     tried += 1
                     if self.matches(candidate, spec.shown):
                         return self._won(spec, candidate, composite, tried, started,
                                          self.check(candidate, spec.shown), True)
-        return self._abstain(spec, tried, started, "no shape she holds fits this task")
+        # ---- pass three: invent ----------------------------------------- #
+        # Nothing she holds fits. Rather than abstain on that, build one out of the grammar —
+        # the only pass here that can produce a shape nobody ever showed her.
+        if invent:
+            found = self.invent(spec)
+            if found is not None and self.matches(found, spec.shown):
+                self.invented += 1
+                shape = abstract(found)
+                shape.origin = "invented"
+                shape.confirmed += 1
+                shape.remember(_fillings_of(shape.skeleton, found.body))
+                self.schemas.setdefault(shape.key, shape)
+                self.written += 1
+                return Written(program=found, schema=shape.key, attempts=tried,
+                               seconds=time.time() - started,
+                               shown=self.check(found, spec.shown), grafted=True,
+                               note="invented from the grammar, not from a shape she held")
+        return self._abstain(spec, tried, started,
+                             "attempt budget exhausted and nothing invented" if exhausted
+                             else "no shape she holds fits this task")
 
     def _won(self, spec: Spec, program: Program, schema: Schema, tried: int, started: float,
              check: Check, grafted: bool) -> Written:
@@ -2328,6 +2400,191 @@ class Coder:
         for outer in outers:
             for inner in inners:
                 yield outer, inner
+
+    # -- invention ---------------------------------------------------------- #
+    def invent(self, spec: Spec, *, max_terms: int = 4000, max_level: int = 3,
+               witnesses: int = 4) -> Optional[Program]:
+        """Build a program out of the grammar itself, having never been shown its shape.
+
+        Everything else in :meth:`write` *instantiates* — it takes a skeleton she was taught or
+        seeded with and fills the blanks. That is why she could be shown ``sum(map(f, filter(p,
+        xs)))`` once and then write it for a task nobody demonstrated, and equally why a shape
+        nobody ever showed her was simply out of reach: there was no skeleton to fill. Measured,
+        that ceiling was 29 of 65 families cold and 1 of 28 unseen hard problems.
+
+        This is the other half. It is **bottom-up enumerative synthesis with observational
+        equivalence**, which is the standard method and is worth naming rather than dressing up:
+
+        * start with the terminals — the parameters, and the constants the task itself put on the
+          table;
+        * a term's *signature* is what it evaluates to on each shown input. Two terms with the
+          same signature are indistinguishable on this task, so only the first is kept. That is
+          the pruning, and it is what makes the search finite in practice rather than in principle:
+          the bank holds behaviours, not expressions;
+        * build level ``k`` by applying every operator to terms from the levels below, keeping
+          only those whose behaviour is new;
+        * a term whose signature *is* the answer column is the program.
+
+        **Type-directed, because otherwise it does not finish.** Terms are grouped by the kind of
+        value they produce — the signature already says it — and ``add`` is only ever offered two
+        integer-valued terms. Without that the binary layer alone is the bank squared.
+
+        **The budget is small on purpose.** A success is cheap — the answer is usually two levels
+        down and found in under a second — while a *failure* costs the whole budget, and a failure
+        is what most calls are. A generous budget made a sweep of sixty-five tasks take longer
+        than every other pass combined, for finds it had already made in the first few hundred
+        terms. A caller who wants to search harder passes a larger ``max_terms``.
+
+        **What this can and cannot invent.** It composes *expressions*: a fold over a filtered map,
+        an index into a sort, a length of a deduplication. It does not invent an algorithm with a
+        loop and a carried state — edit distance is not in this space at any depth, and no budget
+        reaches it. So it moves the shape of the ceiling rather than removing it, and
+        :meth:`write` still abstains when nothing in the space matches.
+        """
+        if not spec.shown:
+            return None
+        # Signatures are computed on a few *witness* examples rather than on all of them. The bank
+        # is a pruning structure, not a proof: two terms that agree on four inputs are worth
+        # collapsing into one, and a term that matches the answer on four is worth *checking*
+        # properly. Running every candidate on every example spends the budget proving things
+        # about candidates that were going to be discarded.
+        sample = spec.shown[:max(2, witnesses)]
+        envs = [dict(zip(spec.params, ex.args)) for ex in sample]
+        target = tuple(ex.out for ex in sample)
+        target_kind = _kind_of(target[0])
+
+        def signature(term: Term) -> Optional[Tuple[Any, ...]]:
+            out = []
+            for env in envs:
+                try:
+                    value = self.searcher.run(term, env)
+                except (CodeError, RecursionError):
+                    return None
+                out.append(value)
+            return tuple(out)
+
+        seen: Dict[Any, Term] = {}
+        by_kind: Dict[str, List[Term]] = {}
+        minted = 0
+
+        def offer(term: Term) -> Optional[Program]:
+            """Record a term if its behaviour is new; return a program if it is the answer."""
+            nonlocal minted
+            sig = signature(term)
+            if sig is None:
+                return None
+            try:
+                key = (tuple(map(_hashable, sig)))
+            except CodeError:
+                key = repr(sig)
+            if key in seen:
+                return None
+            seen[key] = term
+            minted += 1
+            kinds = {_kind_of(v) for v in sig}
+            by_kind.setdefault(kinds.pop() if len(kinds) == 1 else "mixed", []).append(term)
+            if sig == target:
+                # It agrees on the witnesses. Now make it earn the rest.
+                candidate = Program(spec.name or "f", spec.params, term)
+                if self.matches(candidate, spec.shown):
+                    return candidate
+            return None
+
+        ints, texts = spec.constants()
+        terminals: List[Term] = [Var(p) for p in spec.params]
+        terminals += [Lit(v) for v in _pick_constants(ints, 8)]
+        terminals += [Lit(v) for v in list(dict.fromkeys(texts))[:4]]
+        terminals += [Lit(0), Lit(1), Lit(True), Lit(False), Lit(())]
+        for term in terminals:
+            hit = offer(term)
+            if hit is not None:
+                return hit
+
+        functions = _fn1_library(ints, texts, _element_kinds(spec))
+        folders = _fn2_library()
+        # Unary operators are offered only to terms of a kind they can accept. Untyped, `sum` was
+        # offered to every term in the bank including the booleans and the strings, and at level
+        # two that layer alone is the bank times twenty-five — it consumed the budget before the
+        # composition it was there to build could be reached.
+        unary_by_kind: Dict[str, Tuple[str, ...]] = {
+            "list": ("len", "sum", "maxof", "minof", "sort", "rev", "uniq", "head", "last",
+                     "tail", "flat", "setof", "tolist", "anyof", "allof"),
+            "str": ("len", "upper", "lower", "title", "strip", "words", "rev", "head", "last",
+                    "tail", "isdigit", "toint"),
+            "int": ("abs", "neg", "tostr", "range"),
+            "bool": ("not",),
+            "dict": ("len", "keys", "vals", "items"),
+        }
+
+        # The order inside a level is the whole of whether this finishes. Unary and higher-order
+        # constructions are few and productive — `sum(...)`, `filter(f, ...)` — while the binary
+        # layer is the bank squared and mostly noise. Offering binary first spent the entire
+        # budget at level one, so level two never ran and `sum(filter(p, xs))` — a composition two
+        # steps deep, and the commonest shape there is — was never reached at all.
+        for _level in range(max_level):
+            if minted >= max_terms:
+                break
+            pool = [t for group in by_kind.values() for t in group]
+            numbers = list(by_kind.get("int", []))[:_BANK_WIDTH]
+            lists = (list(by_kind.get("list", [])) + list(by_kind.get("str", [])))[:_BANK_WIDTH]
+
+            for kind, ops in unary_by_kind.items():
+                for term in by_kind.get(kind, [])[:_BANK_WIDTH]:
+                    if minted >= max_terms:
+                        break
+                    for op in ops:
+                        hit = offer(Call(op, (term,)))
+                        if hit is not None:
+                            return hit
+            for fn in functions:
+                for term in lists[:_BANK_WIDTH]:
+                    if minted >= max_terms:
+                        break
+                    for op in ("map", "filter", "countif", "sortby"):
+                        hit = offer(Call(op, (fn, term)))
+                        if hit is not None:
+                            return hit
+            for fn in folders:
+                for term in lists:
+                    for start_at in (numbers[:4] + [Lit(0), Lit(1)]):
+                        if minted >= max_terms:
+                            break
+                        hit = offer(Call("fold", (fn, start_at, term)))
+                        if hit is not None:
+                            return hit
+
+            # Binary, with both sides typed as narrowly as the operator allows and each pairing
+            # capped, so one operator cannot eat the budget the levels above it still need.
+            pairs: List[Tuple[str, List[Term], List[Term]]] = [
+                ("add", numbers, numbers), ("sub", numbers, numbers),
+                ("mul", numbers, numbers), ("div", numbers, numbers),
+                ("mod", numbers, numbers), ("min2", numbers, numbers),
+                ("max2", numbers, numbers),
+                ("at", lists, numbers), ("take", lists, numbers), ("drop", lists, numbers),
+                ("count", lists, pool[:12]), ("has", lists, pool[:12]),
+                ("cat", lists, lists), ("append", lists, pool[:12]),
+                ("eq", pool[:14], pool[:14]), ("lt", numbers, numbers),
+                ("gt", numbers, numbers), ("ge", numbers, numbers),
+            ]
+            for op, left, right in pairs:
+                budgeted = 0
+                for a in left:
+                    for b in right:
+                        if minted >= max_terms or budgeted >= _BINARY_WIDTH:
+                            break
+                        budgeted += 1
+                        hit = offer(Call(op, (a, b)))
+                        if hit is not None:
+                            return hit
+            if target_kind == "bool":
+                flags = by_kind.get("bool", [])[:16]
+                for a in flags:
+                    for b in flags:
+                        for op in ("and", "or"):
+                            hit = offer(Call(op, (a, b)))
+                            if hit is not None:
+                                return hit
+        return None
 
     def _recallable(self, arity: int) -> List[Schema]:
         """Taught shapes that have remembered fillings, most-confirmed first."""
@@ -2550,6 +2807,7 @@ class Coder:
             "refusals": self.refusals,
             "written": self.written,
             "recalled": self.recalled,
+            "invented": self.invented,
             "recall_share": (round(self.recalled / self.written, 4) if self.written else 0.0),
             "abstained": self.abstained,
             "write_rate": round(self.written / asked, 4) if asked else 0.0,

@@ -229,13 +229,26 @@ def test_a_shape_taught_on_one_task_is_used_on_another():
     assert not cold.ok, "the same budget without the lesson should not find it"
 
 
-def test_grafting_can_reach_a_composite_nobody_taught_and_it_costs():
-    """Invention is real and it is expensive — which is the whole reason a lesson is worth
-    anything. Both numbers are asserted so neither claim can drift."""
+def test_a_composite_nobody_taught_is_reached_by_invention_not_by_grafting():
+    """Two routes to a shape she was never shown, and they cost very different amounts.
+
+    This test used to assert that a small budget could *not* reach ``sum(filter(even, xs))``.
+    That was true when grafting — composing two seed shapes and enumerating the result — was the
+    only route, and it is no longer true: ``Coder.invent`` builds the composition out of the
+    grammar directly and finds it in a fraction of the budget. So the assertion is inverted here
+    rather than deleted, and the old claim is kept beside it with invention switched off, because
+    both are still facts about the search and the difference between them is the point.
+    """
     spec = _spec("evens", lambda xs: sum(x for x in xs if x % 2 == 0), DATA)
-    cheap = Coder().write(spec, attempts=1200, graft=True)
-    assert not cheap.ok
-    patient = Coder().write(spec, attempts=200000, graft=True)
+
+    inventor = Coder()
+    quick = inventor.write(spec, attempts=1200, graft=True)
+    assert quick.ok and inventor.invented == 1, quick.note
+    assert inventor.check(quick.program, spec.held_out).ok
+
+    # The old route, on its own: grafting reaches it, and pays for it.
+    assert not Coder().write(spec, attempts=1200, graft=True, invent=False).ok
+    patient = Coder().write(spec, attempts=200000, graft=True, invent=False)
     assert patient.ok and patient.grafted
     assert patient.attempts > 1200
 
