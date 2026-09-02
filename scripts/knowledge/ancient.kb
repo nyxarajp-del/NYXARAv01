@@ -1,0 +1,96 @@
+# ancient.kb — the ancient world: its civilisations, cities, writing and what survives of them.
+#
+# `history.kb` runs from the Stone Age to the Moon landing in ninety lines, which gives every
+# ancient civilisation about one. So Mesopotamia, Egypt, the Indus Valley, Greece, Rome, China and
+# Mesoamerica each had a date and a location and nothing else — no city, no script, no invention,
+# no reason any of them mattered.
+#
+# `mythology.kb` tells their stories and `philosophy.kb` their thinkers; this is the ground both
+# stand on. It is written around what archaeology can actually show — a site, a script, a
+# technology, a trade route — rather than around narrative, because that is what a fact store can
+# hold without asserting an interpretation.
+
+# --- how the ancient world is known ------------------------------------------------------------ #
+archaeology | is_a=discipline | means=the study of the human past through what was left behind | involves=excavation | involves=dating | causes=history for periods with no writing
+excavation | is_a=method | means=uncovering a site in recorded layers | requires=recording where each find lay | causes=the sequence being recoverable
+stratigraphy | is_a=principle | means=that lower layers were laid down before higher ones | causes=a relative date for anything found in them
+radiocarbon dating | is_a=method | purpose=dating organic material by its remaining carbon-14 | has_property=useful back about fifty thousand years
+artefact | is_a=object | means=something made or shaped by people | purpose=evidence of how they lived
+inscription | is_a=text | means=writing cut into stone, metal or clay | has_property=survives where documents do not
+Rosetta Stone | is_a=inscription | located_in=Egypt | purpose=the key that let Egyptian hieroglyphs be read | has_property=carries the same text in three scripts
+decipherment | is_a=process | means=working out how to read a script nobody has read for centuries | requires=a bilingual text or a known name
+undeciphered script | is_a=script | means=a writing system nobody can yet read | has_kind=Indus script
+prehistory as a period | is_a=period | means=the time before writing | causes=it being known only through archaeology
+
+# --- Mesopotamia and the Near East ---------------------------------------------------------------- #
+Fertile Crescent | is_a=region | located_in=the Near East | purpose=where farming and cities first appear together | has_part=Mesopotamia
+Sumer | is_a=civilisation | located_in=southern Mesopotamia | involves=the first cities | involves=cuneiform | has_part=Ur | has_part=Uruk
+cuneiform | is_a=script | located_in=Mesopotamia | means=wedge shaped marks pressed into wet clay | has_property=among the earliest writing systems | purpose=accounts, law and literature
+clay tablet | is_a=artefact | purpose=the writing surface of Mesopotamia | has_property=survives fire, which destroyed the archives that preserved them
+ziggurat | is_a=building | located_in=Mesopotamia | means=a stepped temple platform | purpose=raising a shrine above the plain
+Babylon | is_a=ancient city | located_in=Mesopotamia | involves=the Code of Hammurabi | involves=the Hanging Gardens in later accounts
+Code of Hammurabi | is_a=law code | located_in=Babylon | has_property=among the earliest written law codes | purpose=setting penalties publicly rather than case by case
+Assyria | is_a=civilisation | located_in=northern Mesopotamia | involves=an empire held by a standing army | involves=the library at Nineveh
+Phoenicia | is_a=civilisation | located_in=the eastern Mediterranean coast | involves=seafaring trade | causes=the alphabet spreading around the Mediterranean
+Phoenician alphabet | is_a=script | purpose=writing with a few dozen consonant signs | causes=the Greek and Latin alphabets
+Persia | is_a=civilisation | involves=the Achaemenid empire | involves=a road system and a postal relay | has_part=Persepolis
+Persepolis | is_a=archaeological site | located_in=Iran | purpose=a ceremonial capital of the Persian empire
+
+# --- Egypt --------------------------------------------------------------------------------------------- #
+Ancient Egyptian civilisation | is_a=civilisation | located_in=the Nile valley | requires=the annual Nile flood | involves=pharaohs | involves=hieroglyphs | has_property=lasted about three thousand years
+Nile flood | is_a=event | occurs_when=summer rains fall far upriver | causes=silt renewing the fields each year | causes=Egyptian agriculture and the Egyptian calendar
+pharaoh | is_a=ruler | located_in=Ancient Egypt | has_property=held to be both king and divine in the state religion
+hieroglyphs | is_a=script | located_in=Ancient Egypt | means=a script of pictorial signs standing for sounds and ideas
+papyrus | is_a=material | located_in=Egypt | purpose=a writing surface made from a reed | causes=documents that could be rolled and carried
+pyramid as a tomb | is_a=tomb | located_in=Egypt | purpose=housing a pharaoh's burial | consists_of=cut stone | has_property=built without iron tools or the wheel for haulage
+Sphinx of Giza | is_a=monument | located_in=Egypt | has_property=a lion's body with a human head
+Valley of the Kings | is_a=archaeological site | located_in=Egypt | purpose=rock cut tombs of the New Kingdom
+Tutankhamun | is_a=pharaoh | has_property=a minor king whose tomb was found nearly intact | causes=most of what is publicly known of Egyptian burial goods
+
+# --- the Indus, and early India ------------------------------------------------------------------------- #
+Indus Valley civilisation as a culture | is_a=civilisation | located_in=the Indus basin | involves=planned cities | involves=standardised weights | has_part=Mohenjo-daro | has_part=Harappa | has_property=its script is still undeciphered
+Mohenjo-daro | is_a=archaeological site | located_in=the Indus valley | involves=a grid plan | involves=covered drains | has_part=Great Bath
+Harappa | is_a=archaeological site | located_in=the Indus valley | involves=granaries and a citadel
+Great Bath | is_a=structure | located_in=Mohenjo-daro | purpose=a large watertight tank, probably ritual
+Indus script | is_a=undeciphered script | located_in=the Indus valley | has_property=known from short seal inscriptions only
+Indus seal | is_a=artefact | purpose=marking ownership or goods in trade | consists_of=steatite
+Vedic period | is_a=period | located_in=northern India | involves=the composition of the Vedas | has_property=known largely from texts rather than from excavation
+Nalanda | is_a=ancient university | located_in=Bihar | purpose=a centre of Buddhist learning drawing students from across Asia
+Taxila | is_a=archaeological site | located_in=the north-west of the subcontinent | purpose=an early centre of learning and trade
+Ashokan edict | is_a=inscription | located_in=India | purpose=proclaiming Ashoka's policy on rock and pillar | causes=the earliest deciphered Indian writing after the Indus
+
+# --- Greece, Rome and the classical Mediterranean ----------------------------------------------------------- #
+polis | is_a=political entity | located_in=Ancient Greece | means=a city and the land around it governed as one state | causes=politics being conducted face to face
+Athenian democracy | is_a=government | located_in=Athens | means=citizens deciding public matters by assembly and by lot | has_property=excluded women, slaves and foreigners
+Sparta | is_a=ancient city | located_in=Greece | involves=a society organised around military service
+Parthenon | is_a=temple | located_in=Athens | part_of=Acropolis | consists_of=marble
+Olympic Games of antiquity | is_a=festival | located_in=Olympia | purpose=athletic contests held in honour of Zeus | causes=the modern games being named for them
+Alexander the Great | is_a=ruler | involves=an empire from Greece to the Indus | causes=Greek language and art spreading across Asia
+Hellenistic period | is_a=period | occurs_when=Alexander's empire is divided among his generals | involves=Greek culture blended with Egyptian and Asian
+Library of Alexandria | is_a=library | located_in=Egypt | purpose=gathering the writing of the known world | has_property=its loss is the standard example of knowledge destroyed
+Roman Republic | is_a=government | located_in=Rome | involves=elected magistrates and a senate | causes=vocabulary still used for institutions
+Roman legion | is_a=military unit | purpose=the standing infantry formation of Rome | causes=an empire held by roads and discipline
+Roman road | is_a=infrastructure | purpose=moving armies and messages quickly | has_property=surveyed straight and built in layers | causes=routes still followed today
+aqueduct | is_a=infrastructure | located_in=the Roman world | purpose=carrying water to a city by gravity over many miles | requires=a very slight continuous fall
+Roman concrete | is_a=material | purpose=building vaults and domes | has_property=sets under water | causes=the Roman Pantheon's dome standing to this day
+Roman Pantheon | is_a=building | located_in=Rome | has_part=dome | has_property=the largest unreinforced concrete dome ever built
+Latin | located_in=Ancient Rome | purpose=scholarship and law in Europe long after Rome
+Pompeii | is_a=archaeological site | located_in=Italy | occurs_when=Vesuvius buried it in ash | causes=an ordinary Roman town preserved as it stood
+fall of Rome | is_a=historical change | means=the end of Roman authority in the west | has_property=a long process rather than a single event
+
+# --- China, the Americas and Africa ---------------------------------------------------------------------------- #
+ancient China | is_a=civilisation | located_in=the Yellow River valley | involves=dynasties | involves=a script still in use in modified form
+oracle bone | is_a=artefact | located_in=China | purpose=divination | causes=the earliest known Chinese writing
+Terracotta Army | is_a=archaeological site | located_in=China | purpose=guarding the tomb of the first emperor | consists_of=thousands of individually modelled figures
+Silk Road as a network | is_a=trade route | means=the overland routes linking China, India, Persia and the Mediterranean | causes=goods, religions and diseases travelling together
+Grand Canal | is_a=canal | located_in=China | purpose=moving grain between north and south | has_property=among the longest artificial waterways
+Maya civilisation | is_a=civilisation | located_in=Mesoamerica | involves=a written script | involves=an accurate calendar | involves=stepped pyramids
+Maya calendar | is_a=calendar | located_in=Mesoamerica | has_property=tracked long cycles with great precision
+Aztec civilisation | is_a=civilisation | located_in=Mexico | has_part=Tenochtitlan | involves=causeways and floating gardens
+Tenochtitlan | is_a=ancient city | located_in=Mexico | has_property=built on an island in a lake | causes=Mexico City standing on its site
+Inca civilisation | is_a=civilisation | located_in=the Andes | involves=terraced farming | involves=a road network without the wheel | involves=quipu
+quipu | is_a=recording system | located_in=the Inca empire | means=knotted cords used to record numbers and accounts
+Great Zimbabwe | is_a=archaeological site | located_in=southern Africa | has_property=massive dry stone walls built without mortar
+Kingdom of Aksum | is_a=civilisation | located_in=the Horn of Africa | involves=trade between Rome and India | involves=carved stone stelae
+Timbuktu | is_a=ancient city | located_in=Mali | purpose=a centre of trade and of manuscript learning
+trans-Saharan trade | is_a=trade route | purpose=carrying salt, gold and books across the desert | requires=camels

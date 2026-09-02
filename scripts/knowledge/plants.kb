@@ -1,0 +1,95 @@
+# plants.kb — botany, and the plants themselves.
+#
+# The same gap `animals.kb` fills, on the other side of the kingdom: `biology.kb` defines `plant`,
+# `photosynthesis`, `pollination` and `producer`, and names no plant. So `tree`, `grass`, `root`
+# and `leaf` — four of the most ordinary nouns there are — had nothing behind them.
+#
+# Written so the structure is walkable: a part of a plant is `part_of=plant`, a named plant is
+# `is_a` a group the file defines, and the processes carry `requires` and `causes` so that "what
+# does a leaf need" and "what does transpiration cause" both have an answer.
+
+# --- the groups ---------------------------------------------------------------------------------- #
+flowering plant | is_a=plant | means=a plant that reproduces through flowers and seeds | has_part=flower | has_kind=tree | has_kind=shrub | has_kind=herb | has_property=the largest group of plants
+conifer | is_a=plant | means=a tree bearing cones rather than flowers | has_kind=pine | has_kind=cedar | has_property=needle shaped leaves | has_property=usually evergreen
+fern | is_a=plant | has_property=reproduces by spores rather than seeds | located_in=damp shaded places | has_property=no flowers
+moss | is_a=plant | has_property=small and low growing | located_in=damp shaded places | has_property=no true roots
+algae | is_a=organism | located_in=water | capable_of=photosynthesis | has_property=no roots, stems or leaves | causes=much of the world's oxygen
+tree | is_a=flowering plant | has_property=a single woody stem | has_part=trunk | has_part=branch | has_part=canopy | has_property=long lived
+shrub | is_a=flowering plant | has_property=woody and branching from near the ground | has_property=shorter than a tree
+herb | is_a=flowering plant | has_property=a soft green stem | has_property=usually short lived
+grass | is_a=flowering plant | has_property=narrow leaves and hollow stems | has_kind=wheat | has_kind=rice | has_kind=bamboo | capable_of=regrowing after being cut
+climber | is_a=plant | means=a plant that grows upward by holding on to something else | has_kind=vine | requires=support
+succulent | is_a=plant | has_property=thick fleshy tissue that stores water | has_kind=cactus | located_in=dry places
+cactus | is_a=succulent | located_in=deserts | has_property=spines instead of leaves | capable_of=storing water in its stem
+evergreen | is_a=plant | means=a plant that keeps its leaves all year
+deciduous plant | is_a=plant | means=a plant that drops all its leaves in one season | occurs_when=autumn arrives | purpose=surviving a season with little water or light
+annual plant | is_a=plant | means=a plant that grows, seeds and dies within one year
+perennial plant | is_a=plant | means=a plant that lives for several years
+weed | is_a=plant | means=a plant growing where it is not wanted | causes=competition with a crop for light and nutrients
+
+# --- the parts ---------------------------------------------------------------------------------- #
+root | is_a=plant organ | part_of=plant | purpose=anchoring the plant and taking up water and minerals | located_in=soil | has_kind=taproot | has_kind=fibrous root
+root hair | is_a=plant structure | part_of=root | purpose=increasing the surface available for absorbing water
+stem | is_a=plant organ | part_of=plant | purpose=holding the leaves up and carrying water and food between root and leaf | has_part=node
+trunk | is_a=stem | part_of=tree | consists_of=wood | purpose=supporting the whole crown of a tree
+branch | is_a=plant organ | part_of=tree | purpose=spreading the leaves out to catch light
+bark | is_a=plant tissue | part_of=tree | purpose=protecting the trunk from injury and drying
+leaf | is_a=plant organ | part_of=plant | purpose=making food by photosynthesis | has_part=stomata | has_part=vein | has_property=broad and flat to catch light
+stomata | is_a=plant structure | part_of=leaf | purpose=letting gases in and out | capable_of=opening and closing | causes=water loss when open
+xylem | is_a=plant tissue | purpose=carrying water and minerals up from the root | has_property=carries in one direction only
+phloem | is_a=plant tissue | purpose=carrying sugars from the leaves to the rest of the plant | has_property=carries in both directions
+flower | is_a=plant organ | purpose=reproduction | has_part=petal | has_part=stamen | has_part=pistil | has_part=sepal
+petal | is_a=part of a flower | purpose=attracting pollinators | has_property=often brightly coloured
+stamen | is_a=part of a flower | purpose=producing pollen | has_property=the male part
+pistil | is_a=part of a flower | purpose=receiving pollen and holding the ovule | has_property=the female part
+pollen | is_a=plant material | purpose=carrying the male cells of a flowering plant | causes=hay fever in some people
+nectar | is_a=plant material | purpose=rewarding a pollinator | consists_of=sugar
+seed | is_a=plant structure | means=a young plant packed with a food store inside a coat | purpose=starting a new plant away from the parent | requires=water and warmth to germinate
+fruit of a plant | is_a=plant structure | purpose=protecting the seeds and helping them travel | occurs_when=a flower is fertilised
+bulb | is_a=plant structure | purpose=storing food underground through a dormant season | has_kind=onion
+tuber | is_a=plant structure | purpose=storing food underground | has_kind=potato
+thorn | is_a=plant structure | purpose=defending against being eaten
+sap | is_a=plant fluid | purpose=carrying water, minerals and sugars through the plant
+
+# --- what plants do ------------------------------------------------------------------------------- #
+germination | is_a=process | means=a seed beginning to grow into a seedling | requires=water | requires=warmth | requires=oxygen | causes=a root emerging first
+transpiration | is_a=process | means=water evaporating from the leaves | causes=water being pulled up from the roots | occurs_when=the stomata are open
+respiration in plants | is_a=process | means=releasing energy from sugar | requires=oxygen | has_property=goes on day and night
+tropism | is_a=plant behaviour | means=growth bent toward or away from something | has_kind=phototropism | has_kind=gravitropism
+phototropism | is_a=tropism | means=growth toward light | causes=a plant on a windowsill leaning outward
+gravitropism | is_a=tropism | means=growth guided by gravity | causes=roots growing down and shoots growing up
+pollinator | is_a=organism | purpose=carrying pollen between flowers | has_kind=bee | has_kind=butterfly | has_kind=bird
+seed dispersal | is_a=process | purpose=moving seeds away from the parent plant | involves=wind | involves=water | involves=animals
+grafting | is_a=technique | means=joining a shoot of one plant onto the root of another | purpose=growing a chosen variety on a hardy root
+pruning | is_a=technique | means=cutting parts of a plant away deliberately | purpose=shaping growth or improving yield
+nitrogen fixation | is_a=process | means=turning nitrogen from the air into a form plants can use | requires=bacteria | located_in=the roots of legumes | causes=soil fertility
+
+# --- named plants ---------------------------------------------------------------------------------- #
+banyan | is_a=tree | located_in=India | has_property=aerial roots that become new trunks | has_property=a very wide canopy
+peepal | is_a=tree | located_in=India | has_property=heart shaped leaves | has_property=held sacred in several traditions
+neem | is_a=tree | located_in=India | purpose=traditional medicine and pest control | has_property=bitter
+mango tree | is_a=tree | located_in=South Asia | purpose=fruit | has_property=evergreen
+coconut palm | is_a=tree | located_in=tropical coasts | purpose=fruit, oil and fibre | has_property=a single unbranched trunk
+banana plant | is_a=herb | has_property=the largest herb, not a tree | purpose=fruit
+bamboo | is_a=grass | has_property=among the fastest growing plants | purpose=building and scaffolding | has_property=hollow jointed stems
+teak | is_a=tree | purpose=furniture and boat building | has_property=durable and water resistant timber
+sandalwood | is_a=tree | purpose=fragrant wood and oil | located_in=India
+oak | is_a=tree | is_a=deciduous plant | purpose=timber | has_property=produces acorns
+pine | is_a=conifer | purpose=timber and resin | located_in=cool climates
+eucalyptus | is_a=tree | located_in=Australia | purpose=oil and timber | has_property=fast growing
+baobab | is_a=tree | located_in=Africa | capable_of=storing water in its trunk | has_property=a very thick trunk
+mangrove | is_a=tree | located_in=tidal coasts | capable_of=growing in salt water | purpose=protecting the coast from storms
+rose | is_a=shrub | purpose=ornament and perfume | has_part=thorn | has_property=fragrant
+lotus | is_a=flowering plant | located_in=ponds | has_property=leaves that shed water | has_property=a national flower of India
+sunflower | is_a=herb | purpose=seeds and oil | has_property=large yellow flower heads
+marigold | is_a=herb | purpose=garlands and pest control | located_in=India
+jasmine | is_a=shrub | purpose=perfume and garlands | has_property=strongly scented white flowers
+tulsi | is_a=herb | located_in=India | purpose=traditional medicine | also_known_as=holy basil
+aloe vera | is_a=succulent | purpose=soothing burns and skin care | has_property=thick gel filled leaves
+tea plant | is_a=shrub | purpose=tea leaves | located_in=hill slopes with high rainfall
+coffee plant | is_a=shrub | purpose=coffee beans | located_in=tropical highlands
+cotton plant | is_a=shrub | purpose=cotton fibre | is_a=cash crop
+sugarcane | is_a=grass | purpose=sugar | is_a=cash crop | has_property=a thick juicy stem
+rubber tree | is_a=tree | purpose=latex | located_in=tropical regions
+mushroom | is_a=fungus | has_property=not a plant | purpose=food for some kinds | has_property=some kinds are poisonous
+lichen | is_a=organism | means=a fungus and an alga living as one | located_in=bare rock and bark | has_property=an indicator of clean air

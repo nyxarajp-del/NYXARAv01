@@ -1,0 +1,82 @@
+# space.kb — spaceflight: the missions, the machines and what it takes to leave the ground.
+#
+# `astronomy.kb` describes the universe and stops at the telescope; it has `rocket`, `satellite`,
+# `International Space Station` and `Apollo 11` as four lines with no system behind them. Nothing
+# said what an orbit costs, what a spacesuit is for, what re-entry does, or why a rocket has
+# stages. That is engineering rather than astronomy, and it is what most space questions are
+# actually about.
+
+# --- getting there --------------------------------------------------------------------------------- #
+spaceflight | is_a=activity | means=travel beyond the Earth's atmosphere | requires=escaping most of the Earth's gravity | requires=a launch vehicle
+escape velocity | is_a=speed | means=the speed needed to leave a body's gravity without further thrust | has_property=about eleven kilometres a second for the Earth
+orbital velocity | is_a=speed | means=the speed at which falling around a body exactly matches its curvature | causes=an object staying in orbit rather than coming down
+launch vehicle | is_a=vehicle | purpose=carrying a payload from the ground to orbit | has_part=rocket stage | has_part=payload fairing | requires=enormous amounts of fuel
+rocket stage | is_a=part of a launch vehicle | purpose=being dropped once its fuel is spent | causes=the remaining rocket no longer having to lift empty tanks
+staging | is_a=technique | means=shedding spent parts of a rocket during ascent | purpose=carrying more payload for the same fuel
+payload | is_a=cargo | means=what a rocket is actually launched to deliver | has_property=a small fraction of the launch mass
+propellant | is_a=substance | means=the fuel and oxidiser a rocket burns | has_property=must carry its own oxidiser because there is no air
+liquid fuel rocket | is_a=rocket engine | has_property=can be throttled and shut down | requires=pumps and cryogenic tanks
+solid fuel rocket | is_a=rocket engine | has_property=simple and powerful | has_property=cannot be shut down once lit
+launch pad | is_a=structure | purpose=holding and servicing a rocket until launch
+countdown | is_a=procedure | purpose=bringing every system to readiness at the same moment
+launch window | is_a=period | means=the span of time in which a launch can reach its target | requires=the target being in the right place
+reusable rocket | is_a=launch vehicle | capable_of=landing and flying again | causes=a large fall in the cost of reaching orbit
+spaceport | is_a=facility | purpose=where launches are prepared and flown | located_in=a site with a clear range downrange
+
+# --- staying there ------------------------------------------------------------------------------------- #
+orbit of a spacecraft | is_a=path | means=a closed path around a body under gravity | has_kind=low Earth orbit | has_kind=geostationary orbit | has_kind=polar orbit
+low Earth orbit | is_a=orbit of a spacecraft | has_property=a few hundred kilometres up | has_property=circles the Earth in about ninety minutes | located_in=where the space station flies
+geostationary orbit | is_a=orbit of a spacecraft | has_property=one orbit takes exactly one day | causes=a satellite staying above the same point on the equator | purpose=communications and weather satellites
+polar orbit | is_a=orbit of a spacecraft | purpose=passing over every part of the Earth as it rotates beneath | located_in=where imaging satellites fly
+microgravity | is_a=condition | means=the near weightlessness of continuous free fall | causes=muscle and bone loss over months | causes=liquids forming spheres
+vacuum of space | is_a=condition | means=the near absence of matter beyond the atmosphere | causes=no sound travelling | requires=a pressurised suit or cabin for a person
+cosmic radiation | is_a=hazard | means=high energy particles from the Sun and beyond | causes=risk to crew and to electronics | requires=shielding
+space debris | is_a=problem | means=defunct satellites and fragments left in orbit | causes=collision risk for working spacecraft
+spacesuit | is_a=equipment | purpose=keeping a person alive outside a spacecraft | has_part=pressure layer | has_part=life support pack | requires=oxygen supply and temperature control
+spacewalk | is_a=activity | means=work done outside a spacecraft in orbit | requires=a spacesuit and a tether | also_known_as=extravehicular activity
+docking | is_a=manoeuvre | means=two spacecraft joining in orbit | requires=matching velocity almost exactly
+re-entry | is_a=phase of flight | means=coming back into the atmosphere from space | causes=intense heating from compressed air | requires=a heat shield
+heat shield | is_a=component | purpose=protecting a returning spacecraft from re-entry heat | has_property=designed to be eroded away deliberately
+splashdown | is_a=landing | means=a capsule returning into the sea | requires=parachutes
+gravity assist | is_a=manoeuvre | means=borrowing speed by swinging past a planet | purpose=reaching the outer solar system on affordable fuel
+mission control | is_a=facility | purpose=directing a flight from the ground | requires=continuous telemetry
+telemetry | is_a=data | means=measurements a spacecraft sends back about itself | purpose=knowing what is happening where nobody can look
+deep space network | is_a=system | purpose=communicating with spacecraft far from Earth | requires=very large antennas
+
+# --- the machines --------------------------------------------------------------------------------------- #
+artificial satellite | is_a=spacecraft | purpose=doing a job from orbit | has_kind=communications satellite | has_kind=weather satellite | has_kind=navigation satellite | has_kind=earth observation satellite
+communications satellite | is_a=artificial satellite | purpose=relaying signals between distant points on Earth | located_in=geostationary orbit
+weather satellite | is_a=artificial satellite | purpose=watching cloud, storm and temperature from above | causes=cyclone warnings days in advance
+navigation satellite | is_a=artificial satellite | purpose=letting a receiver work out where it is | requires=very accurate onboard clocks
+space probe | is_a=spacecraft | purpose=travelling to another body and sending back data | has_property=usually one way
+rover | is_a=spacecraft | purpose=driving across another world's surface | has_part=wheels | has_part=instruments | requires=commands that allow for the signal delay
+lander | is_a=spacecraft | purpose=setting down softly on another body
+orbiter | is_a=spacecraft | purpose=circling another body rather than landing
+space station | is_a=spacecraft | purpose=a place in orbit where people live and work for months | requires=resupply | has_part=solar array | has_part=life support system
+space shuttle | is_a=launch vehicle | has_property=partly reusable | purpose=carrying crew and cargo to low Earth orbit | has_property=retired from service
+space telescope | is_a=telescope | located_in=orbit | purpose=observing without the atmosphere blurring or absorbing the light
+solar array | is_a=component | purpose=making electricity from sunlight in space | has_property=the usual power source for a spacecraft
+life support system | is_a=system | purpose=supplying air and water and removing carbon dioxide | requires=recycling on a long mission
+
+# --- what has been done ---------------------------------------------------------------------------------- #
+Sputnik | is_a=artificial satellite | purpose=the first artificial satellite to orbit the Earth | occurs_when=1957 | causes=the space race beginning
+Vostok 1 | is_a=space mission | purpose=carrying the first human into space | involves=Yuri Gagarin | occurs_when=1961
+Apollo programme | is_a=space programme | purpose=landing people on the Moon and returning them | involves=Apollo 11 | involves=the Saturn V rocket
+Saturn V | is_a=launch vehicle | purpose=carrying the Apollo missions to the Moon | has_property=the most powerful rocket flown for many years
+Moon landing | is_a=event | occurs_when=1969 | involves=Neil Armstrong | involves=Apollo 11
+Voyager 1 | is_a=space probe | purpose=surveying the outer planets and then interstellar space | has_property=the most distant human made object
+Hubble Space Telescope as a mission | is_a=space telescope | purpose=observing in visible and ultraviolet light from orbit | causes=a far better estimate of the age of the universe
+Mars rover | is_a=rover | purpose=studying the surface and geology of Mars | involves=searching for signs of past water
+Cassini | is_a=space probe | purpose=studying Saturn and its moons
+New Horizons | is_a=space probe | purpose=the first close survey of Pluto
+Chandrayaan mission | is_a=space mission | purpose=exploring the Moon | involves=ISRO | causes=evidence of water on the Moon
+NASA | is_a=agency | purpose=the space programme of the United States
+European Space Agency | is_a=agency | purpose=the joint space programme of European states
+space race | is_a=historical rivalry | means=the competition to achieve firsts in spaceflight | causes=very rapid progress in a short period
+astronaut | is_a=person | purpose=flying and working in space | requires=long training | requires=physical fitness
+cosmonaut | is_a=astronaut | means=the word used for a Russian astronaut
+astrobiology | is_a=discipline | means=the study of whether and where life could exist beyond Earth
+extraterrestrial life | is_a=hypothesis | means=life originating away from the Earth | has_property=no confirmed example
+habitable zone | is_a=region | means=the range of distances from a star where liquid water could exist on a surface
+exoplanet | is_a=planet | means=a planet orbiting a star other than the Sun | has_property=thousands have now been found
+terraforming | is_a=hypothesis | means=changing another world's environment to make it habitable | has_property=far beyond present capability

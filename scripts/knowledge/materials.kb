@@ -1,0 +1,94 @@
+# materials.kb — what things are made of, and why that material and not another.
+#
+# `chemistry.kb` has elements and compounds; `technology.kb` has concrete, glass and paper as
+# three lines among fifty. Between the two sits the question a person actually asks — "what is
+# steel", "why is copper used for wires", "what is plastic made from" — and it was unanswerable.
+#
+# Every material here carries a `purpose` and at least one `has_property` that *explains* the
+# purpose, because a material is chosen for a property: copper conducts, so it is wire; rubber
+# stretches and grips, so it is a tyre. That pairing is the whole subject, and it is also what
+# makes the file useful to `njp/core.py` — a member inheriting `has_property` from its material
+# class is a sound inference, and this file gives the walk something to walk on.
+
+# --- kinds of material ------------------------------------------------------------------------- #
+material | is_a=substance | means=what an object is made of | has_kind=metal | has_kind=polymer | has_kind=ceramic | has_kind=composite | has_kind=natural fibre
+natural material | is_a=material | means=a material taken from living things or the ground with little change | has_kind=wood | has_kind=cotton | has_kind=stone | has_kind=wool
+synthetic material | is_a=material | means=a material made by chemical processing rather than found | has_kind=plastic | has_kind=nylon | has_kind=polyester
+composite | is_a=material | means=two materials combined so the mixture beats either alone | has_kind=reinforced concrete | has_kind=fibreglass | has_kind=plywood
+alloy | is_a=metal | means=a metal mixed with another element to change its properties | has_property=usually harder than the pure metal
+polymer | is_a=material | means=a substance of very long repeating molecular chains | has_kind=rubber | has_kind=nylon
+ceramic | is_a=material | means=a hard brittle material made by firing clay or minerals | has_kind=pottery | has_kind=porcelain | has_kind=brick | has_property=resists heat | has_property=brittle
+raw material | is_a=material | means=a material that goes into making something else | causes=a finished product after processing
+recycling | is_a=process | means=turning used material back into new material | purpose=saving raw material and energy | causes=less waste
+
+# --- properties that decide the choice ----------------------------------------------------------- #
+hardness | is_a=property of a material | means=how well it resists being scratched or dented
+strength | is_a=property of a material | means=how much force it takes to break it | has_kind=tensile strength | has_kind=compressive strength
+tensile strength | is_a=strength | means=resistance to being pulled apart
+compressive strength | is_a=strength | means=resistance to being crushed
+brittleness | is_a=property of a material | means=breaking rather than bending under stress | causes=cracking under a sudden blow
+ductility | is_a=property of a material | means=being able to be drawn into a wire without breaking
+malleability | is_a=property of a material | means=being able to be hammered or rolled into a sheet
+elasticity | is_a=property of a material | means=returning to its shape after a force is removed
+density of a material | is_a=property of a material | means=mass per unit of volume | causes=whether an object floats
+corrosion | is_a=process | means=a metal being eaten away by chemical attack | occurs_when=metal meets water and oxygen | causes=rust in iron | requires=air or water to be excluded to prevent
+rust | is_a=substance | occurs_when=iron reacts with water and oxygen | causes=iron weakening and flaking | has_property=reddish brown
+galvanising | is_a=process | means=coating iron with zinc | purpose=stopping rust | causes=a longer lived roof or nail
+insulator | means=a material that does not let heat or electricity pass easily | has_kind=rubber | has_kind=plastic | has_kind=wood | has_kind=glass
+biodegradable material | is_a=material | means=a material micro-organisms can break down | has_kind=paper | has_kind=cotton | has_kind=wood
+non-biodegradable material | is_a=material | means=a material that does not rot away | has_kind=plastic | has_kind=glass | causes=long lasting pollution
+
+# --- metals ------------------------------------------------------------------------------------ #
+steel | purpose=building frames, tools and vehicles | has_property=rusts unless protected
+stainless steel | is_a=steel | consists_of=chromium | purpose=cutlery, sinks and instruments | has_property=resists rust
+cast iron | is_a=alloy | purpose=cookware and heavy machine bases | has_property=hard | has_property=brittle | has_property=holds heat well
+brass | purpose=fittings, taps and instruments | has_property=golden coloured | has_property=easy to machine
+bronze | is_a=alloy | consists_of=copper | consists_of=tin | purpose=statues and bells | has_property=harder than copper
+aluminium foil | is_a=material | purpose=wrapping food | has_property=very thin | has_property=reflects heat
+wire | is_a=object | consists_of=copper | purpose=carrying electric current | requires=ductility to be drawn
+solder | is_a=alloy | purpose=joining two metal parts electrically | has_property=melts at a low temperature
+scrap metal | is_a=raw material | purpose=being melted down and used again | causes=less mining
+
+# --- polymers and everyday synthetics -------------------------------------------------------------- #
+plastic | is_a=polymer | is_a=synthetic material | purpose=containers, pipes, packaging and casings | has_property=light | has_property=waterproof | has_property=does not rot | causes=persistent pollution when discarded
+polythene | is_a=plastic | purpose=bags and sheeting | has_property=flexible
+PVC | is_a=plastic | purpose=pipes, cables and window frames | has_property=rigid unless softened
+rubber | is_a=polymer | purpose=tyres, seals and soles | has_property=elastic | has_property=grips a surface | has_property=an electrical insulator
+vulcanisation | is_a=process | means=heating rubber with sulphur | purpose=making rubber tougher and less sticky | inventor=Charles Goodyear
+nylon | is_a=synthetic material | purpose=rope, fishing line and fabric | has_property=strong for its weight
+polyester | is_a=synthetic material | purpose=clothing and bottles | has_property=holds its shape | has_property=dries quickly
+foam | is_a=material | means=a solid full of trapped gas bubbles | purpose=cushioning and insulation | has_property=very light
+adhesive | is_a=substance | purpose=sticking two surfaces together | has_kind=glue | has_kind=tape
+
+# --- from plants and animals -------------------------------------------------------------------------- #
+wood | is_a=natural material | consists_of=cellulose | purpose=building, furniture and fuel | has_property=strong for its weight | has_property=burns | has_kind=hardwood | has_kind=softwood
+hardwood | is_a=wood | purpose=furniture and flooring | has_property=dense | has_property=slow growing
+softwood | is_a=wood | purpose=construction and paper | has_property=lighter and faster growing
+plywood | is_a=composite | consists_of=thin wood layers glued crosswise | purpose=panels and furniture | has_property=less likely to split than plain wood
+charcoal | is_a=material | occurs_when=wood is heated without enough air to burn | purpose=fuel and filtering | consists_of=carbon
+cotton | is_a=natural fibre | purpose=clothing and bedding | has_property=absorbs water | has_property=comfortable in heat | located_in=warm climates
+wool | is_a=natural fibre | purpose=warm clothing and carpets | has_property=traps air and keeps heat in | has_property=comes from sheep
+silk | is_a=natural fibre | purpose=fine cloth | has_property=smooth and strong | has_property=produced by silkworms
+jute | is_a=natural fibre | purpose=sacks and rope | located_in=Bengal | has_property=cheap and biodegradable
+leather | is_a=natural material | purpose=shoes, bags and belts | has_property=tough and flexible | occurs_when=animal hide is tanned
+tanning | is_a=process | means=treating hide so it will not rot | causes=leather
+paper | consists_of=cellulose fibres | purpose=writing, printing and packaging | occurs_when=pulp is pressed and dried
+pulp | is_a=raw material | purpose=making paper | consists_of=wood fibres and water
+latex | is_a=plant fluid | purpose=making rubber | located_in=the rubber tree
+beeswax | is_a=natural material | purpose=candles and polish | located_in=a hive
+
+# --- from the ground ---------------------------------------------------------------------------------- #
+stone | is_a=natural material | purpose=building and paving | has_property=strong in compression | has_property=heavy
+clay | is_a=natural material | purpose=pottery and bricks | has_property=soft when wet and hard when fired | requires=firing to become ceramic
+brick | is_a=ceramic | occurs_when=clay is moulded and fired | purpose=walls | has_property=strong in compression
+cement | is_a=material | purpose=binding sand and stone into concrete | occurs_when=limestone and clay are heated and ground | requires=water to set
+concrete | is_a=composite | has_property=very strong in compression
+mortar | is_a=material | purpose=holding bricks together | consists_of=cement | consists_of=sand
+plaster | is_a=material | purpose=giving a wall a smooth surface | requires=water to set
+sand | is_a=natural material | purpose=concrete, mortar and glass | consists_of=small grains of rock
+gravel | is_a=natural material | purpose=concrete and road beds
+lime | is_a=material | occurs_when=limestone is heated | purpose=mortar and treating acidic soil
+glass | occurs_when=sand is melted and cooled | purpose=windows, bottles and lenses | has_property=recyclable without loss
+porcelain | is_a=ceramic | purpose=tableware and sanitary ware | has_property=white and non porous
+asphalt | is_a=material | purpose=road surfaces | has_property=waterproof | has_property=softens in heat
+petroleum | is_a=raw material | purpose=fuel and the feedstock for plastics | is_a=fossil fuel | located_in=underground reservoirs

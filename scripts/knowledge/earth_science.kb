@@ -37,6 +37,7 @@ troposphere | is_a=atmospheric layer | has_property=where weather happens | loca
 stratosphere | is_a=atmospheric layer | has_part=the ozone layer
 weather | is_a=state of the atmosphere | means=the condition of the air at a place over hours or days | has_part=temperature | has_part=humidity | has_part=wind | has_part=precipitation
 climate | is_a=long term pattern of weather | means=the average weather of a place over decades | requires=long records
+monsoon | is_a=wind system | means=a wind that reverses direction between the seasons | occurs_when=land and sea heat at different rates | causes=a wet season and a dry season | requires=a large temperature difference between land and ocean
 wind | is_a=movement of air | occurs_when=air moves from high pressure to low pressure | causes=waves | purpose=driving wind turbines
 cloud | is_a=mass of water droplets | occurs_when=moist air rises and cools | causes=rain@0.6
 rain | is_a=precipitation | occurs_when=droplets in a cloud grow heavy enough to fall | causes=river flow | requires=condensation

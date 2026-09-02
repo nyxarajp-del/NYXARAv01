@@ -427,16 +427,60 @@ def _sentence(predicate: str, subject_text: str, objects: Sequence[str]) -> str:
     return _capitalise(template.format(S=subject_text, s=subject_text, o=joined, a=joined))
 
 
+def unaskable_subjects(rows: Iterable[Dict[str, Any]]) -> List[str]:
+    """Subjects whose *name* the question reader cannot give back, whatever the relation.
+
+    :data:`_ASKABLE` guarantees each template reads back as its own predicate, and that is only
+    half of the pair. The other half is the subject, and a subject can be lost by its own spelling:
+    ``Grounder._read_question`` strips a leading article, so ``What is a priori?`` comes back as
+    ``('priori', 'is_a')`` and there is no fact under that key. ``The Odyssey`` failed the same way
+    — the first two subjects in this KB that began with an article, and both arrived in one change
+    set, which is how long the trap sat unsprung.
+
+    Renaming is the right fix where a name survives it (``The Odyssey`` is fine as ``Odyssey``) and
+    it is not available for a term whose article is part of it: *a priori* is not "priori". So
+    those subjects keep their triples — the graph is the whole of what she knows — and carry no
+    question, exactly as ``_GRAPH_ONLY`` predicates do, for exactly the same reason: a question
+    guaranteed to be unanswerable is a guaranteed-wrong item in the exam, and the score would be
+    measuring the spelling.
+
+    The list is *reported* rather than silently applied. ``--check`` prints it, so a subject that
+    drops out of the exam does so visibly.
+    """
+    from nyxara.njp.grounding import Grounder, _clean       # noqa: PLC0415 — optional at import
+
+    grounder = Grounder()
+    # The reader consults its own store to tell "the capital of France" (a relation about a
+    # subject) from "the Age of Exploration" (a subject whose name contains " of "), so a check
+    # run against an *empty* Grounder is stricter than the thing it is checking: it reported
+    # `age of exploration` and `unit of measurement` unaskable while the live brain reads both
+    # correctly. Seeding the subject keys — the only thing `_known_entity` looks at — makes this
+    # measure the reader that actually runs.
+    for subject in {row["subject"] for row in rows}:
+        grounder.facts.setdefault((grounder._key(subject), "is_a"), [])
+    lost: List[str] = []
+    for subject in sorted({row["subject"] for row in rows}):
+        text = next(r["subject_text"] for r in rows if r["subject"] == subject)
+        read, predicate = grounder._read_question(_clean(f"What is {text}?").lower())
+        if predicate != "is_a" or read != subject:
+            lost.append(subject)
+    return lost
+
+
 def qa_pairs(rows: Iterable[Dict[str, Any]]) -> Iterator[Dict[str, str]]:
     """One question per (subject, relation), with every object of that relation in the answer.
 
     Per *relation*, not per triple, and that is the point: asking "what are the properties of
     copper?" three times with a third of the answer each time would teach the exam that a complete
     answer is wrong twice. The Grounder extracts each object back out of the list on the way in.
+
+    Subjects the reader cannot give back are skipped — see :func:`unaskable_subjects`.
     """
+    rows = list(rows)
+    lost = set(unaskable_subjects(rows))
     grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for row in rows:
-        if row["predicate"] not in _ASKABLE:
+        if row["predicate"] not in _ASKABLE or row["subject"] in lost:
             continue
         key = (row["subject"], row["predicate"])
         bucket = grouped.setdefault(key, {"subject_text": row["subject_text"], "objects": []})
@@ -509,6 +553,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "facts": len(rows),
         "subjects": len({row["subject"] for row in rows}),
         "qa_pairs": len(pairs),
+        # Named, not merely subtracted. A subject that leaves the exam because English cannot
+        # give its name back should be visible in the report that says how big the exam is.
+        "unaskable_subjects": unaskable_subjects(rows),
         "domains": dict(sorted(by_domain.items())),
         "predicates": dict(sorted(by_predicate.items(), key=lambda kv: (-kv[1], kv[0]))),
     }

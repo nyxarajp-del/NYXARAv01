@@ -1,0 +1,121 @@
+# measurement.kb — units, instruments, time, calendars and how a quantity is put into a number.
+#
+# physics.kb defines the SI base quantities and their units, which is the *physics* of measuring.
+# What is missing either side of it is the general knowledge: the prefixes, the everyday units
+# people actually use, the instrument that reads each quantity, and the way time is divided. Those
+# are the questions a general-knowledge exam asks ("what is a kilometre", "what measures pressure",
+# "how long is a leap year") and none of them had an answer.
+#
+# `unit` is functional here, so a quantity carries exactly one — the SI one. Everyday units are
+# subjects in their own right with `is_a=unit of X`, which is what makes "what is a mile" askable
+# without claiming that the mile is *the* unit of length.
+
+# --- measuring at all --------------------------------------------------------------------------- #
+measurement | is_a=process | means=comparing a quantity against a unit to get a number | requires=a unit | requires=an instrument | causes=a number that can be compared
+unit of measurement | is_a=convention | means=an agreed amount of a quantity that other amounts are counted in | purpose=making measurements comparable between people
+standard | is_a=agreed reference | purpose=defining a unit so every copy of it agrees
+quantity | is_a=property | means=something of which there can be more or less | has_kind=length | has_kind=mass | has_kind=time | has_kind=temperature
+accuracy | is_a=property of a measurement | means=how close a reading is to the true value
+precision | is_a=property of a measurement | means=how close repeated readings are to each other | has_property=different from accuracy
+measurement error | is_a=defect | means=the difference between a reading and the true value | has_kind=systematic error | has_kind=random error
+systematic error | is_a=measurement error | means=an error that pushes every reading the same way | causes=readings that are precise and wrong | requires=calibration to remove
+random error | is_a=measurement error | means=an error that varies unpredictably between readings | causes=scatter | requires=repeated readings to reduce
+calibration | is_a=process | purpose=setting an instrument against a known standard | causes=systematic error being removed
+significant figures | is_a=convention | purpose=saying how precisely a number is known
+estimation | is_a=method | means=arriving at an approximate value without measuring | purpose=checking whether a measured answer is plausible
+
+# --- SI, and the prefixes ------------------------------------------------------------------------- #
+International System of Units | is_a=system of units | also_known_as=SI | has_part=metre | has_part=kilogram | has_part=second | has_part=ampere | has_part=kelvin | has_part=mole | has_part=candela | purpose=one agreed set of units for the world
+metric system | is_a=system of units | has_property=based on powers of ten | causes=conversion by moving the decimal point
+metric prefix | is_a=convention | purpose=naming a multiple of a unit | has_kind=kilo | has_kind=centi | has_kind=milli | has_kind=mega | has_kind=micro | has_kind=giga | has_kind=nano
+kilo | is_a=metric prefix | means=one thousand times | symbol=k
+centi | is_a=metric prefix | means=one hundredth of | symbol=c
+milli | is_a=metric prefix | means=one thousandth of | symbol=m
+micro | is_a=metric prefix | means=one millionth of
+nano | is_a=metric prefix | means=one thousand millionth of
+mega | is_a=metric prefix | means=one million times | symbol=M
+giga | is_a=metric prefix | means=one thousand million times | symbol=G
+
+# --- length, area and volume ---------------------------------------------------------------------- #
+metre | is_a=unit of length | symbol=m | part_of=International System of Units
+kilometre | is_a=unit of length | means=one thousand metres | purpose=measuring distance between places
+centimetre | is_a=unit of length | means=one hundredth of a metre
+millimetre | is_a=unit of length | means=one thousandth of a metre
+mile | is_a=unit of length | means=about one and six tenths kilometres | located_in=Britain and the United States
+foot | is_a=unit of length | means=about thirty and a half centimetres | purpose=measuring height in some countries
+inch | is_a=unit of length | means=two and fifty-four hundredths centimetres
+light year | is_a=unit of length | means=the distance light travels in a year | purpose=measuring distance between stars
+area | is_a=quantity | means=how much surface a shape covers | requires=two lengths
+square metre | is_a=unit of area | purpose=measuring floor and land area
+hectare | is_a=unit of area | means=ten thousand square metres | purpose=measuring farmland
+acre | is_a=unit of area | purpose=measuring land | located_in=Britain, the United States and India
+volume | is_a=quantity | means=how much space something occupies | requires=three lengths
+litre | is_a=unit of volume | means=one thousandth of a cubic metre | purpose=measuring liquid
+millilitre | is_a=unit of volume | means=one thousandth of a litre
+
+# --- mass, weight, and the rest ------------------------------------------------------------------------ #
+kilogram | part_of=International System of Units
+gram | is_a=unit of mass | means=one thousandth of a kilogram
+tonne | is_a=unit of mass | means=one thousand kilograms
+weight and mass | is_a=common confusion | means=mass is how much matter there is and weight is the force gravity exerts on it | causes=a wrong answer about the Moon
+speed | is_a=quantity | unit=metre per second | means=distance covered per unit of time
+kilometre per hour | is_a=unit of speed | purpose=stating the speed of a vehicle
+knot | is_a=unit of speed | purpose=stating the speed of a ship or aircraft | means=one nautical mile per hour
+degree Celsius | is_a=unit of temperature | symbol=°C | has_property=water freezes at zero and boils at one hundred at sea level
+degree Fahrenheit | is_a=unit of temperature | has_property=water freezes at thirty-two degrees | located_in=the United States
+kelvin scale | is_a=temperature scale | has_property=starts at absolute zero | has_property=no negative values
+absolute zero | means=the temperature at which particles have the least possible energy
+percentage | means=a proportion expressed out of one hundred
+ratio | is_a=comparison | means=one quantity expressed as a multiple of another
+scale of a map | is_a=ratio | means=how a distance on a map relates to the distance on the ground | purpose=reading real distance off a map
+
+# --- the instruments ------------------------------------------------------------------------------------- #
+measuring instrument | is_a=tool | purpose=turning a quantity into a reading | has_kind=ruler | has_kind=thermometer | has_kind=weighing scale | has_kind=clock | has_kind=barometer
+ruler | is_a=measuring instrument | purpose=measuring length | has_part=graduated scale
+measuring tape | is_a=measuring instrument | purpose=measuring longer lengths | has_property=flexible
+vernier calliper | is_a=measuring instrument | purpose=measuring small lengths precisely
+weighing scale | is_a=measuring instrument | purpose=measuring mass
+thermometer | is_a=measuring instrument | requires=a property that changes with temperature
+barometer | is_a=measuring instrument | purpose=measuring atmospheric pressure | capable_of=indicating a change in weather
+ammeter | is_a=measuring instrument | purpose=measuring electric current | located_in=a circuit in series
+voltmeter | is_a=measuring instrument | purpose=measuring potential difference | located_in=a circuit in parallel
+measuring cylinder | is_a=measuring instrument | purpose=measuring the volume of a liquid
+stopwatch | is_a=measuring instrument | purpose=measuring an interval of time
+odometer | is_a=measuring instrument | purpose=recording the distance a vehicle has travelled
+seismometer | is_a=measuring instrument | purpose=recording ground motion in an earthquake
+anemometer | is_a=measuring instrument | purpose=measuring wind speed
+rain gauge | is_a=measuring instrument | purpose=measuring rainfall
+
+# --- time --------------------------------------------------------------------------------------------------- #
+second | is_a=unit of time | symbol=s | part_of=International System of Units
+day | means=twenty-four hours | requires=one rotation of the Earth
+month | means=one of the twelve divisions of a year | has_property=twenty-eight to thirty-one days long
+year | means=the time the Earth takes to orbit the Sun | has_property=three hundred and sixty-five days in a common year
+leap year | is_a=year | has_property=three hundred and sixty-six days | occurs_when=the year is divisible by four, except centuries not divisible by four hundred | purpose=keeping the calendar in step with the Earth's orbit
+decade | is_a=unit of time | means=ten years
+century | is_a=unit of time | means=one hundred years
+millennium | is_a=unit of time | means=one thousand years
+calendar | purpose=dividing time into days, months and years | has_kind=Gregorian calendar | has_kind=lunar calendar | has_kind=Hindu calendar | has_kind=Islamic calendar
+Gregorian calendar | is_a=calendar | has_property=the civil calendar of most of the world | has_property=twelve months
+lunar calendar | is_a=calendar | requires=the phases of the Moon | has_property=a year shorter than the solar year
+Islamic calendar | is_a=lunar calendar | has_property=its dates move through the seasons
+clock | is_a=measuring instrument | purpose=telling the time of day | has_kind=sundial | has_kind=mechanical clock | has_kind=quartz clock | has_kind=atomic clock
+sundial | is_a=clock | requires=sunlight | means=a clock read from the shadow the Sun casts
+atomic clock | is_a=clock | has_property=the most accurate clock made | requires=the vibration of atoms | purpose=defining the second
+time zone | is_a=convention | purpose=keeping local clocks near solar time | causes=different clock times in different places at one moment
+Greenwich Mean Time | is_a=time standard | located_in=Greenwich | purpose=the reference against which time zones are stated
+Coordinated Universal Time | is_a=time standard | also_known_as=UTC | purpose=the world's civil time reference | requires=atomic clocks
+International Date Line | is_a=line on the Earth | purpose=marking where the calendar day changes | located_in=the Pacific Ocean
+daylight saving time | is_a=convention | means=putting clocks forward in summer | purpose=making more use of evening daylight
+
+# --- counting and number ----------------------------------------------------------------------------------------- #
+counting | is_a=process | means=putting things in one to one correspondence with the numbers | purpose=finding how many
+number system | is_a=system | purpose=writing numbers down | has_kind=decimal system | has_kind=binary system | has_kind=Roman numerals
+decimal system | is_a=number system | has_property=base ten | has_part=digit | requires=place value
+place value | is_a=principle | means=that a digit's value depends on its position | causes=the same digit meaning different amounts in different columns
+zero as a placeholder | is_a=invention | purpose=marking an empty place in a written number | birthplace=India | causes=positional notation being possible
+Roman numerals | is_a=number system | has_property=no zero | has_property=letters standing for values | purpose=writing numbers in the Roman world
+binary system | is_a=number system | has_property=base two | purpose=representing numbers in a computer
+abacus | is_a=tool | purpose=doing arithmetic by moving beads | has_property=older than the written algorithm
+average | is_a=statistic | means=a single value standing for a set of values | has_kind=mean | has_kind=median | has_kind=mode
+rounding | is_a=operation | purpose=replacing a number by a nearby simpler one | causes=a loss of precision

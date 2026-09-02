@@ -1,0 +1,94 @@
+# environment.kb — ecology, pollution, resources and what is being done about them.
+#
+# `biology.kb` has `ecosystem`, `food chain` and `biodiversity`; `earth_science.kb` has
+# `greenhouse effect` and `climate change`. Both stop at the mechanism. The half nobody had
+# written down is the *consequence and the response*: what pollution is, what a renewable resource
+# is, what conservation does, what a carbon footprint measures — the vocabulary in which the
+# subject is actually discussed.
+#
+# Written with one restraint: every causal line names a mechanism she can also be asked about, so
+# "what causes global warming" resolves to something with its own entry rather than to a slogan.
+
+# --- the living world ---------------------------------------------------------------------------- #
+environment | is_a=system | means=the surroundings an organism lives in, living and non-living together | has_part=air | has_part=water | has_part=soil | has_part=organisms
+ecology | is_a=discipline | means=the study of how organisms relate to each other and to their surroundings
+biosphere | is_a=system | means=the whole of the Earth where life is found | consists_of=land, water and air with living things in them
+niche | is_a=ecological role | means=the way an organism makes its living within an ecosystem | has_property=two species rarely share one for long
+population of a species | is_a=group | means=all the individuals of one species in one place
+community | is_a=group | means=all the populations living together in one place
+food web | is_a=model | means=all the feeding links in a community taken together | has_property=more realistic than a single food chain
+trophic level | is_a=position in a food chain | has_kind=producer | has_kind=herbivore | has_kind=carnivore | has_property=energy is lost between one level and the next
+consumer | is_a=organism | means=an organism that eats other organisms | has_kind=herbivore | has_kind=carnivore | has_kind=omnivore
+symbiosis | is_a=relationship | means=two species living closely together | has_kind=mutualism | has_kind=parasitism | has_kind=commensalism
+mutualism | is_a=symbiosis | means=a relationship in which both species gain | has_kind=pollination | has_kind=lichen
+food chain length | is_a=property of an ecosystem | means=how many feeding steps it holds | has_property=limited by energy lost at each step
+carrying capacity | is_a=limit | means=the largest population a place can support indefinitely | requires=food, water and space
+keystone species | is_a=species | means=a species whose removal changes the whole community out of proportion to its numbers
+invasive species | is_a=species | means=a species introduced where it has no natural controls | causes=native species being crowded out
+endangered species | is_a=species | means=a species at serious risk of dying out | requires=protection to survive
+extinct species | is_a=species | means=a species with no living members left | has_property=irreversible
+succession | is_a=process | means=the orderly change of a community over time | causes=bare ground becoming woodland if left alone
+decomposition | is_a=process | means=dead material being broken down into simpler substances | requires=decomposers | causes=nutrients returning to the soil
+
+# --- biomes --------------------------------------------------------------------------------------- #
+biome | is_a=region | means=a large area defined by its climate and the life that suits it | has_kind=forest | has_kind=grassland | has_kind=desert | has_kind=tundra | has_kind=wetland
+forest | is_a=biome | has_kind=tropical rainforest | has_kind=temperate forest | has_kind=boreal forest | purpose=storing carbon and holding soil | has_property=high biodiversity
+grassland | is_a=biome | has_property=too dry for forest and too wet for desert | has_kind=savanna | has_kind=prairie
+wetland | is_a=biome | means=land that is waterlogged for much of the year | purpose=filtering water and absorbing floods | has_kind=marsh | has_kind=mangrove swamp
+coral reef | is_a=ecosystem | located_in=warm shallow seas | has_property=among the richest habitats on Earth | requires=stable warm water | causes=coastal protection
+watershed | is_a=region | means=all the land whose rainfall drains to one river | also_known_as=catchment
+
+# --- pollution -------------------------------------------------------------------------------------- #
+pollution | is_a=problem | means=harmful material or energy released into the environment | has_kind=air pollution | has_kind=water pollution | has_kind=soil pollution | has_kind=noise pollution | has_kind=plastic pollution | causes=harm to health and to ecosystems
+pollutant | is_a=substance | means=the material that does the harm | has_kind=particulate matter | has_kind=sulphur dioxide | has_kind=sewage
+air pollution | is_a=pollution | causes=respiratory disease | causes=reduced visibility | occurs_when=fuel is burnt incompletely | requires=cleaner fuels and filters to reduce
+particulate matter | is_a=pollutant | means=tiny solid particles suspended in air | causes=lung damage | has_property=small enough to reach deep into the lungs
+smog | is_a=air pollution | occurs_when=pollutants are trapped under still cold air | causes=poor visibility and breathing difficulty
+acid rain | is_a=pollution | occurs_when=sulphur and nitrogen oxides dissolve in rain | causes=damage to forests, lakes and stone buildings
+water pollution | is_a=pollution | occurs_when=sewage, fertiliser or industrial waste enters a waterway | causes=disease | causes=fish dying
+eutrophication | is_a=process | occurs_when=fertiliser runs into a lake | causes=algal bloom | causes=oxygen being used up and fish dying
+oil spill | is_a=pollution | occurs_when=oil escapes into the sea | causes=seabirds and marine life being coated and poisoned
+plastic pollution | is_a=pollution | causes=animals swallowing or being trapped in plastic | has_property=persists for centuries | requires=less single use plastic to reduce
+microplastic | is_a=pollutant | means=plastic broken into fragments smaller than five millimetres | located_in=oceans, soil and drinking water
+noise pollution | is_a=pollution | causes=stress and hearing damage | occurs_when=traffic, industry or loudspeakers exceed safe levels
+light pollution | is_a=pollution | causes=stars being invisible from cities | causes=disruption to nocturnal animals
+waste | is_a=material | means=material discarded because it is no longer wanted | has_kind=household waste | has_kind=industrial waste | has_kind=electronic waste
+landfill | is_a=site | purpose=burying waste | causes=methane and leachate if unlined
+electronic waste | is_a=waste | means=discarded electrical and electronic equipment | causes=toxic metals entering soil and water | purpose=recovery of valuable metals when recycled
+composting | is_a=process | means=letting organic waste rot under control | purpose=turning waste into soil improver | causes=less material going to landfill
+
+# --- climate ------------------------------------------------------------------------------------------ #
+global warming | is_a=process | means=the long term rise in the Earth's average surface temperature | occurs_when=greenhouse gases build up in the atmosphere | causes=sea level rise | causes=more frequent heatwaves | causes=shifting rainfall patterns
+greenhouse gas | is_a=gas | means=a gas that lets sunlight in and holds heat in | has_kind=carbon dioxide | has_kind=methane | has_kind=nitrous oxide | has_kind=water vapour
+carbon dioxide emissions | is_a=pollution | occurs_when=fossil fuels are burnt | causes=global warming | requires=cleaner energy to reduce
+methane | has_property=traps far more heat per molecule than carbon dioxide | occurs_when=organic matter rots without oxygen
+carbon footprint | is_a=measure | means=the greenhouse gas a person, product or activity is responsible for | purpose=comparing the climate cost of choices
+carbon sink | is_a=system | means=something that takes in more carbon than it gives out | has_kind=forest | has_kind=ocean | purpose=slowing the build up of carbon dioxide
+deforestation | is_a=process | means=the clearing of forest for other uses | causes=loss of habitat | causes=soil erosion | causes=more carbon dioxide in the air
+desertification | is_a=process | means=fertile land turning to desert | occurs_when=land is overgrazed or over-farmed in a dry climate | causes=loss of livelihood
+sea level rise | is_a=process | occurs_when=ice melts and sea water expands as it warms | causes=coastal flooding | causes=salt entering groundwater
+glacier retreat | is_a=process | means=glaciers losing more ice each year than they gain | causes=less summer river flow for the people downstream
+extreme weather | is_a=phenomenon | has_kind=heatwave | has_kind=flood | has_kind=cyclone | has_kind=drought | has_property=becoming more frequent as the climate warms
+heatwave | is_a=extreme weather | means=an unusually long spell of very hot weather | causes=heatstroke | requires=shade, water and rest to survive safely
+Paris Agreement | is_a=treaty | purpose=limiting the rise in global average temperature | involves=national emission targets
+
+# --- resources and the response --------------------------------------------------------------------------- #
+natural resource | is_a=material | means=something useful taken from the natural world | has_kind=renewable resource | has_kind=non-renewable resource
+renewable resource | is_a=natural resource | means=a resource that replenishes on a human timescale | has_kind=solar energy | has_kind=wind | has_kind=timber | requires=being used no faster than it renews
+non-renewable resource | is_a=natural resource | means=a resource with a fixed stock that does not replenish | has_kind=coal | has_kind=petroleum | has_kind=metal ore
+sustainability | is_a=principle | means=meeting present needs without preventing future generations from meeting theirs | requires=resources being used no faster than they renew
+conservation | is_a=activity | purpose=protecting species and habitats from being lost | involves=protected areas | involves=laws against hunting and clearing
+national park | is_a=protected area | purpose=conserving a landscape and its wildlife | has_property=development restricted by law
+wildlife sanctuary | is_a=protected area | purpose=protecting particular species and their habitat
+afforestation | is_a=activity | means=planting trees where there was no forest | causes=carbon being taken up | causes=soil being held
+reforestation | is_a=activity | means=replanting forest that was cleared
+rainwater harvesting | is_a=technique | means=collecting and storing rain where it falls | purpose=recharging groundwater and supplying water in a dry season
+water conservation | is_a=activity | purpose=using less water and wasting less | involves=repairing leaks | involves=drip irrigation
+drip irrigation | is_a=technique | means=delivering water slowly to the root of each plant | causes=much less water used than flooding a field
+solar energy | is_a=renewable resource | requires=sunlight | causes=electricity through a solar panel | has_property=no fuel cost after installation
+wind energy | is_a=renewable resource | requires=wind | causes=electricity through a wind turbine | has_property=intermittent
+biogas | is_a=renewable resource | occurs_when=organic waste rots without oxygen in a sealed tank | purpose=cooking fuel | causes=less firewood being cut
+energy efficiency | is_a=practice | means=getting the same result for less energy | causes=lower emissions and lower bills
+three Rs | is_a=principle | means=reduce, reuse and recycle, in that order of preference | purpose=cutting the amount of waste produced
+environmental impact assessment | is_a=study | purpose=working out what a proposed project would do to its surroundings | requires=being done before the project begins
+sustainable development | is_a=goal | means=development that lasts because it does not exhaust what it depends on | involves=economy | involves=environment | involves=social equity

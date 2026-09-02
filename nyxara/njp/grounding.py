@@ -995,6 +995,38 @@ _ASK_ANYWHERE = re.compile(
 # sentence can ever normalise to this string.
 _CAUSE_OF = "<-causes"
 
+#: "What does X do?" — a reserved marker like :data:`_CAUSE_OF`, and for the same reason: it is
+#: how a question is *read*, never a name anything is stored under.
+#:
+#: The form is genuinely ambiguous and the ambiguity is not resolvable from the surface. "What does
+#: a plumber do" wants ``purpose``; "what does a bat do" wants ``capable_of``; both are the same
+#: five words with a different noun. So it is not resolved from the surface — :meth:`Grounder.answer`
+#: tries both and lets the store decide, which is the move :meth:`_read_polar_surface` already makes
+#: for "is X <phrase>" and for the same reason: **the evidence disambiguates, the grammar cannot.**
+#:
+#: Measured before this existed: the pattern at the foot of the English block read the verb into
+#: ``<p>`` and produced the predicate ``"do"``, which nothing has ever stored. So
+#: ``answer("what does a plumber do?")`` came back UNKNOWN while
+#: ``answer("what is a plumber used for?")`` answered from the same triple.
+_ROLE_OF = "<-does"
+
+#: "What is the <relation> of X?" — a marker, because this form must be allowed to *fail*.
+#:
+#: The pattern is broad by design: reading the relation out of the noun slot covers capital,
+#: currency, symbol, unit, formula, purpose, meaning, birthplace, author, inventor and discoverer
+#: with one line rather than eleven, and every relation added after it for free. The cost is that
+#: it also matches every subject with " of " in its name, and this corpus has eighty-nine of them.
+#: Measured the moment it was added: "what is the Code of Hammurabi?" read as
+#: ``('hammurabi', 'code')``, "what is the Republic of India?" as ``('india', 'republic')``, and
+#: `prepare_knowledge_corpus.unaskable_subjects` — which exists to catch exactly this — went from
+#: 2 to 89.
+#:
+#: So :meth:`Grounder._read_question` treats a match on this marker as a *proposal*: it is accepted
+#: only if the noun folds to a relation something has actually been stored under, and otherwise the
+#: scan continues to the patterns below, where the generic ``what is X`` reads the whole name as
+#: the subject it is. The store decides, again, because the grammar cannot.
+_NOUN_OF = "<-nounof"
+
 # Question forms -> the predicate they are asking about. Same reasoning: a floor, not a ceiling.
 #
 # Ordering is load-bearing. A form that names BOTH a subject and a property ("Ravi ka naam kya
@@ -1096,6 +1128,14 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"\bwhere\s+do(?:es)?\s+(?P<s>.+?)\s+live", "located_in"),
     (r"\bwhere\s+(?:am\s+i|do\s+i)\s+live", "located_in"),
     (r"\bwhere\s+does\s+(?P<s>.+?)\s+work", "works_at"),
+    # Above the bare `where is X` directly below, which is greedy to the end of the line and so
+    # swallows the trailing verb into the subject. Measured: "where is the Taj Mahal located?"
+    # returned the subject ``'the taj mahal located'``, which is nothing's key, so a question about
+    # a fact she holds answered UNKNOWN on one trailing word.
+    (r"\bwhere\s+(?:is|are|was|were)\s+(?P<s>.+?)\s+"
+     r"(?:located|situated|found|placed)\b", "located_in"),
+    (r"\bwhere\s+(?:was|were)\s+(?P<s>.+?)\s+born\b", "birthplace"),
+    (r"\bwhere\s+(?:can\s+)?(?:you|we|one|i)\s+find\s+(?P<s>.+?)\??$", "located_in"),
     (r"\bwhere\s+is\s+(?P<s>.+?)\??$", "located_in"),
     (r"\bwho\s+is\s+(?P<s>.+?)\??$", "is_a"),
 
@@ -1158,6 +1198,43 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # "sparrow kya kar sakta hai" — verb-final, the same question.
     (r"^(?P<s>.+?)\s+(?:kya|क्या)\s+(?:kar\s+sakta|kar\s+sakti|कर\s+सकता|कर\s+सकती)\b",
      "capable_of"),
+
+    # --- The forms an ordinary person uses, which this table did not have --------------------- #
+    #
+    # Measured over 25 everyday phrasings of questions the store could already answer: **18 of
+    # them did not parse**, and every one failed the same way — the generic `what is X` directly
+    # below matched first and swallowed the whole tail into the subject, so "what is the capital
+    # of France" asked ``is_a`` about an entity called "capital of france". The facts were in the
+    # store, reachable by `_lookup`, and unaskable in the words anybody actually uses.
+    #
+    # **The noun form is one pattern, not eleven.** ``tell me the <p> of X`` has been here since
+    # the beginning and is the phrasing nobody uses; ``what is the <p> of X`` is the one everybody
+    # uses and was absent. Reading the relation out of the ``<p>`` slot and folding it through
+    # `_PREDICATE_ALIASES` covers capital, currency, symbol, unit, formula, purpose, meaning,
+    # birthplace, author, inventor and discoverer at once — and every relation added later,
+    # without a line each. It sits *below* the specific noun forms above it (`name`, `cause`,
+    # `reason`, `effect`), so those keep their readings, and *above* the generic, so it wins.
+    (r"\bwhat(?:'s| is|\s+are)\s+(?:the\s+)?(?P<p>\w+)\s+of\s+(?P<s>.+?)\??$", _NOUN_OF),
+
+    # "Who invented the telephone" and "who discovered penicillin" are two of the most-asked
+    # general-knowledge questions there are, and neither parsed: `who is X` above matches only the
+    # copula, so these fell to the generic and read the verb as part of a subject.
+    (r"\bwho\s+(?:invented|created|built|designed|made|founded)\s+(?P<s>.+?)\??$", "inventor"),
+    (r"\bwho\s+(?:discovered|found\s+out|identified)\s+(?P<s>.+?)\??$", "discoverer"),
+    (r"\bwho\s+(?:wrote|authored|composed|painted)\s+(?P<s>.+?)\??$", "author"),
+
+    # The remaining phrasings, each one a tail the generic was swallowing.
+    (r"\bwhat\s+(?:is|are)\s+(?P<s>.+?)\s+(?:made|composed|built)\s+(?:out\s+)?of\b",
+     "consists_of"),
+    (r"\bwhat\s+(?:is|are)\s+(?P<s>.+?)\s+also\s+(?:called|known\s+as|named)\b",
+     "also_known_as"),
+    (r"\bwhat\s+(?:is|are)\s+(?P<s>.+?)\s+a\s+(?:kind|type|form|sort)\s+of\b", "is_a"),
+    (r"\bwhat\s+(?:is|are)\s+(?:needed|required|necessary)\s+for\s+(?P<s>.+?)\??$",
+     "requires"),
+    (r"\bwhat\s+(?:is|are)\s+(?P<s>.+?)\s+(?:needed|required|used)\s+for\b", "purpose"),
+    # "What does a plumber do" — read as a marker rather than a relation, because the surface
+    # cannot say whether it is asking `purpose` or `capable_of`. See :data:`_ROLE_OF`.
+    (r"\bwhat\s+(?:does|do)\s+(?:an?\s+|the\s+)?(?P<s>.+?)\s+do\b", _ROLE_OF),
 
     (r"\bwhat\s+is\s+(?P<s>.+?)\??$", "is_a"),
     # The predicate is read out of the verb itself and folded by `_PREDICATE_ALIASES`, so this
@@ -1453,15 +1530,29 @@ _POLAR_SURFACE = re.compile(
     r"^(?P<verb>is|are|was|were|does|do|did|can|could|has|have)\s+(?P<rest>.+?)\s*\??$")
 
 #: Which relation each opening verb reaches for first. The evidence still decides — this only sets
-#: the order the two are tried in, because "can X ..." is far more often a capability and
+#: the order they are tried in, because "can X ..." is far more often a capability and
 #: "is X ..." far more often a property, and trying the likelier one first costs nothing.
+#:
+#: ``is_a`` was missing from every row of this table and from the default, and the omission cost
+#: the single commonest general-knowledge question there is. Measured on the shipped world corpus
+#: with ``sun is_a star`` asserted, ``answer("is the sun a star?")`` returned UNKNOWN with
+#: ``why="no claim either way about this pair"`` — the subject resolved, the fact was in the
+#: store, and the only two relations the scan ever tried were ``has_property`` and ``capable_of``.
+#: "Is a whale a mammal", "is copper a metal", "is Peru a country": all of them, all UNKNOWN.
+#:
+#: It goes **last** rather than first, in every row. A membership question is the commonest
+#: reading of "is X a Y" but not of "does X Y" or "can X Y", and a relation tried before the
+#: verb's own preference would answer a capability question out of the taxonomy.
 _POLAR_PREFERENCE: Dict[str, Tuple[str, ...]] = {
-    "can": ("capable_of", "has_property"), "could": ("capable_of", "has_property"),
-    "does": ("capable_of", "has_property"), "do": ("capable_of", "has_property"),
-    "did": ("capable_of", "has_property"),
-    "has": ("has_part", "has_property"), "have": ("has_part", "has_property"),
+    "can": ("capable_of", "has_property", "is_a"),
+    "could": ("capable_of", "has_property", "is_a"),
+    "does": ("capable_of", "has_property", "is_a"),
+    "do": ("capable_of", "has_property", "is_a"),
+    "did": ("capable_of", "has_property", "is_a"),
+    "has": ("has_part", "has_property", "is_a"),
+    "have": ("has_part", "has_property", "is_a"),
 }
-_POLAR_DEFAULT: Tuple[str, ...] = ("has_property", "capable_of")
+_POLAR_DEFAULT: Tuple[str, ...] = ("has_property", "capable_of", "is_a")
 
 
 class Grounder:
@@ -2441,6 +2532,16 @@ class Grounder:
             if not predicate:
                 return self._ask_graph(question, out)
 
+            # "What does X do?" names no relation, and the surface cannot say which of two it
+            # wants — see :data:`_ROLE_OF`. So the store decides: `purpose` first because an
+            # artefact or a role is the commoner subject of the question, `capable_of` when the
+            # subject holds no purpose. Neither is guessed; whichever has evidence is the reading,
+            # and if neither has any the answer stays honestly UNKNOWN.
+            if predicate == _ROLE_OF:
+                predicate = next(
+                    (candidate for candidate in ("purpose", "capable_of")
+                     if self._lookup(subject, candidate)), "purpose")
+
             # An inverse question reads the same edges from the far end; everything downstream —
             # corroboration, the tri-state, the `why` line — is identical, because it is the same
             # evidence. Only the direction of the scan and which end becomes the answer differ.
@@ -2846,6 +2947,30 @@ class Grounder:
             groups = match.groupdict()
             pred = predicate or self._predicate(_clean(groups.get("p", "") or ""))
             subject = self.resolve(groups.get("s") or SELF_ENTITY)
+            # A proposal rather than a reading — see :data:`_NOUN_OF`. Accepted only where the noun
+            # names a relation the package can actually store; otherwise the " of " belongs to the
+            # subject's own name and the scan continues to the generic form below.
+            if pred == _NOUN_OF:
+                folded = self._predicate(_clean(groups.get("p", "") or ""))
+                whole = f"{_clean(groups.get('p', '') or '')} of {subject}".strip()
+                # Two tests, and the second is the one that makes this form safe.
+                #
+                # The relation must be one the package can store — known to the tables, or known
+                # to the store, so a relation a later corpus introduces is accepted without anyone
+                # having to remember this line.
+                #
+                # And **the whole phrase must not itself be a known entity.** "Age of Exploration"
+                # and "unit of measurement" are subjects; ``age`` and ``unit`` are also relations;
+                # and without this check the relation reading wins and a question about the subject
+                # is answered about something else. The store knows its own subjects, which is the
+                # same signal `_read_polar_surface` uses to find where a subject ends, and it is
+                # the only signal that can tell these two readings apart.
+                if (folded
+                        and (folded in _KNOWN_PREDICATES
+                             or any(held == folded for _s, held in self.facts))
+                        and not self._known_entity(whole)):
+                    return subject, folded
+                continue
             if pred:
                 return subject, pred
         # No pattern read this question. Before the compiler that ended the turn — measured over
@@ -2903,6 +3028,12 @@ class Grounder:
             readings: List[Tuple[str, str]] = []
             if tail and folded in _KNOWN_PREDICATES:
                 readings.append((folded, tail))
+            # The object's leading article needs no handling here and it is worth saying why,
+            # because it looks like it should: "is the sun a star" reaches this with the phrase
+            # "a star" while the store files the object as "star". `_key` routes through
+            # `canon.canonical_entity`, which strips a leading a/an/the from both ends, so the two
+            # keys already meet. A strip added here scored identically on 300 membership and 300
+            # taxonomy items — dead code with a plausible story attached, which is worse than none.
             readings.extend((predicate, phrase) for predicate in order)
             for predicate, target in readings:
                 wanted = self._key(target)
@@ -3467,6 +3598,25 @@ _PREDICATE_ALIASES: Dict[str, str] = {
     "job": "works_at", "work": "works_at", "works": "works_at", "employer": "works_at",
     "owns": "owns", "own": "owns", "has": "owns",
     "kind": "is_a", "type": "is_a",
+    # The nominal forms of relations that already had a verbal one, and the fold is the whole fix:
+    # "what is the meaning of X" and "what does X mean" are one question, and without these rows
+    # the first asked for a relation called `meaning` that nothing has ever written.
+    "meaning": "means", "definition": "means", "defines": "means",
+    "example": "has_kind", "examples": "has_kind", "varieties": "has_kind",
+    "contain": "has_part", "contains": "has_part", "include": "has_part", "includes": "has_part",
+    "made_of": "consists_of", "composed_of": "consists_of", "composition": "consists_of",
+    "uses": "purpose", "use": "purpose", "function": "purpose", "role": "purpose",
+    "inventor": "inventor", "invented_by": "inventor", "creator": "inventor",
+    "discoverer": "discoverer", "discovered_by": "discoverer",
+    "author": "author", "written_by": "author", "writer": "author",
+    # The noun relations the shipped world corpus is built on. They map to themselves, which looks
+    # redundant and is not: `_KNOWN_PREDICATES` is derived from this table, and a relation absent
+    # from it is one `_NOUN_OF` will refuse to accept — so without these rows "what is the capital
+    # of France" is read as a question about an entity called "capital of france".
+    "capital": "capital", "currency": "currency", "symbol": "symbol",
+    "unit": "unit", "formula": "formula", "birthplace": "birthplace",
+    "has_kind": "has_kind", "has_part": "has_part", "consists_of": "consists_of",
+    "also_known_as": "also_known_as", "occurs_when": "occurs_when", "capable_of": "capable_of",
     # The relations a seed pattern renames on the way in. "animal needs water" is *stored* as
     # `requires` by the pattern that reads it, and "what does an animal need" asks for `needs` —
     # so without this fold the fact is written under a key no question ever forms. Same class of

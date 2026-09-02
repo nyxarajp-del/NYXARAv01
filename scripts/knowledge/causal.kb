@@ -1,0 +1,126 @@
+# causal.kb — chains, not links: things that cause things that cause things.
+#
+# `CognitiveLearningCore.reach` walks a relation past its first hop, and it was almost never able
+# to. Measured over 80 subjects that cause something: **4 reached a second hop**, and the reason
+# turned out to be the corpus rather than the walk — only 35 two-hop causal chains existed in
+# 13,483 facts to be found. Every domain file states what a thing causes and almost never states
+# what *that* causes, because a writer describing one subject naturally stops at its consequences.
+#
+# So this file is written the other way round: each line is chosen because its object is a subject
+# somewhere else, so the walk has somewhere to go. Nothing here is new knowledge about a new thing
+# — it is the joins between things already in the corpus, which is exactly what a chain is.
+#
+# The rule every line follows: **each link is separately true and separately defensible.** A chain
+# assembled from three real links is a real inference; a chain assembled from one real link and two
+# convenient ones is a story, and the walk cannot tell them apart, so the writing has to.
+
+# --- water, heat and weather ---------------------------------------------------------------- #
+sunlight | causes=evaporation | causes=photosynthesis | causes=warming of the ground
+evaporation | causes=water vapour | causes=cooling of the surface it leaves
+water vapour | causes=condensation | causes=humidity
+cloud formation | causes=precipitation | causes=reduced sunlight at the ground
+precipitation | causes=runoff | causes=soil moisture
+runoff | causes=erosion | causes=river flow
+erosion | causes=loss of topsoil | causes=sediment in rivers
+loss of topsoil | causes=lower crop yield
+river flow | causes=groundwater recharge
+lower crop yield | causes=food shortage | causes=higher food prices
+food shortage | causes=malnutrition
+higher food prices | causes=inflation
+
+# --- heat, fire and the atmosphere ----------------------------------------------------------- #
+heat | causes=evaporation | causes=convection
+convection | causes=wind
+wind | causes=erosion | causes=dispersal of seeds
+waves | causes=coastal erosion
+combustion | causes=heat | causes=smoke
+smoke | causes=air pollution | causes=reduced visibility
+air pollution | causes=acid rain
+respiratory disease | causes=reduced lung function
+greenhouse effect | causes=global warming
+global warming | causes=ice melting | causes=extreme weather
+ice melting | causes=sea level rise
+coastal flooding | causes=displacement of people
+extreme weather | causes=crop failure | causes=damage to buildings
+crop failure | causes=food shortage
+deforestation | causes=erosion | causes=habitat loss | causes=carbon dioxide
+habitat loss | causes=species decline
+species decline | causes=extinction
+
+# --- the body ------------------------------------------------------------------------------------ #
+fever | causes=dehydration
+dehydration | causes=fatigue | causes=headache
+fatigue | causes=reduced concentration
+reduced concentration | causes=mistakes
+exercise | causes=increased heart rate | causes=sweating | causes=fitness
+increased heart rate | causes=greater blood flow
+sweating | causes=cooling of the body | causes=water loss
+water loss | causes=dehydration
+poor sleep | causes=fatigue | causes=weakened immunity
+weakened immunity | causes=infection
+smoking | causes=lung damage
+lung damage | causes=reduced lung function
+mosquito bite | causes=itching | causes=malaria in an infected area
+malaria | causes=fever
+
+# --- plants and food ------------------------------------------------------------------------------- #
+glucose | causes=stored energy
+irrigation | causes=soil moisture | causes=higher yield
+soil moisture | causes=germination
+germination | causes=seedling growth | causes=root development
+root development | causes=better water uptake
+fertiliser | causes=faster growth | causes=runoff of nutrients
+runoff of nutrients | causes=eutrophication
+eutrophication | causes=oxygen depletion
+algal bloom | causes=oxygen depletion
+oxygen depletion | causes=fish dying
+overgrazing | causes=loss of topsoil | causes=desertification
+crop rotation | causes=soil fertility
+soil fertility | causes=higher yield
+higher yield | causes=food surplus
+food surplus | causes=lower food prices | causes=trade
+
+# --- machines, power and cities ------------------------------------------------------------------------ #
+burning coal | causes=steam | causes=carbon dioxide | causes=air pollution
+steam | causes=turbine rotation
+turbine rotation | causes=electricity generation
+electricity generation | causes=lighting | causes=refrigeration | causes=waste heat
+refrigeration | causes=longer food storage
+longer food storage | causes=less food waste
+waste heat | causes=warming of the surroundings
+industrialisation | causes=urbanisation | causes=air pollution | causes=higher output
+urbanisation | causes=crowding | causes=demand for housing
+crowding | causes=faster disease spread
+faster disease spread | causes=epidemic
+demand for housing | causes=higher rents
+traffic congestion | causes=delay | causes=air pollution | causes=fuel waste
+fuel waste | causes=higher costs
+mechanisation | causes=higher output | causes=fewer jobs in that task
+higher output | causes=lower unit cost
+lower unit cost | causes=lower prices
+lower prices | causes=higher demand
+
+# --- learning, work and society ------------------------------------------------------------------------- #
+practice | causes=confidence
+skill | causes=better performance | causes=higher earnings
+better performance | causes=recognition
+education | causes=literacy | causes=skill | causes=informed choices
+literacy | causes=access to information
+access to information | causes=informed choices
+informed choices | causes=better outcomes
+sanitation | causes=fewer infections
+fewer infections | causes=lower child mortality
+vaccination | causes=immunity | causes=fewer infections
+immunity | causes=protection against reinfection
+clean water | causes=fewer infections
+poverty | causes=malnutrition | causes=limited access to education
+limited access to education | causes=fewer opportunities
+unemployment | causes=loss of income
+loss of income | causes=poverty
+inflation | causes=reduced purchasing power
+reduced purchasing power | causes=lower demand
+trust | causes=cooperation | causes=lower transaction costs
+cooperation | causes=shared effort
+misinformation | causes=false beliefs
+false beliefs | causes=poor decisions
+poor decisions | causes=avoidable harm

@@ -1,0 +1,136 @@
+# world.kb — more countries, and the organisations, landmarks and lines that span them.
+#
+# `geography.kb` carries about forty countries with their capitals and currencies, which is the
+# right shape and not enough of it, and it stops at the border: the United Nations gets one line
+# in `society.kb` and nothing else that operates between countries has an entry at all. So "what
+# is the WHO", "where is Machu Picchu", "what is the Commonwealth" and half the countries on the
+# map had no answer.
+#
+# `capital` and `currency` are functional — one value each — so a country appears here only if it
+# is not already in `geography.kb`, and the two files never state the same pair twice.
+
+# --- countries: Asia --------------------------------------------------------------------------- #
+Afghanistan | is_a=country | located_in=Asia | capital=Kabul | currency=Afghani
+Kazakhstan | is_a=country | located_in=Asia | capital=Astana | currency=Tenge | has_property=the largest landlocked country
+Uzbekistan | is_a=country | located_in=Asia | capital=Tashkent | currency=Som
+Iraq | is_a=country | located_in=Asia | capital=Baghdad | currency=Iraqi dinar
+Israel | is_a=country | located_in=Asia | capital=Jerusalem | currency=Shekel
+Jordan | is_a=country | located_in=Asia | capital=Amman | currency=Jordanian dinar
+Lebanon | is_a=country | located_in=Asia | capital=Beirut | currency=Lebanese pound
+Syria | is_a=country | located_in=Asia | capital=Damascus | currency=Syrian pound
+Yemen | is_a=country | located_in=Asia | capital=Sanaa | currency=Yemeni rial
+Oman | is_a=country | located_in=Asia | capital=Muscat | currency=Omani rial
+Qatar | is_a=country | located_in=Asia | capital=Doha | currency=Qatari riyal
+Kuwait | is_a=country | located_in=Asia | capital=Kuwait City | currency=Kuwaiti dinar
+United Arab Emirates | is_a=country | located_in=Asia | capital=Abu Dhabi | currency=Dirham | has_part=Dubai
+Bahrain | is_a=country | located_in=Asia | capital=Manama | currency=Bahraini dinar
+Myanmar | is_a=country | located_in=Asia | capital=Naypyidaw | currency=Kyat
+Malaysia | is_a=country | located_in=Asia | capital=Kuala Lumpur | currency=Ringgit
+Singapore | is_a=country | located_in=Asia | capital=Singapore City | currency=Singapore dollar | has_property=a city state
+Philippines | is_a=country | located_in=Asia | capital=Manila | currency=Philippine peso | has_property=an archipelago
+Cambodia | is_a=country | located_in=Asia | capital=Phnom Penh | currency=Riel
+Laos | is_a=country | located_in=Asia | capital=Vientiane | currency=Kip
+Mongolia | is_a=country | located_in=Asia | capital=Ulaanbaatar | currency=Tugrik
+Bhutan | is_a=country | located_in=Asia | capital=Thimphu | currency=Ngultrum | has_property=measures Gross National Happiness
+Maldives | is_a=country | located_in=Asia | capital=Male | currency=Rufiyaa | has_property=the lowest lying country
+
+# --- countries: Europe --------------------------------------------------------------------------- #
+Austria | is_a=country | located_in=Europe | capital=Vienna | currency=Euro
+Belgium | is_a=country | located_in=Europe | capital=Brussels | currency=Euro | has_property=hosts the headquarters of the European Union
+Denmark | is_a=country | located_in=Europe | capital=Copenhagen | currency=Danish krone
+Finland | is_a=country | located_in=Europe | capital=Helsinki | currency=Euro
+Czech Republic | is_a=country | located_in=Europe | capital=Prague | currency=Czech koruna
+Hungary | is_a=country | located_in=Europe | capital=Budapest | currency=Forint
+Romania | is_a=country | located_in=Europe | capital=Bucharest | currency=Leu
+Ukraine | is_a=country | located_in=Europe | capital=Kyiv | currency=Hryvnia
+Iceland | is_a=country | located_in=Europe | capital=Reykjavik | currency=Icelandic krona | has_property=volcanic and geothermally powered
+Croatia | is_a=country | located_in=Europe | capital=Zagreb | currency=Euro
+Serbia | is_a=country | located_in=Europe | capital=Belgrade | currency=Serbian dinar
+Bulgaria | is_a=country | located_in=Europe | capital=Sofia | currency=Lev
+Vatican City | is_a=country | located_in=Europe | has_property=the smallest country in the world | purpose=the seat of the Catholic Church
+
+# --- countries: Africa and the Americas ------------------------------------------------------------ #
+Algeria | is_a=country | located_in=Africa | capital=Algiers | currency=Algerian dinar | has_property=the largest country in Africa
+Sudan | is_a=country | located_in=Africa | capital=Khartoum | currency=Sudanese pound
+Uganda | is_a=country | located_in=Africa | capital=Kampala | currency=Ugandan shilling
+Zimbabwe | is_a=country | located_in=Africa | capital=Harare
+Zambia | is_a=country | located_in=Africa | capital=Lusaka | currency=Kwacha
+Senegal | is_a=country | located_in=Africa | capital=Dakar
+Congo | is_a=country | located_in=Africa | capital=Kinshasa | has_part=Congo Basin
+Madagascar | is_a=country | located_in=Africa | capital=Antananarivo | has_property=an island with many species found nowhere else
+Cuba | is_a=country | located_in=the Caribbean | capital=Havana | currency=Cuban peso
+Jamaica | is_a=country | located_in=the Caribbean | capital=Kingston
+Venezuela | is_a=country | located_in=South America | capital=Caracas | has_part=Angel Falls
+Ecuador | is_a=country | located_in=South America | capital=Quito | has_part=Galapagos Islands
+Bolivia | is_a=country | located_in=South America | capital=La Paz | has_part=Salar de Uyuni
+Uruguay | is_a=country | located_in=South America | capital=Montevideo
+Panama | is_a=country | located_in=Central America | capital=Panama City | has_part=Panama Canal
+Fiji | is_a=country | located_in=Oceania | capital=Suva | has_property=an island nation in the Pacific
+Papua New Guinea | is_a=country | located_in=Oceania | capital=Port Moresby | has_property=among the most linguistically diverse countries
+
+# --- what a country is made of ----------------------------------------------------------------------- #
+nation | is_a=group of people | means=a people who see themselves as one community | has_property=not the same thing as a state
+state | is_a=political entity | means=an organised political community under one government | has_part=territory | has_part=population | has_part=government
+border | is_a=boundary | means=the line where one country's territory ends and another's begins | causes=customs and passport checks
+passport | is_a=document | purpose=identifying a traveller and their nationality | requires=being issued by a government
+visa | is_a=permission | purpose=allowing a foreigner to enter a country for a stated reason and time
+citizenship | is_a=status | means=full membership of a state, with its rights and duties | requires=birth, descent or naturalisation
+capital city | means=the city where a country's government sits
+national flag | is_a=symbol | purpose=standing for a country | has_property=its colours and emblems usually carry a stated meaning
+national anthem | is_a=song | purpose=standing for a country at formal occasions
+sovereignty | is_a=principle | means=a state's authority over its own territory being final | causes=other states having no right to rule inside it
+colonialism | is_a=historical system | means=one country ruling and exploiting another people's territory | causes=borders drawn without regard to the people inside them
+independence | is_a=event | means=a territory becoming a sovereign state | occurs_when=colonial rule ends
+
+# --- organisations between countries ------------------------------------------------------------------- #
+international organisation | is_a=institution | means=a body whose members are states | has_kind=United Nations | has_kind=World Health Organization | has_kind=World Trade Organization
+World Health Organization | is_a=international organisation | purpose=coordinating international public health | part_of=United Nations | located_in=Geneva | also_known_as=WHO
+UNICEF | is_a=international organisation | purpose=protecting the rights and welfare of children | part_of=United Nations
+UNESCO | is_a=international organisation | purpose=cooperation in education, science and culture | part_of=United Nations | involves=World Heritage Sites
+World Trade Organization | is_a=international organisation | purpose=setting and enforcing the rules of trade between countries
+International Monetary Fund | is_a=international organisation | purpose=lending to countries in financial difficulty and monitoring the world economy
+World Bank | is_a=international organisation | purpose=lending for development projects in poorer countries
+Security Council | is_a=body | part_of=United Nations | purpose=deciding on matters of international peace and security | has_property=five permanent members with a veto
+General Assembly | is_a=body | part_of=United Nations | purpose=where every member state has one vote
+International Court of Justice | is_a=court | purpose=settling legal disputes between states | located_in=The Hague
+European Union | is_a=international organisation | means=a union of European states with a single market | has_part=European Parliament | causes=free movement of goods and people among members
+NATO | is_a=alliance | purpose=collective defence among its members | has_property=an attack on one is treated as an attack on all
+Commonwealth of Nations | is_a=international organisation | means=an association of states, most of them formerly under British rule
+ASEAN | is_a=international organisation | located_in=Southeast Asia | purpose=economic and political cooperation among its members
+BRICS | is_a=group of countries | means=a grouping of major emerging economies | involves=Brazil, Russia, India, China and South Africa
+G20 | is_a=group of countries | purpose=coordinating on the world economy | has_property=its members produce most of the world's output
+OPEC | is_a=international organisation | purpose=coordinating the petroleum policies of its member countries
+Red Cross | is_a=organisation | purpose=humanitarian relief in war and disaster | has_property=neutral by charter
+Amnesty International | is_a=organisation | purpose=campaigning for human rights
+Greenpeace | is_a=organisation | purpose=campaigning on environmental issues
+Nobel Prize | is_a=prize | purpose=recognising outstanding contributions in named fields | located_in=Sweden | has_kind=Nobel Prize in Literature | has_kind=Nobel Peace Prize
+Nobel Peace Prize | is_a=Nobel Prize | purpose=recognising work for peace | located_in=Norway
+World Heritage Site | is_a=designation | purpose=marking a place of outstanding value to humanity | requires=listing by UNESCO
+
+# --- landmarks and lines on the map ------------------------------------------------------------------------ #
+Machu Picchu | is_a=archaeological site | located_in=Peru | is_a=World Heritage Site | has_property=an Inca city high in the Andes
+Petra | is_a=archaeological site | located_in=Jordan | has_property=buildings carved into rose coloured rock
+Stonehenge | is_a=monument | located_in=England | has_property=a prehistoric ring of standing stones
+Eiffel Tower | is_a=monument | located_in=Paris | consists_of=wrought iron | has_property=built for a world fair
+Statue of Liberty | is_a=monument | located_in=New York | purpose=a gift from France marking friendship and liberty
+Christ the Redeemer | is_a=monument | located_in=Rio de Janeiro
+Angkor Wat | is_a=temple | located_in=Cambodia | has_property=the largest religious monument in the world
+Forbidden City | is_a=palace complex | located_in=Beijing | purpose=the imperial seat of Ming and Qing China
+Acropolis | is_a=archaeological site | located_in=Athens | has_part=Parthenon
+Sydney Opera House | is_a=building | located_in=Sydney | has_property=a roof of shell shaped shapes
+Niagara Falls | is_a=waterfall | located_in=the border of Canada and the United States
+Angel Falls | is_a=waterfall | located_in=Venezuela | has_property=the highest uninterrupted waterfall
+Dead Sea | is_a=lake | has_property=the lowest land surface on Earth | has_property=so salty that people float
+Lake Baikal | is_a=lake | located_in=Russia | has_property=the deepest lake in the world
+Caspian Sea | is_a=lake | has_property=the largest inland body of water
+Suez Canal | is_a=canal | located_in=Egypt | purpose=linking the Mediterranean and the Red Sea | causes=a far shorter route between Europe and Asia
+Panama Canal | is_a=canal | located_in=Panama | purpose=linking the Atlantic and the Pacific | has_part=lock
+Tropic of Cancer | is_a=line of latitude | means=the northern limit of where the Sun can be overhead
+Tropic of Capricorn | is_a=line of latitude | means=the southern limit of where the Sun can be overhead
+Arctic Circle | is_a=line of latitude | means=the line north of which the Sun does not set at midsummer
+hemisphere | is_a=half of the Earth | has_kind=northern hemisphere | has_kind=southern hemisphere | means=half the globe, divided by the equator or a meridian
+archipelago | is_a=landform | means=a group or chain of islands
+strait | is_a=waterway | means=a narrow channel of water joining two larger bodies
+isthmus | is_a=landform | means=a narrow strip of land joining two larger land masses
+delta of a river | is_a=landform | occurs_when=a river drops its sediment as it meets the sea | has_property=very fertile
+oasis | is_a=place | means=a fertile spot in a desert where groundwater reaches the surface

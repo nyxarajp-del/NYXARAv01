@@ -14,7 +14,9 @@ from __future__ import annotations
 import pytest
 
 from nyxara.njp.brain import NJPBrain
-from nyxara.njp.grounding import SELF_ENTITY, Epistemic, Grounder
+from nyxara.njp.grounding import (
+    SELF_ENTITY, Epistemic, GroundedTriple, Grounder, _ROLE_OF, _clean,
+)
 
 
 @pytest.fixture()
@@ -350,3 +352,90 @@ def test_a_list_whose_subject_names_nothing_is_refused():
     got = grounder.ground("Here are a few tips that help you, stay organized and be "
                           "productive.").triples
     assert not [t for t in got if t.source == "enumeration"]
+
+
+# --------------------------------------------------------------------------- #
+# The question grammar — the forms an ordinary person uses
+# --------------------------------------------------------------------------- #
+#: Every one of these was measured failing before `_NOUN_OF` and the block above the generic
+#: ``what is X`` were added: 18 of 25 everyday phrasings of questions the store could already
+#: answer did not parse, and each failed the same way — the generic pattern matched first and
+#: swallowed the tail into the subject, so "what is the capital of France" asked ``is_a`` about an
+#: entity named "capital of france".
+_EVERYDAY_FORMS = (
+    ("What is the purpose of {s}?", "purpose"),
+    ("What is the capital of {s}?", "capital"),
+    ("What is the currency of {s}?", "currency"),
+    ("What is the symbol of {s}?", "symbol"),
+    ("What is the unit of {s}?", "unit"),
+    ("What is the formula of {s}?", "formula"),
+    ("What is the meaning of {s}?", "means"),
+    ("What is the birthplace of {s}?", "birthplace"),
+    ("Who invented {s}?", "inventor"),
+    ("Who discovered {s}?", "discoverer"),
+    ("Who wrote {s}?", "author"),
+    ("What is {s} made of?", "consists_of"),
+    ("What is {s} composed of?", "consists_of"),
+    ("What is {s} also called?", "also_known_as"),
+    ("What is {s} also known as?", "also_known_as"),
+    ("What is {s} a kind of?", "is_a"),
+    ("Where is {s} located?", "located_in"),
+    ("Where was {s} born?", "birthplace"),
+    ("What is needed for {s}?", "requires"),
+    ("What are examples of {s}?", "has_kind"),
+    ("What does {s} contain?", "has_part"),
+)
+
+
+@pytest.mark.parametrize("template,predicate", _EVERYDAY_FORMS)
+def test_an_everyday_phrasing_reads_back_as_itself(template, predicate):
+    """Subject *and* predicate, because getting one right and the other wrong reads as fine."""
+    grounder = Grounder()
+    probe = "solar eclipse"          # two words on purpose; one-word subjects hide the failure
+    subject, read = grounder._read_question(_clean(template.format(s=probe)).lower())
+    assert (subject, read) == (probe, predicate), template
+
+
+def test_what_does_x_do_is_resolved_from_the_store_not_from_the_surface():
+    """The form is ambiguous and the grammar cannot settle it; the evidence can.
+
+    "What does a plumber do" wants `purpose` and "what does a bat do" wants `capable_of`, and the
+    five words are identical. So `_read_question` returns a marker and `answer` tries both — the
+    move `_read_polar_surface` already makes for "is X <phrase>", for the same reason.
+    """
+    grounder = Grounder()
+    subject, read = grounder._read_question(_clean("what does a plumber do?").lower())
+    assert (subject, read) == ("plumber", _ROLE_OF)
+
+    # `purpose` arrives from prose; `capable_of` is asserted the way the world corpus asserts it,
+    # because no seed pattern writes that relation from a sentence — "a bat can fly" is extracted
+    # as ``('bat', 'fly', '')``. That is a read/write asymmetry of its own and not this test's
+    # subject; what is under test is which relation the *question* resolves to.
+    grounder.ground("a plumber is used for fitting pipes")
+    grounder._assert(GroundedTriple(subject="bat", predicate="capable_of", object="fly",
+                                    confidence=0.9, source="test"))
+    assert "fitting" in grounder.answer("what does a plumber do?").text
+    assert grounder.answer("what does a bat do?").text == "fly"
+
+
+def test_a_subject_whose_name_contains_of_is_not_read_as_a_relation():
+    """The cost of the broad noun form, and the check that pays it.
+
+    ``what is the <p> of X`` covers eleven relations with one line and would also read every
+    subject with " of " in its name as a relation about a shorter subject. Measured the moment it
+    was added: "what is the Code of Hammurabi" read as ``('hammurabi', 'code')`` and the corpus
+    builder's own unaskable count went from 2 to 89. Two things stop it — the noun must name a
+    relation something is stored under, and the whole phrase must not itself be a known entity.
+    """
+    grounder = Grounder()
+    # Nothing is stored, so `code` names no relation: the whole phrase is the subject.
+    assert grounder._read_question(_clean("what is the code of hammurabi?").lower()) == (
+        "code of hammurabi", "is_a")
+
+    # `age` *is* a relation, and "age of exploration" is also a subject. The subject wins.
+    grounder.ground("the age of exploration is a historical period")
+    assert grounder._read_question(_clean("what is the age of exploration?").lower()) == (
+        "age of exploration", "is_a")
+    # ...and the relation reading still works where the phrase is not a subject.
+    assert grounder._read_question(_clean("what is the age of the universe?").lower()) == (
+        "universe", "age")

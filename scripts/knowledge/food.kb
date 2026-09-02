@@ -1,0 +1,115 @@
+# food.kb — food, nutrition, cooking, agriculture and where what is eaten comes from.
+#
+# everyday.kb has `food`, `fruit`, `vegetable`, `rice`, `wheat`, `bread`, `milk`, `egg`, `tea`,
+# `cooking` — the objects in a kitchen. It has nothing about *why* any of them is eaten, which is
+# the half of this subject that generalises: a nutrient is a category with members, a cooking
+# method is a process with a cause, and a crop is a plant with a growing condition.
+#
+# Nutrition claims are written at the level a fact store can defend — "protein is needed for
+# growth and repair" — and never as advice about a person, because the store has no way to hold
+# who it is advice for.
+
+# --- what food is ------------------------------------------------------------------------------- #
+food | is_a=substance | purpose=supplying an organism with energy and materials | consists_of=nutrients | requires=digestion to be used
+nutrient | is_a=substance | means=a component of food the body needs | has_kind=carbohydrate | has_kind=protein | has_kind=fat | has_kind=vitamin | has_kind=dietary mineral | has_kind=water | has_kind=dietary fibre
+macronutrient | is_a=nutrient | means=a nutrient needed in large amounts | has_kind=carbohydrate | has_kind=protein | has_kind=fat
+micronutrient | is_a=nutrient | means=a nutrient needed in small amounts | has_kind=vitamin | has_kind=dietary mineral
+carbohydrate | is_a=macronutrient | has_kind=dietary fibre | consists_of=carbon, hydrogen and oxygen
+starch | is_a=carbohydrate | located_in=grains, potatoes and pulses | means=a long chain of glucose units | requires=digestion to become glucose
+sugar | is_a=carbohydrate | has_property=sweet | has_kind=glucose | has_kind=sucrose | has_kind=lactose | causes=a quick rise in blood glucose
+dietary fibre | is_a=carbohydrate | has_property=not digested by the body | purpose=keeping the gut moving | located_in=vegetables, fruit and whole grains
+protein | is_a=macronutrient | purpose=growth and repair of tissue | located_in=pulses, eggs, milk, meat and fish
+amino acid | is_a=molecule | means=the unit a protein is built from | has_kind=essential amino acid
+fat | is_a=macronutrient | purpose=storing energy and carrying some vitamins | has_kind=saturated fat | has_kind=unsaturated fat | has_property=more energy per gram than carbohydrate
+vitamin | is_a=micronutrient | means=an organic compound needed in small amounts that the body cannot make enough of | has_kind=vitamin A | has_kind=vitamin C | has_kind=vitamin D | has_kind=vitamin B12
+vitamin C | is_a=vitamin | located_in=citrus fruit and green vegetables | purpose=keeping connective tissue healthy | causes=scurvy when absent
+vitamin D | is_a=vitamin | purpose=helping the body absorb calcium | occurs_when=skin is exposed to sunlight
+vitamin A | is_a=vitamin | purpose=supporting vision | located_in=carrots, liver and green leaves
+dietary mineral | is_a=micronutrient | has_kind=calcium | has_kind=iron | has_kind=iodine | has_kind=sodium | means=an inorganic element the body needs
+calcium | is_a=dietary mineral | purpose=building bone and teeth | located_in=milk, leafy greens and sesame
+iron | is_a=dietary mineral | purpose=making haemoglobin | located_in=pulses, leafy greens and meat | causes=anaemia when deficient
+iodine | is_a=dietary mineral | purpose=making thyroid hormone | located_in=iodised salt and seafood
+calorie | is_a=unit of energy | purpose=measuring the energy food supplies | symbol=cal
+balanced diet | is_a=diet | means=a diet supplying every nutrient in the right proportion | purpose=meeting the body's needs without excess | requires=variety
+appetite | is_a=sensation | purpose=prompting an organism to eat
+digestion of food | is_a=process | requires=enzymes | purpose=turning food into absorbable molecules
+
+# --- kinds of food ---------------------------------------------------------------------------------- #
+cereal | is_a=crop | means=a grass grown for its edible grain | has_kind=rice | has_kind=wheat | has_kind=maize | has_kind=barley | has_kind=millet | consists_of=starch
+rice | is_a=cereal | requires=standing water while growing@0.8 | has_property=the staple of much of the world
+wheat | is_a=cereal | purpose=making flour and bread | has_property=contains gluten
+maize | is_a=cereal | also_known_as=corn | birthplace=the Americas
+millet | is_a=cereal | has_property=drought tolerant | located_in=India and Africa
+pulse crop | is_a=crop | means=an edible seed of a legume | has_kind=lentil | has_kind=chickpea | has_kind=bean | has_kind=pea | consists_of=protein
+legume | is_a=plant | capable_of=fixing nitrogen in the soil | causes=soil fertility | has_kind=pulse crop
+vegetable | means=an edible part of a plant other than the sweet fruit | has_kind=root vegetable | has_kind=leafy vegetable | consists_of=vitamins | consists_of=dietary fibre
+root vegetable | is_a=vegetable | has_kind=carrot | has_kind=potato | has_kind=onion | located_in=underground
+leafy vegetable | is_a=vegetable | has_kind=spinach | has_kind=cabbage | has_kind=lettuce | consists_of=vitamins
+fruit | means=the seed bearing part of a plant, eaten sweet | consists_of=sugar | consists_of=vitamins
+mango | is_a=fruit | located_in=South Asia | consists_of=vitamin A
+banana | is_a=fruit | consists_of=potassium | has_property=grows in a bunch
+spice | is_a=food ingredient | purpose=giving food aroma and flavour | has_kind=turmeric | has_kind=cumin | has_kind=black pepper | has_kind=cinnamon | consists_of=aromatic compounds
+turmeric | is_a=spice | located_in=India | has_property=yellow | consists_of=curcumin
+salt | is_a=food ingredient | formula=NaCl | purpose=seasoning and preserving food | causes=water being drawn out of cells
+oil | is_a=food ingredient | is_a=fat | purpose=cooking and carrying flavour | has_kind=mustard oil | has_kind=olive oil | has_kind=sunflower oil
+milk | consists_of=calcium | consists_of=lactose | purpose=feeding the young of a mammal
+curd | is_a=dairy product | occurs_when=milk is fermented by bacteria | consists_of=probiotic bacteria | also_known_as=yoghurt
+cheese | is_a=dairy product | occurs_when=milk protein is curdled and the whey drained | requires=a curdling agent
+butter | is_a=dairy product | occurs_when=cream is churned | consists_of=fat
+egg | has_part=yolk | has_part=egg white | has_part=shell
+bread | requires=heat | occurs_when=dough is baked
+flour | is_a=food ingredient | occurs_when=grain is ground | purpose=making bread, roti and pasta
+dough | is_a=mixture | consists_of=flour | consists_of=water | requires=kneading
+yeast | is_a=fungus | purpose=making dough rise | causes=carbon dioxide in dough | involves=fermentation
+honey | is_a=food | consists_of=sugar | purpose=sweetening | has_property=made by bees | has_property=keeps for a very long time
+tea | is_a=beverage | consists_of=caffeine | has_property=made from the leaves of the tea plant
+coffee | is_a=beverage | consists_of=caffeine | occurs_when=roasted beans are brewed | birthplace=Ethiopia
+drinking water | is_a=beverage | purpose=replacing the water the body loses | requires=being free of pathogens
+
+# --- cooking ------------------------------------------------------------------------------------------ #
+cooking | is_a=process | purpose=making food safer, softer and better tasting | causes=the killing of many pathogens | causes=changes in flavour and texture
+recipe | is_a=instruction | purpose=setting down the ingredients and steps of a dish
+ingredient | is_a=substance | means=one of the things a dish is made from
+boiling food | is_a=cooking method | requires=water at its boiling point | causes=food softening | purpose=cooking through liquid
+steaming | is_a=cooking method | requires=steam | has_property=keeps more nutrients than boiling@0.8
+frying | is_a=cooking method | requires=hot oil | causes=browning | causes=a crisp surface
+roasting | is_a=cooking method | requires=dry heat | located_in=an oven or over a fire
+baking | is_a=cooking method | requires=an oven | purpose=cooking bread, cakes and pastry with dry heat
+grilling | is_a=cooking method | requires=direct radiant heat
+fermentation | is_a=process | means=micro-organisms changing a food's sugars | causes=curd | causes=bread rising | causes=preservation | requires=micro-organisms
+pasteurisation | purpose=killing pathogens in a liquid without cooking it | requires=controlled heating | inventor=Louis Pasteur
+refrigeration of food | is_a=preservation method | purpose=slowing the growth of micro-organisms | requires=cold
+drying | is_a=preservation method | purpose=removing the water micro-organisms need | causes=long keeping
+pickling | is_a=preservation method | requires=salt or acid | purpose=stopping spoilage
+canning | is_a=preservation method | requires=heat | requires=an airtight container
+food spoilage | is_a=process | occurs_when=micro-organisms grow in food | causes=food becoming unsafe | requires=warmth and moisture
+food safety | is_a=practice | purpose=keeping food free of pathogens | requires=clean hands | requires=cooking food through | requires=keeping raw and cooked food apart
+
+# --- agriculture ---------------------------------------------------------------------------------------- #
+agriculture | is_a=activity | purpose=growing plants and raising animals for food | has_part=sowing | has_part=irrigation | has_part=harvest | requires=soil | requires=water
+crop | is_a=plant | means=a plant grown deliberately for use | has_kind=cereal | has_kind=pulse crop | has_kind=cash crop
+cash crop | is_a=crop | means=a crop grown to be sold rather than eaten by the grower | has_kind=cotton | has_kind=tea | has_kind=sugarcane
+farmer | is_a=person | purpose=growing crops or raising livestock
+soil | is_a=material | consists_of=minerals
+soil fertility | is_a=property of soil | means=how well soil supports growth | requires=nutrients | requires=organic matter
+fertiliser | is_a=substance | purpose=adding nutrients to soil | causes=higher yield | has_kind=organic fertiliser | has_kind=chemical fertiliser
+manure | is_a=organic fertiliser | consists_of=animal waste | purpose=returning nutrients and organic matter to soil
+compost | is_a=organic fertiliser | occurs_when=plant waste is left to decompose | purpose=improving soil
+irrigation | is_a=practice | purpose=supplying crops with water | requires=a water source | causes=a crop surviving a dry season
+sowing | is_a=activity | means=putting seed into prepared soil
+harvest | is_a=activity | means=gathering a crop when it is ripe | occurs_when=a crop reaches maturity
+yield | is_a=measure | means=how much a field produces per unit of area
+crop rotation | is_a=practice | means=growing different crops in a field in successive seasons | purpose=keeping soil fertile and breaking pest cycles | causes=fewer pests
+monoculture | is_a=practice | means=growing one crop over a large area | causes=vulnerability to a single pest@0.85
+pest | is_a=organism | means=an organism that damages a crop | causes=lower yield
+pesticide | is_a=substance | purpose=killing pests | causes=harm to other organisms when misused@0.8
+plough | is_a=tool | purpose=turning soil before sowing
+tractor | is_a=vehicle | purpose=pulling farm implements | part_of=agriculture
+livestock | is_a=animal | means=an animal kept for food, fibre or labour | has_kind=cattle | has_kind=goat | has_kind=poultry | has_kind=sheep
+cattle | is_a=livestock | purpose=milk and draught power | is_a=mammal
+poultry | is_a=livestock | purpose=eggs and meat | is_a=bird
+fishing | is_a=activity | purpose=taking fish for food | located_in=rivers, lakes and the sea
+aquaculture | is_a=activity | means=raising fish or shellfish deliberately | purpose=food production
+green revolution | is_a=historical change | involves=high yielding crop varieties | involves=fertiliser | involves=irrigation | causes=a large rise in cereal production
+famine | is_a=disaster | means=a widespread failure of the food supply | causes=malnutrition | causes=death
+food security | is_a=condition | means=everyone having reliable access to enough safe food | requires=production | requires=distribution | requires=affordability

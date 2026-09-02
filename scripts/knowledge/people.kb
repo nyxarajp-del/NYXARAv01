@@ -1,0 +1,140 @@
+# people.kb — notable people across fields, and what each is known for.
+#
+# `history.kb` names about thirty figures, `arts.kb` and `philosophy.kb` a dozen each in their own
+# subjects. What was missing is the rest of the usual roll: the scientists after Newton, the
+# mathematicians, the reformers, the explorers, the modern leaders.
+#
+# One constraint shapes every line, and the corpus builder's own docstring explains it: **there is
+# no `known_for` relation**, because the question "what is X known for" parses as something else
+# and the pattern is dead. So what a person is known for is written as `is_a` (their role),
+# `discoverer` / `inventor` / `author` (the thing itself, functional and so exactly one), and
+# `involves` (what their work was about). "What is Marie Curie?" answers; "what is Marie Curie
+# known for?" does not, and that is a property of the question grammar rather than of the store.
+#
+# Living people are deliberately sparse and confined to matters of record — a role held, a prize
+# awarded — because a fact store has no way to mark a claim as current-as-of-a-date.
+
+# --- physics and astronomy -------------------------------------------------------------------- #
+Nikola Tesla | is_a=engineer | is_a=inventor | involves=alternating current | involves=the induction motor | birthplace=Croatia
+Michael Faraday | is_a=physicist | is_a=chemist | discoverer=electromagnetic induction | birthplace=London | has_property=had almost no formal schooling
+James Clerk Maxwell | is_a=physicist | involves=the equations uniting electricity, magnetism and light | birthplace=Edinburgh
+Niels Bohr | is_a=physicist | involves=the quantum model of the atom | birthplace=Copenhagen
+Werner Heisenberg | is_a=physicist | involves=the uncertainty principle
+Max Planck | is_a=physicist | involves=the quantum of energy | causes=quantum theory beginning
+Erwin Schrodinger | is_a=physicist | involves=the wave equation of quantum mechanics
+Richard Feynman | is_a=physicist | involves=quantum electrodynamics | has_property=known as a teacher as much as a researcher
+Stephen Hawking | is_a=physicist | involves=black holes | author=A Brief History of Time | birthplace=Oxford
+Enrico Fermi | is_a=physicist | involves=the first controlled nuclear chain reaction
+J J Thomson | is_a=physicist | discoverer=the electron
+Ernest Rutherford | is_a=physicist | discoverer=the atomic nucleus | birthplace=New Zealand
+Wilhelm Rontgen | is_a=physicist | discoverer=the X ray
+Henri Becquerel | is_a=physicist | discoverer=radioactivity
+Edwin Hubble | is_a=astronomer | discoverer=the expansion of the universe
+Nicolaus Copernicus | is_a=astronomer | involves=placing the Sun rather than the Earth at the centre | birthplace=Poland
+Johannes Kepler | is_a=astronomer | involves=the laws of planetary motion | means=showed that orbits are ellipses
+Tycho Brahe | is_a=astronomer | involves=the most accurate naked eye observations before the telescope
+Carl Sagan | is_a=astronomer | is_a=science communicator | involves=making astronomy public
+
+# --- chemistry, biology and medicine ------------------------------------------------------------- #
+Dmitri Mendeleev | is_a=chemist | discoverer=the periodic table | birthplace=Russia
+Antoine Lavoisier | is_a=chemist | involves=the role of oxygen in burning | has_property=often called the father of modern chemistry
+Robert Boyle | is_a=chemist | involves=the relation between the pressure and volume of a gas
+Alexander Fleming | is_a=bacteriologist | discoverer=penicillin | birthplace=Scotland
+Joseph Lister | is_a=surgeon | inventor=antiseptic surgery
+Edward Jenner | is_a=physician | inventor=vaccination | involves=smallpox
+William Harvey | is_a=physician | discoverer=the circulation of the blood
+Gregor Mendel | is_a=scientist | is_a=monk | involves=the inheritance of traits in pea plants | causes=genetics as a science
+Rosalind Franklin | is_a=chemist | involves=X ray diffraction images of DNA | causes=the double helix being worked out
+Jane Goodall | is_a=primatologist | involves=the study of wild chimpanzees
+Carl Linnaeus | is_a=naturalist | involves=the system of naming species by genus and species | birthplace=Sweden
+Norman Borlaug | is_a=agricultural scientist | involves=high yielding wheat | causes=the green revolution
+
+# --- mathematics and computing ------------------------------------------------------------------------ #
+Euclid | is_a=mathematician | author=Elements | involves=geometry set out from axioms | located_in=Alexandria
+Archimedes | is_a=mathematician | is_a=engineer | discoverer=the principle of buoyancy | birthplace=Syracuse
+Carl Friedrich Gauss | is_a=mathematician | involves=number theory | involves=the normal distribution
+Leonhard Euler | is_a=mathematician | involves=notation still used today | has_property=among the most prolific mathematicians
+Isaac Newton as a mathematician | is_a=mathematician | involves=the calculus | has_property=developed it independently of Leibniz
+Gottfried Leibniz | is_a=mathematician | is_a=philosopher | involves=the calculus | involves=binary notation
+Blaise Pascal | is_a=mathematician | involves=probability | inventor=an early mechanical calculator
+Pierre de Fermat | is_a=mathematician | involves=number theory
+Emmy Noether | is_a=mathematician | involves=the link between symmetry and conservation laws
+Charles Babbage | is_a=mathematician | involves=a design for a programmable mechanical computer
+Grace Hopper | is_a=computer scientist | involves=the compiler | involves=making programming readable in words
+John von Neumann | is_a=mathematician | involves=the stored program computer architecture | involves=game theory
+Claude Shannon | is_a=mathematician | involves=information theory | causes=the measurement of information in bits
+Tim Berners-Lee | is_a=computer scientist | inventor=the World Wide Web
+Dennis Ritchie | is_a=computer scientist | involves=the C programming language
+Donald Knuth | is_a=computer scientist | author=The Art of Computer Programming | involves=the analysis of algorithms
+
+# --- exploration and endurance --------------------------------------------------------------------------- #
+Ferdinand Magellan | is_a=explorer | involves=the first expedition to sail round the world
+Vasco da Gama | is_a=explorer | involves=the sea route from Europe to India
+Marco Polo | is_a=explorer | involves=travels across Asia | author=The Travels of Marco Polo
+Ibn Battuta | is_a=explorer | involves=thirty years of travel across Africa and Asia | birthplace=Tangier
+James Cook | is_a=explorer | involves=charting the Pacific
+Roald Amundsen | is_a=explorer | involves=the first expedition to reach the South Pole
+Edmund Hillary | is_a=mountaineer | involves=the first ascent of Mount Everest | birthplace=New Zealand
+Tenzing Norgay | is_a=mountaineer | involves=the first ascent of Mount Everest
+Yuri Gagarin | is_a=cosmonaut | involves=the first human spaceflight | birthplace=Russia
+Neil Armstrong | is_a=astronaut | involves=the first walk on the Moon
+Valentina Tereshkova | is_a=cosmonaut | involves=the first woman in space
+Kalpana Chawla | is_a=astronaut | birthplace=Karnal | involves=space shuttle missions
+
+# --- reform, rights and leadership ---------------------------------------------------------------------------- #
+Abraham Lincoln | is_a=statesman | involves=the abolition of slavery in the United States | involves=the American Civil War
+Martin Luther King | is_a=civil rights leader | involves=non-violent protest against racial segregation | is_a=Nobel laureate
+Rosa Parks | is_a=civil rights activist | involves=refusing to give up a bus seat | causes=the Montgomery bus boycott
+Malala Yousafzai | is_a=activist | involves=the right of girls to education | is_a=Nobel laureate | birthplace=Pakistan
+Susan B Anthony | is_a=activist | involves=the campaign for women's suffrage
+Emmeline Pankhurst | is_a=activist | involves=the campaign for women's suffrage in Britain
+Winston Churchill | is_a=statesman | involves=leading Britain during the Second World War
+Franklin D Roosevelt | is_a=statesman | involves=the New Deal | involves=the Second World War
+Simon Bolivar | is_a=statesman | involves=independence for several South American countries
+Kwame Nkrumah | is_a=statesman | involves=independence for Ghana
+Sun Yat-sen | is_a=statesman | involves=the founding of the Chinese republic
+Mustafa Kemal Ataturk | is_a=statesman | involves=the founding of the Turkish republic
+Eleanor Roosevelt | is_a=diplomat | involves=the drafting of the Universal Declaration of Human Rights
+Nelson Mandela as a president | is_a=statesman | involves=the end of apartheid in South Africa
+
+# --- writing, thought and the arts --------------------------------------------------------------------------------- #
+Homer as a poet | is_a=poet | involves=the earliest surviving Greek epics
+Virgil | is_a=poet | author=Aeneid | located_in=Ancient Rome
+Rumi | is_a=poet | located_in=Persia | involves=mystical poetry
+Franz Kafka | is_a=novelist | birthplace=Prague | involves=stories of bureaucracy and estrangement
+Virginia Woolf | is_a=novelist | involves=the stream of consciousness technique
+Mark Twain | is_a=novelist | birthplace=the United States | involves=satire of American life
+Maya Angelou | is_a=poet | is_a=memoirist | involves=writing on race and resilience
+Toni Morrison | is_a=novelist | is_a=Nobel laureate in Literature
+Karl Marx | is_a=philosopher | is_a=economist | author=Das Kapital | involves=class and capital
+Adam Smith | is_a=economist | author=The Wealth of Nations | involves=the division of labour | involves=markets
+John Maynard Keynes | is_a=economist | involves=government spending as a response to recession
+Amartya Sen | is_a=economist | is_a=Nobel laureate | involves=welfare economics | involves=famine and entitlement | birthplace=India
+Sigmund Freud | is_a=neurologist | involves=psychoanalysis | involves=the unconscious mind
+Ivan Pavlov | is_a=physiologist | discoverer=classical conditioning
+Ludwig Wittgenstein | is_a=philosopher | involves=language and the limits of what can be said
+Simone de Beauvoir | is_a=philosopher | author=The Second Sex | involves=the position of women
+Rembrandt | is_a=painter | birthplace=the Netherlands | involves=light and shadow in portraiture
+Frida Kahlo | is_a=painter | birthplace=Mexico | involves=self portraits
+Salvador Dali | is_a=painter | is_a=surrealist | birthplace=Spain
+Beethoven as a composer | is_a=composer | involves=nine symphonies
+Ravi Varma | is_a=painter | located_in=India | involves=Indian subjects in a European technique
+Satyajit Ray | is_a=film director | birthplace=Calcutta | involves=Bengali cinema
+Charlie Chaplin | is_a=film director | is_a=actor | involves=silent comedy
+Akira Kurosawa | is_a=film director | birthplace=Japan
+Bhimsen Joshi | is_a=musician | involves=Hindustani classical singing
+Lata Mangeshkar | is_a=singer | located_in=India | involves=playback singing for film
+
+# --- sport ------------------------------------------------------------------------------------------------------------ #
+Pele | is_a=footballer | birthplace=Brazil | involves=three World Cup wins
+Diego Maradona | is_a=footballer | birthplace=Argentina
+Muhammad Ali | is_a=boxer | involves=three world heavyweight titles | has_property=known for refusing conscription on principle
+Jesse Owens | is_a=athlete | involves=four gold medals at the 1936 Olympic Games
+Usain Bolt | is_a=athlete | birthplace=Jamaica | involves=world records in the sprint
+Sachin Tendulkar | is_a=cricketer | birthplace=Mumbai | involves=the most runs in international cricket
+Kapil Dev | is_a=cricketer | involves=India's first Cricket World Cup win
+Milkha Singh | is_a=athlete | located_in=India | involves=the four hundred metres
+Major Dhyan Chand | is_a=hockey player | located_in=India | involves=three Olympic gold medals
+Mary Kom | is_a=boxer | birthplace=Manipur | involves=world championships in boxing
+Viswanathan Anand | is_a=chess player | birthplace=Chennai | involves=the world chess championship
+Garry Kasparov | is_a=chess player | involves=the world chess championship | involves=the match against Deep Blue

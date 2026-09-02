@@ -1797,6 +1797,332 @@ narrower than "she knows English and Hindi" and is not nothing: **taught 167 sen
 languages, she reads and says 114 held-out items she was never shown, in three tongues at once,
 and translates between them.**
 
+### NJP V.21 — general knowledge, taught and then examined on what she was never told
+
+`nyxara.njp.school` examines reasoning, language and coding on **generated** items — nonsense
+vocabulary, minted grammars, held-out coding specs — because those three subjects are about
+structure, and structure can be tested on entities that did not exist when the lesson ran.
+
+General knowledge cannot be examined that way. There is no minting a fresh fact about the world;
+what she knows of it is exactly what she was told. So the held-out surface has to be built the
+other way round: **from facts she was told, compose questions whose answers she was never told.**
+
+**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 48 — from **3,745 facts
+over 966 subjects to 13,755 over 3,937**, three and a half times the corpus.
+
+The first pass added six subjects that were simply absent: `arts`, `sport`, `philosophy` (with the
+world religions described rather than asserted), `body` (the anatomy `medicine` assumed and never
+stated), `food` and `measurement`.
+
+The second went after a different kind of gap — places where the corpus named a *category* and
+never a member of it. `biology.kb` defined `mammal`, `bird`, `reptile`, `insect` and `vertebrate`
+and did not name one animal, so a taxonomy with kinds and no members was a hierarchy one level deep
+and the inheritance machinery in `njp/core.py` had almost nothing to walk *through*. Nineteen more
+domains: `animals`, `plants`, `materials`, `mind` (psychology — the terms this package uses about
+itself, with `attention` and `episodic memory` as module names and no fact about either),
+`environment`, `transport`, `world` (fifty more countries and the organisations between them),
+`india` (the brain is expected to work in Hindi and Hinglish and held nothing about the Ganga),
+`law`, `finance`, `inventions`, `people`, `space`, `media`, `work`, `home`, `health`, `mythology`,
+and `basics` — colour, shape, direction, quantity and the senses, the layer that had been invisible
+because it appears in the *questions* rather than in the answers.
+
+A third pass took the six that were left, each of them a mechanism sitting under facts already in
+the corpus: `microbes` (a virus, and why an antibiotic does nothing to one — `health.kb` said
+handwashing causes large falls in disease and had no mechanism behind it), `weather` (pressure,
+fronts, humidity and how a forecast is actually made, under `earth_science`'s nine named
+outcomes), `energy` (the chain from a fuel to a socket, joining `technology`'s seven unconnected
+devices), `ocean` (tides, currents and zones, which `weather`, `environment` and `animals` had all
+been referring to), `ancient` and `modern` (the two halves of `history.kb`'s ninety lines, which
+gave every civilisation about one).
+
+**Seventeen name collisions were resolved by hand**, which is the interesting part of a merge at this
+scale, because the store keys on the name and would otherwise hold one subject that is two things:
+`bat` the animal against the cricket bat; `python` the snake against the language; `memory` the
+faculty against RAM; `attention` the psychological process against the transformer mechanism; `bus`
+the vehicle against the data bus; `tree` the plant against the data structure; `trade` against the
+skilled trade; `charge` the electric quantity against the criminal one; `library`, `transformer` and
+`mercury`, all three of which predate this change set; `act` the deed against the Act of
+Parliament; and, from the third pass, `transmission` (disease against gearbox), `vector` (the
+mathematical against the mosquito), `wave` (ocean against physics), `pantheon` (the set of gods
+against the building in Rome) and `library` again.
+
+That last was caught by the exam rather than by reading: `arrest is_a act`, `act is_a statute`, and
+"what is arrest used for" inherited the purpose of legislation. Everything else that collides —
+`cricket`, `ethics`, `calendar`, `steel`, `road`, and 57 more — is one concept classified at two
+granularities (`bone` as tissue and as organ, `teacher` as person and as profession), and those
+merge correctly and give the inheritance walk two routes instead of one.
+
+**A feeding role is now written below the taxonomic class.** `tiger is_a mammal` and `tiger is_a
+carnivore` at equal confidence made "what is a tiger" come back CONFLICTING — `Grounder.answer`
+saw two equally supported readings and correctly refused to pick one, which is the right rule
+producing a useless answer. Roles are written at `@0.8` instead, because that is what is actually
+true of the two claims: `mammal` is what a tiger *is*, `carnivore` is a role it fills, which a bear
+fills part-time. Both stay inheritable. Measured, `recall` moved from 0.835 to 0.887 and 21 of its
+abstentions became answers.
+
+**How she is examined.** `nyxara.njp.general` is seven papers, each defined by what it holds out:
+
+| paper | what is held out |
+|---|---|
+| `recall` | nothing — the control, so a low score reads as "the grammar failed", not "she forgot" |
+| `membership` | nothing, but asked as `is X a Y` — the other form English has, through different code |
+| `taxonomy` | two `is_a` hops, where the one-hop version is not stated anywhere |
+| `inheritance` | a property of the kind, asked of a member that carries no such property |
+| `inverse` | `what causes X`, where the edge is stored pointing the other way |
+| `abstention` | subjects the corpus never heard of — **silence is the pass** |
+| `soundness` | the relations that cannot cross from kind to member — **silence is the pass** |
+
+Measured on the corpus as shipped, 400 items a paper, ~145 s:
+
+```
+paper          asked  right  wrong  declined  silent   score
+recall           400    334      0        66       0   0.835
+membership       400    399      1         0       0   0.998
+taxonomy         400    399      1         0       0   0.998
+inheritance      400    400      0         0       0   1.000
+inverse          400    389      0        11       0   0.973
+abstention       400    400      0         0       0   1.000   (silence is the pass)
+soundness        400    400      0         0       0   1.000   (silence is the pass)
+
+2721/2800 = 0.972 overall
+of what she answered: 1521 through English, 400 only through the derivation ladder
+not asked: 43 inheritance chains longer than 3 hops, which the walk cannot afford
+```
+
+Every paper held its score when the corpus tripled, which is the first thing worth saying about
+it: the numbers below are about mechanisms, not about how much happened to be in the store.
+
+**`membership` and `taxonomy` scored 0.000 before this change set** — 0 of 300 and 0 of 300,
+re-measured by putting the table back. `answer("is the sun a star?")` returned UNKNOWN, with
+`why="no claim either way about this pair"` and `sun is_a star` in the store, because `is_a`
+appeared in no row of `grounding._POLAR_PREFERENCE` nor in its default: the only relations an
+`is X ...` question ever scanned were `has_property` and `capable_of`. "Is a whale a mammal", "is
+copper a metal", "is Peru a country" — the commonest question form in general knowledge, and none
+of it could ever have been answered. One relation name added to one table moved both papers to
+0.998, and made the *two-hop* question answerable as a side effect, because the polar scan already
+searched the subject's neighbours.
+
+The items still wrong are one subject and one cause: `_read_polar_surface` searches at most four
+words for where the subject ends, and a handful of the corpus's 3,145 subjects are longer —
+*One Hundred Years of Solitude* is the one that keeps being sampled. A real ceiling over a
+fraction of a percent of the corpus, named here rather than tuned away.
+
+**`soundness` swings every item to none of them** when `core._NOT_INHERITABLE` is emptied — 328/328
+against 0/328 when it was first measured, re-measured on every run. Inheritance — "a bird needs
+water, so a sparrow probably does" — was being applied to every relation alike, and over the
+corpus that was wrong 89 times in 247: `has_kind` points *down* the taxonomy, so inheriting it
+inverts the hierarchy ("the types of aircraft: car", "the types of an ammeter: a ruler", "the types
+of the Amazon rainforest: the Amazon rainforest"); `means`, `symbol` and `also_known_as` identify
+their subject, so the kind's answer is the wrong size ("combustion means a rearrangement of atoms
+into new substances" — the definition of *chemical reaction*; "the cpu is also known as the cpu");
+`capital`, `currency`, `author`, `inventor`, `discoverer` and `birthplace` name one particular
+thing about one particular subject. The table refuses rather than discounts, because there is no
+confidence at which "the sun is a red giant" becomes a thing to say.
+
+**`inheritance` is 400/400, and every one came through the derivation ladder — none through
+English.** That is the most useful number in the table and the one that is not a success: she can
+derive a property she was never told, and there is no English sentence that asks her to. The
+1,521-to-400 split at the foot of the report is the exact size of what she knows and cannot be
+asked for.
+
+**The 43 chains not asked** are the same discipline pointing the other way, and they are the
+finding the corpus growth produced. On the bigger corpus `inheritance` fell to 0.973, and the
+misses were all five-link chains: "an actor has a backbone", true, reached through
+*person → human being → mammal → vertebrate*. `_inherit` prices each hop by the `is_a` transitivity
+posterior and abandons the chain under `core._MIN_LINK_CONFIDENCE`, so she declines — correctly,
+because a property inherited from four levels up is a very weak claim however true it is. The exam
+was scoring her at 0.973 for refusing to overreach. The cliff was then measured rather than
+argued: **levels 1, 2 and 3 answer 446/446, 167/167 and 58/58; level 4 answers 0 of 13 and level 5
+0 of 3.** `general.MAX_INHERITED_HOPS` is set to that measured edge, a test asserts the bound from
+both sides against the live Core, and what the bound excludes is printed in the report rather than
+dropped from it.
+
+**`recall`'s 66 declined are not misses.** They are relations holding several objects at equal
+confidence, where `Grounder.answer` refuses to pick one — the outcome `prepare_knowledge_corpus`
+documents over the same corpus and counts separately for the same reason. Reading them as gaps is
+how the first version of this exam reported **4,572 of 4,572 with no abstentions at all** on a
+corpus that abstains on 19% of the shipped QA file: the derivation ladder was being asked next, and
+`_direct` takes `max` over the tied triples and answers happily. A refusal the next rung overrules
+is not a refusal.
+
+Three more of the exam's own numbers were wrong before they were right, and each is pinned by a
+test: one-value golds on many-valued relations (`inverse` graded "what causes fever" against
+`infection` and marked `influenza` wrong; `inheritance` graded "what does muscle consist of"
+against `tissue` and marked `cells` wrong, which she had inherited correctly through the subject's
+*other* stated kind), and inverted papers that never asked the ladder — the acceptance test for a
+table, unable to see the table deleted.
+
+The corpus builder also learned that a subject can be lost by its own spelling. `_read_question`
+strips a leading article, so "What is The Odyssey?" comes back as `('odyssey', 'is_a')` and "What
+is a priori?" as `('priori', 'is_a')`. Where a rename survives it the subject was renamed; where
+the article is part of the term it is not available, so `unaskable_subjects` keeps the triples and
+drops the questions — as `_GRAPH_ONLY` predicates already do, for the same reason — and `--check`
+names them rather than subtracting them silently.
+
+Run it: `python -m nyxara.njp.general`, or `NJPBrain.sit_general_exam()`. Nothing in it writes to
+the brain, so it may be run twice around something that does.
+
+### NJP V.22 — the hard half: answers that are in no fact
+
+The twelve-paper exam's first seven papers are each answered by **one fact or one walk**: a lookup,
+a membership test, an inheritance step, an edge read backwards. She scores 0.979 on them, and that
+number says nothing about whether she can reason, because no item on it requires putting two
+unrelated facts together.
+
+`nyxara.njp.puzzle` is the other half, and `general.py` gained five papers that use it. Each asks a
+question whose answer is **nowhere in the store under any key** and has to be constructed:
+
+| paper | what it needs that a lookup does not |
+|---|---|
+| `bridge` | two different relations chained — "the currency of the country the Taj Mahal is in" |
+| `commonality` | a set intersection nothing in the store is *about* |
+| `odd_one_out` | a majority vote over a set the question invents, then the exception |
+| `constraint` | a search under two conditions at once — "which mammal can fly" |
+| `analogy` | a relation identified from one pair and applied to a third term |
+| `chain` | transitive reach past the first hop, with the path |
+
+**The floor was measured before a line of it was written.**
+
+* `bridge`: 211 opportunities existed and `walk_shape` solved **117 of 120** — and **0 of 40**
+  could be *asked*, because nothing in `_QUESTION_PATTERNS` reads a nested question. The knowledge
+  was there, the walk was there, and the two could not be introduced to each other.
+* `commonality`, `odd_one_out`, `constraint`, `analogy`: **no operation existed at all.**
+* `chain`: 4 of 80 starts reached a second hop — which turned out to measure the *corpus*. Only 35
+  two-hop causal chains existed in 13,483 facts. `causal.kb` was written to supply the joins
+  between things already in the corpus, and reach went to **79 of 80**.
+
+First measurement of the five papers: **0.875**. After the defects below: **741/742 = 0.999**, and
+every one of those answers arrived through construction — `by_english` and `by_derivation` are
+zero on all five, asserted by a test.
+
+```
+paper          asked  right  wrong  declined  silent   score
+bridge           150    150      0         0       0   1.000
+commonality      150    149      0         0       1   0.993
+odd_one_out      150    150      0         0       0   1.000
+constraint       150    150      0         0       0   1.000
+chain            142    142      0         0       0   1.000
+```
+
+**What the exam found, and most of it was the exam.** Four of the six defects were mine:
+
+* **The container word is not decoration.** "The capital of the country that Agra is in" returned
+  *Lucknow* — Uttar Pradesh's capital — because the walk took the first hop that yielded anything.
+  The noun in the middle of a nested question says *where to stop*: `bridge_to_kind` walks until a
+  node that **is a** country, and "capital of the **indian state** that Agra is in" and "capital of
+  the **country** that Agra is in" now give different answers off the same walk.
+* **A multi-word container cannot be split by a regex.** With a non-greedy pattern, "the capital of
+  the indian state that mumbai is in" split as container *indian*, subject *state that mumbai*, and
+  every such question came back silent. The blob is captured whole and each split is tried, keeping
+  the one whose subject the store knows — the same signal `_read_polar_surface` uses.
+* **The store's spelling rule applies to objects used as subjects.** `canon` singularises, so
+  "runoff of nutrients" is filed under `runoff of nutrient`. The exam was keying on the surface
+  form, so `chain`'s gold silently lost every middle whose plural folded and marked her wrong for
+  giving the answer it had dropped. Same bug hid `displacement of people` behind
+  `displacement of person`.
+* **Specificity is not string length.** "What do a pressure cooker and a spoon have in common"
+  answered *object* over *utensil*; "a keyboard instrument and a percussion instrument" answered
+  *tool* over *musical instrument*. Both true, both useless — everything shares something at the
+  top of a hierarchy. A shared kind is less specific exactly when another shared kind reaches it by
+  an `is_a` walk, and ranking on that makes "utensil beats object" follow from the taxonomy.
+* **A qualifier can be swallowed by a substring.** "Which ocean is the largest ocean" answered
+  *Atlantic*, because the stored property "the second largest ocean" contains the string "largest
+  ocean". As whole words it does not, and the wrong answer disappears.
+* **"Crime and Punishment" is one novel.** Splitting an item list on " and " as well as on commas
+  turned four items into five, two of them half a book.
+
+And, for the fifth time in this work, a **one-value gold on a many-valued relation** — twice more,
+in `chain` (deforestation has two true two-hop endings) and `constraint` (a kidney and a lung are
+both "two of them"). Each is pinned by a test.
+
+**A second tier, added after the five papers were already at 0.999.** Probing for what she still
+could not do turned up six more forms, and one of them was worse than a refusal — "which bird can
+fly and lives in India" answered **"bird"**, because the stored value `india` was found sitting
+inside the question. That is the mirror of the substring bug fixed a paragraph earlier: a stored
+property may say *more* than the question named, never less, and that direction of matching is gone.
+
+The other five were absent rather than wrong, and all five now answer:
+
+| question | answer | why it was refused |
+|---|---|---|
+| "what is the heart part of?" | circulatory system | `part_of` is stored, carries the highest transitivity prior in `core`, and had no question form that parses |
+| "what would you use to measure temperature?" | thermometer | `purpose` read backwards — the store says what a thermometer is *for* and never what measures temperature |
+| "what would you use to measure pressure?" | barometer | the same, and the stored phrase says "measuring **atmospheric** pressure" — words in order, not adjacent |
+| "what is the capital of the country whose currency is the yen?" | tokyo | a bridge walked *inward*: the subject is not named, it is described |
+| "why does an earthquake happen?" | fault | `causes` from the far end, for any stored effect |
+
+**And a defect none of the papers could see: 105 compound kinds had no parent.** `island country`
+sat unattached, so **Japan was not a country by any walk**; `precious metal` sat unattached, so gold
+was not a metal; `blood cell` sat unattached, so a red blood cell was not a cell. 839 of 1,269 kinds
+had no parent, and most of those are roots and belong that way — but the compounds are not roots,
+they are unattached. It is invisible until something walks the hierarchy, and it was quietly
+weakening every inheritance, every commonality and every constraint search in the corpus.
+
+`taxonomy.kb` states them, on a rule mechanical enough to check: **an English head-final compound is
+a its head.** It does not hold for head-initial phrases — a "creature in mythology" is not a
+mythology, a "unit of time" is not a time — so anything with " of " or " in " was excluded, and a
+further list rejected by hand where the head is a different sense ("gas giant" against the giant of
+folklore). Nothing in the file is a new claim about the world: every line says a thing is what its
+own name already says it is, and the corpus never wrote it down.
+
+Run it: `NJPBrain.puzzle("...")`, or `python -m nyxara.njp.general` for the full twelve papers.
+Nothing in the module writes to the store: a constructed answer is an inference, and filing it
+would let the next question read it back as though somebody had stated it.
+
+### The question grammar — 18 of 25 everyday phrasings did not parse
+
+The exam measures what she can be *asked*, and a second measurement asked a blunter question: of
+25 ordinary phrasings of questions the store could already answer, **how many parse at all?**
+
+**Seven.** The other eighteen failed, and every one failed the same way. The generic
+`what is X` pattern sits near the bottom of `grounding._QUESTION_PATTERNS`, matches to the end of
+the line, and swallows the tail into the subject — so "what is the capital of France" asked `is_a`
+about an entity named *capital of france*, "who invented the telephone" read the verb as part of a
+name, and "where is the Taj Mahal located" produced the subject *the taj mahal located*. The facts
+were in the store, reachable by `_lookup`, reasoned over by the Core, and unaskable in the words
+anybody actually uses. This is the same read/write asymmetry the causal block and the
+`capable_of` block in that table were each added to close, found the same way — by measuring
+instead of assuming.
+
+**The noun form is one pattern, not eleven.** `tell me the <p> of X` had been there since the
+beginning and is the phrasing nobody uses; `what is the <p> of X` is the one everybody uses and was
+absent. Reading the relation out of the noun slot covers capital, currency, symbol, unit, formula,
+purpose, meaning, birthplace, author, inventor and discoverer at once — and every relation added
+later, without a line each.
+
+**That breadth has a cost, and paying it is the interesting part.** The pattern also matches every
+subject whose *name* contains " of ", and this corpus has eighty-nine of them. Measured the moment
+it was added: "what is the Code of Hammurabi" read as `('hammurabi', 'code')`, "what is the
+Republic of India" as `('india', 'republic')`, and the corpus builder's own `unaskable_subjects`
+count — which exists to catch exactly this — went from 2 to 89. So `_NOUN_OF` is a **marker rather
+than a reading**: `_read_question` accepts it only if two things hold, and otherwise keeps scanning.
+
+1. The noun must name a relation something is actually stored under — known to the tables, or
+   present in the live store, so a relation a later corpus introduces is accepted without anyone
+   remembering to update a list.
+2. The whole phrase must not itself be a known entity. *Age of Exploration* is a subject and `age`
+   is also a relation; without this the relation reading wins and a question about the subject is
+   answered about something else. **The store knows its own subjects** — the same signal
+   `_read_polar_surface` uses to find where a subject ends, and the only one that separates these
+   two readings.
+
+`unaskable_subjects` went back to 2 — the two that genuinely cannot be named in English, `a priori`
+and `a posteriori`. It was also fixed itself: it built a *fresh* Grounder, so its check ran against
+an empty store and was stricter than the reader it was checking, reporting `age of exploration`
+unaskable while the live brain read it correctly. It now seeds the subject keys first.
+
+**"What does X do?" is answered by the evidence, not the grammar.** The form is genuinely
+ambiguous — "what does a plumber do" wants `purpose`, "what does a bat do" wants `capable_of`, and
+the five words are identical. It is read as a marker and `Grounder.answer` tries both, taking
+whichever the store has evidence for; neither is guessed, and if neither has any the answer stays
+honestly UNKNOWN. That is the move `_read_polar_surface` already makes for "is X <phrase>", for the
+same reason: the evidence disambiguates and the grammar cannot.
+
+After the change: **25 of 25**, with every existing template in `prepare_knowledge_corpus._ASKABLE`
+and `general.ASKABLE` still reading back as itself, and 23 tests in `tests/njp/test_grounding.py`
+pinning each form.
+
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,

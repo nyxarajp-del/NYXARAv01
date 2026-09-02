@@ -1,0 +1,160 @@
+# basics.kb — colour, shape, direction, quantity, time-of-day and the words for comparing things.
+#
+# The most elementary layer of all, and the one nothing in the corpus had. `mathematics.kb` defines
+# `circle` and `triangle` as geometric figures with areas; nothing said what a colour is, which
+# colours are primary, what "left" means, what an opposite is, or how many things are in a dozen.
+# These are the terms a general-knowledge question uses to ask about everything else, which is why
+# their absence was invisible: they appear in the *questions* rather than in the answers.
+#
+# It is also the densest material in the corpus for the concept layer. `njp/concepts.py` induces a
+# concept from members that share a relation, and a file of twelve colours that all share
+# `is_a=colour` and differ in one property is exactly the shape it looks for.
+
+# --- colour ---------------------------------------------------------------------------------- #
+colour | is_a=property | means=what the eye reports about the wavelengths a surface sends back | requires=light | has_kind=primary colour | has_kind=secondary colour | causes=objects being told apart at a glance
+primary colour | is_a=colour | means=a colour that cannot be mixed from the others | has_kind=red | has_kind=blue | has_kind=yellow | purpose=mixing every other colour
+secondary colour | is_a=colour | means=a colour mixed from two primaries | has_kind=green | has_kind=orange | has_kind=purple
+red | is_a=primary colour | has_property=the longest wavelength the eye sees | purpose=signalling danger and stopping in most conventions
+blue | is_a=primary colour | has_property=a short wavelength | causes=the colour of the sky through scattering
+yellow | is_a=primary colour | has_property=the colour the eye is most sensitive to | purpose=warning signs and high visibility clothing
+green | is_a=secondary colour | occurs_when=blue and yellow are mixed | causes=the colour of leaves through chlorophyll | purpose=signalling that it is safe to go
+orange | is_a=secondary colour | occurs_when=red and yellow are mixed
+purple | is_a=secondary colour | occurs_when=red and blue are mixed
+black | is_a=colour | means=what a surface looks like when it sends back almost no light | has_property=absorbs heat readily
+white | is_a=colour | means=what a surface looks like when it sends back all wavelengths together | has_property=reflects heat readily
+grey | is_a=colour | means=a mixture of black and white
+brown | is_a=colour | occurs_when=red, yellow and black are mixed
+pink | is_a=colour | occurs_when=red is mixed with white
+shade | is_a=property of a colour | means=a colour darkened by adding black
+tint | is_a=property of a colour | means=a colour lightened by adding white
+transparent | is_a=property | means=letting light through so what is behind can be seen | has_kind=glass | has_kind=clean water
+translucent | is_a=property | means=letting light through without a clear image
+opaque | is_a=property | means=letting no light through | causes=a shadow
+rainbow | is_a=phenomenon | occurs_when=sunlight is split by raindrops | consists_of=the colours in order of wavelength | has_property=always opposite the Sun
+
+# --- shape and space ---------------------------------------------------------------------------- #
+shape | is_a=property | means=the outline or form of a thing | has_kind=two dimensional shape | has_kind=three dimensional shape
+two dimensional shape | is_a=shape | means=a flat figure with length and width | has_kind=circle | has_kind=triangle | has_kind=square | has_kind=rectangle | has_kind=oval
+three dimensional shape | is_a=shape | means=a solid with length, width and depth | has_kind=cube | has_kind=sphere | has_kind=cylinder | has_kind=cone | has_kind=pyramid
+oval | is_a=two dimensional shape | means=a closed curve longer in one direction than the other
+cylinder | is_a=three dimensional shape | has_property=two circular ends joined by a curved surface
+cone | is_a=three dimensional shape | has_property=a circular base narrowing to a point
+pyramid | is_a=three dimensional shape | has_property=a flat base with triangular faces meeting at a point
+straight line | is_a=line | means=the shortest path between two points
+curve | is_a=line | means=a line that bends without corners
+edge | is_a=part of a shape | means=where two faces of a solid meet
+corner | is_a=part of a shape | means=where two edges meet | also_known_as=vertex
+face of a solid | is_a=part of a shape | means=one flat surface of a solid
+symmetry | is_a=property | means=that one half matches the other about a line or a point | causes=a shape looking the same after being flipped or turned
+pattern | is_a=arrangement | means=something repeating in a way that can be predicted | causes=the next item being guessable
+
+# --- direction and position ------------------------------------------------------------------------ #
+direction | is_a=property | means=the way something faces or moves | has_kind=north | has_kind=south | has_kind=east | has_kind=west
+north | is_a=direction | means=the direction toward the Earth's north pole | purpose=the reference direction on most maps
+south | is_a=direction | means=the direction opposite north
+east | is_a=direction | means=the direction in which the Earth turns, where the Sun appears to rise
+west | is_a=direction | means=the direction opposite east, where the Sun appears to set
+left | is_a=direction | means=the side toward which a person facing forward finds their left hand
+right side | is_a=direction | means=the side opposite left
+up | is_a=direction | means=away from the ground, against gravity
+down | is_a=direction | means=toward the ground, with gravity
+forward | is_a=direction | means=the direction one is facing
+backward | is_a=direction | means=the direction opposite forward
+above | is_a=position | means=at a higher level than something else
+below | is_a=position | means=at a lower level than something else
+inside | is_a=position | means=within the bounds of something
+outside | is_a=position | means=beyond the bounds of something
+near | is_a=position | means=a short distance away
+far | is_a=position | means=a long distance away
+between | is_a=position | means=with one thing on either side
+distance | is_a=quantity | means=how far apart two things are | unit=metre
+position | is_a=property | means=where a thing is relative to something else | requires=a reference point
+
+# --- quantity and comparison ----------------------------------------------------------------------------- #
+quantity of things | is_a=property | means=how many or how much there is | has_kind=count | has_kind=amount
+count | is_a=quantity of things | means=how many separate things there are | requires=things that can be told apart
+amount | is_a=quantity of things | means=how much of something there is where it cannot be counted one by one
+pair | is_a=group | means=two things that go together
+dozen | is_a=group | means=twelve things
+score of items | is_a=group | means=twenty things
+half | is_a=fraction | means=one of two equal parts
+quarter | is_a=fraction | means=one of four equal parts
+whole | is_a=quantity of things | means=all of something, with no part missing
+none | is_a=quantity of things | means=not any at all
+many | is_a=quantity of things | means=a large number
+few | is_a=quantity of things | means=a small number
+more | is_a=comparison | means=a greater quantity than something else
+less | is_a=comparison | means=a smaller quantity than something else
+equal | is_a=comparison | means=the same in quantity or value
+comparison | is_a=relation | means=judging two things against each other on one property | requires=a property both have
+opposite | is_a=relation | means=a pair as far apart as a property allows | has_kind=hot and cold | has_kind=big and small | has_kind=fast and slow
+size | is_a=property | means=how large a thing is | has_kind=big | has_kind=small
+big | is_a=size | means=large relative to what is usual for its kind
+small | is_a=size | means=little relative to what is usual for its kind
+length of a thing | is_a=property | means=how long a thing is from end to end | unit=metre
+width | is_a=property | means=how broad a thing is from side to side
+height | is_a=property | means=how tall a thing is from bottom to top
+depth | is_a=property | means=how far down or how far back a thing goes
+weight of a thing | is_a=property | means=how heavy a thing is | requires=gravity
+speed of a thing | is_a=property | means=how fast a thing moves | has_kind=fast | has_kind=slow
+order | is_a=arrangement | means=things placed by a rule such as size, time or the alphabet
+sequence | is_a=arrangement | means=things one after another in a fixed order
+first | is_a=position in order | means=before all the others
+last | is_a=position in order | means=after all the others
+middle | is_a=position in order | means=with as many before as after
+
+# --- time of day, and how often ------------------------------------------------------------------------------ #
+today | is_a=day | means=the day that is now
+yesterday | is_a=day | means=the day before today
+tomorrow | is_a=day | means=the day after today
+afternoon | is_a=part of a day | means=from noon until evening
+evening | is_a=part of a day | means=from the end of the afternoon until night
+noon | is_a=time of day | means=the middle of the day, when the Sun is highest
+midnight | is_a=time of day | means=the middle of the night, when one day becomes the next
+dawn | is_a=time of day | means=when light first appears before sunrise
+dusk | is_a=time of day | means=when light fades after sunset
+sunrise | is_a=event | occurs_when=the Sun first appears above the horizon | located_in=the east
+sunset | is_a=event | occurs_when=the Sun disappears below the horizon | located_in=the west
+weekday | is_a=day | means=a day on which work and school usually happen
+weekend | is_a=period | means=the days at the end of the week set aside from work
+daily | is_a=frequency | means=happening once every day
+weekly | is_a=frequency | means=happening once every week
+monthly | is_a=frequency | means=happening once every month
+annually | is_a=frequency | means=happening once every year
+always | is_a=frequency | means=at every time, without exception
+never | is_a=frequency | means=at no time at all
+sometimes | is_a=frequency | means=at some times and not others
+past | is_a=period | means=time that has already happened
+present | is_a=period | means=the time that is now
+future | is_a=period | means=time that has not happened yet
+duration | is_a=quantity | means=how long something lasts | unit=second
+chronological age | is_a=quantity | means=how long a thing has existed
+
+# --- the senses and what they report ---------------------------------------------------------------------------- #
+sense | is_a=faculty | means=a way of taking in something about the world | has_kind=sight | has_kind=hearing | has_kind=smell | has_kind=taste | has_kind=touch
+sight | is_a=sense | requires=light | requires=the eye | causes=knowing colour, shape and distance
+hearing | is_a=sense | requires=sound | requires=the ear | causes=knowing about things that cannot be seen
+smell | is_a=sense | requires=molecules in the air | requires=the nose | causes=food and danger being recognised
+taste | is_a=sense | requires=the tongue | has_kind=sweet | has_kind=sour | has_kind=salty | has_kind=bitter | has_kind=umami
+touch | is_a=sense | requires=the skin | causes=knowing texture, pressure and temperature
+sweet | is_a=taste | occurs_when=sugars are present | causes=food being sought
+sour | is_a=taste | occurs_when=acids are present | causes=spoiled or unripe food being rejected
+salty | is_a=taste | occurs_when=salt is present
+bitter | is_a=taste | causes=many poisons being rejected before they are swallowed
+texture | is_a=property | means=how a surface feels | has_kind=smooth | has_kind=rough | has_kind=soft | has_kind=hard
+smooth | is_a=texture | means=without bumps or roughness
+rough | is_a=texture | means=uneven to the touch
+soft | is_a=texture | means=giving way easily under pressure
+hard | is_a=texture | means=not giving way under pressure
+loud | is_a=property of sound | means=of large amplitude | causes=hearing damage at extremes
+quiet | is_a=property of sound | means=of small amplitude
+bright | is_a=property of light | means=of high intensity
+dark | is_a=property of light | means=with little or no light
+hot | is_a=property | means=at a high temperature
+cold | is_a=property | means=at a low temperature
+warm | is_a=property | means=at a moderately high temperature
+cool | is_a=property | means=at a moderately low temperature
+wet | is_a=property | means=covered with or holding liquid
+dry | is_a=property | means=without moisture
+heavy | is_a=property | means=of large weight for its size
+light in weight | is_a=property | means=of small weight for its size

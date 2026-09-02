@@ -1,0 +1,206 @@
+# arts.kb — literature, music, the visual arts, architecture, theatre, film and dance.
+#
+# society.kb carries one line each for "art", "music", "literature", "painting", "theatre" and
+# "film", which is enough to place them in the taxonomy and nothing like enough to answer a
+# question about any of them. This file is the depth behind those six lines: the forms, the
+# instruments, the movements, and the named works that are the usual currency of general
+# knowledge.
+#
+# Two rules the rest of the KB already follows and that matter more here than elsewhere. Named
+# works take `author` (functional — one value), so a work with a disputed author is left out
+# rather than given a guess. And a movement is `is_a=art movement`, never `is_a` the medium it
+# worked in, because a member of a movement is not a kind of painting.
+
+# --- the arts, and what separates them ------------------------------------------------------- #
+fine art | is_a=art | has_kind=painting | has_kind=sculpture | has_kind=drawing | has_kind=printmaking | purpose=making something to be contemplated rather than used
+performing art | is_a=art | has_kind=music | has_kind=theatre | has_kind=dance | has_kind=opera | has_property=performed in front of an audience | requires=a performer
+applied art | is_a=art | has_kind=architecture | has_kind=pottery | has_kind=calligraphy | means=art made for objects that are also used
+aesthetics | is_a=branch of philosophy | involves=beauty | involves=taste | involves=what makes a work good
+patron | is_a=person | purpose=paying for a work of art to be made | causes=art that would not otherwise exist
+canon | is_a=collection of works | means=the works a tradition treats as its standard
+masterpiece | is_a=work of art | means=a work regarded as the finest of its kind
+
+# --- literature: the forms ------------------------------------------------------------------- #
+literature | has_kind=fiction | has_kind=non-fiction | consists_of=written language
+fiction | is_a=literature | means=narrative writing about invented people and events | has_kind=novel | has_kind=short story | has_kind=novella
+non-fiction | is_a=literature | means=writing that presents itself as an account of real events | has_kind=biography | has_kind=essay | has_kind=history writing
+novel | is_a=work of fiction | has_property=book length | has_part=plot | has_part=character | has_part=setting | has_kind=novel of manners | has_kind=detective novel
+short story | is_a=work of fiction | has_property=readable at one sitting | has_property=a single main effect
+novella | is_a=work of fiction | means=a story longer than a short story and shorter than a novel
+poetry | is_a=literature | has_kind=epic | has_kind=lyric | has_kind=sonnet | has_kind=haiku | has_kind=free verse | involves=poetic metre
+epic | is_a=poem | has_property=long | involves=a hero | involves=events on which a people's fate turns
+lyric poem | is_a=poem | means=a short poem that speaks a single speaker's feeling
+sonnet | is_a=poem | has_property=fourteen lines | involves=a fixed rhyme scheme | has_kind=Petrarchan sonnet | has_kind=Shakespearean sonnet
+haiku | is_a=poem | has_property=three lines | has_property=seventeen syllables in Japanese | involves=a season word | birthplace=Japan
+free verse | is_a=poem | means=poetry written without a regular metre or rhyme scheme
+poetic metre | is_a=property of verse | means=the regular pattern of stressed and unstressed syllables in a line
+rhyme | is_a=property of verse | means=a match between the end sounds of two words
+stanza | is_a=part of a poem | means=a group of lines set off from the rest
+drama | is_a=literature | purpose=being performed by actors | has_kind=tragedy | has_kind=comedy | has_part=dialogue | has_part=act
+tragedy | is_a=drama | involves=a protagonist brought down | causes=pity in the audience | causes=fear in the audience
+comedy | is_a=drama | has_property=ending happily | purpose=provoking laughter
+essay | is_a=work of non-fiction | means=a short piece arguing or reflecting on one subject
+biography | is_a=work of non-fiction | means=an account of one person's life written by someone else
+autobiography | is_a=work of non-fiction | means=an account of a person's life written by that person
+plot | is_a=part of a narrative | means=the ordered events of a story and how one leads to the next
+character | is_a=part of a narrative | means=a person represented in a work
+narrator | is_a=part of a narrative | means=the voice that tells the story
+protagonist | is_a=character | means=the character whose choices the story follows
+antagonist | is_a=character | means=the character who stands against the protagonist
+setting | is_a=part of a narrative | means=the time and place in which a story happens
+theme | is_a=part of a work | means=the idea a work keeps returning to
+genre | is_a=category of works | means=a kind of work with conventions its readers expect | has_kind=tragedy | has_kind=comedy | has_kind=romance | has_kind=satire
+satire | is_a=genre | purpose=attacking a folly or vice through ridicule | involves=irony
+irony | is_a=figure of speech | means=saying one thing while the situation says the opposite
+allegory | is_a=literary device | means=a narrative whose surface events stand for something else
+
+# --- literature: named works and their authors ----------------------------------------------- #
+Odyssey | is_a=epic poem | author=Homer | located_in=Ancient Greece | involves=the return of Odysseus
+Iliad | is_a=epic poem | author=Homer | located_in=Ancient Greece | involves=the Trojan War
+Mahabharata | is_a=epic poem | located_in=India | has_part=Bhagavad Gita | has_property=one of the longest poems ever written
+Ramayana | is_a=epic poem | located_in=India | involves=the story of Rama
+Divine Comedy | is_a=epic poem | author=Dante Alighieri | involves=a journey through the afterlife
+Don Quixote | is_a=novel | author=Miguel de Cervantes | is_a=early modern novel | located_in=Spain
+Pride and Prejudice | is_a=novel | author=Jane Austen | is_a=novel of manners
+Great Expectations | is_a=novel | author=Charles Dickens
+War and Peace | is_a=novel | author=Leo Tolstoy | located_in=Russia
+Crime and Punishment | is_a=novel | author=Fyodor Dostoevsky | located_in=Russia
+Things Fall Apart | is_a=novel | author=Chinua Achebe | located_in=Nigeria
+One Hundred Years of Solitude | is_a=novel | author=Gabriel Garcia Marquez | is_a=work of magical realism
+Nineteen Eighty-Four | is_a=novel | author=George Orwell | is_a=dystopian novel
+Gitanjali | is_a=poetry collection | author=Rabindranath Tagore | located_in=India
+Canterbury Tales | is_a=collection of stories | author=Geoffrey Chaucer
+Homer | is_a=poet | located_in=Ancient Greece
+Dante Alighieri | is_a=poet | birthplace=Florence
+Jane Austen | is_a=novelist | birthplace=England
+Charles Dickens | is_a=novelist | birthplace=England
+Leo Tolstoy | is_a=novelist | birthplace=Russia
+Fyodor Dostoevsky | is_a=novelist | birthplace=Russia
+Rabindranath Tagore | is_a=poet | is_a=Nobel laureate in Literature | birthplace=Calcutta
+Chinua Achebe | is_a=novelist | birthplace=Nigeria
+Gabriel Garcia Marquez | is_a=novelist | birthplace=Colombia
+George Orwell | is_a=novelist | is_a=essayist
+Miguel de Cervantes | is_a=novelist | birthplace=Spain
+Geoffrey Chaucer | is_a=poet | birthplace=London
+Nobel Prize in Literature | is_a=prize | purpose=recognising an author's body of work | located_in=Sweden
+
+# --- music: the elements ---------------------------------------------------------------------- #
+music | is_a=performing art | consists_of=sound organised in time | has_part=timbre
+melody | is_a=element of music | means=a sequence of notes heard as a single line
+harmony | is_a=element of music | means=notes sounded together | involves=chords
+rhythm | is_a=element of music | means=the pattern of durations in time | involves=beat
+beat | is_a=element of rhythm | means=the regular pulse a listener taps to
+tempo | is_a=property of music | means=how fast the beat goes | unit=beats per minute
+timbre | is_a=element of music | means=what makes two instruments playing the same note sound different
+pitch | is_a=property of a note | means=how high or low it sounds | requires=frequency
+note | is_a=unit of music | has_property=a pitch | has_property=a duration
+scale | is_a=set of notes | means=the notes a piece draws on, in order of pitch | has_kind=major scale | has_kind=minor scale | has_kind=pentatonic scale
+chord | is_a=group of notes | means=three or more notes sounded together
+octave | is_a=musical interval | means=the interval between one note and another at twice its frequency
+musical key | is_a=property of a piece | means=the scale a piece is centred on
+musical notation | is_a=writing system | purpose=recording music so it can be played again | has_part=staff | has_part=clef | has_part=note head
+composer | is_a=person | purpose=writing music
+orchestra conductor | is_a=person | purpose=directing an orchestra in performance
+
+# --- music: instruments and ensembles --------------------------------------------------------- #
+musical instrument | is_a=tool | purpose=producing musical sound | has_kind=string instrument | has_kind=wind instrument | has_kind=percussion instrument | has_kind=keyboard instrument
+string instrument | is_a=musical instrument | has_kind=violin | has_kind=guitar | has_kind=sitar | has_kind=cello | requires=a vibrating string
+wind instrument | is_a=musical instrument | has_kind=flute | has_kind=trumpet | has_kind=clarinet | requires=a vibrating column of air
+percussion instrument | is_a=musical instrument | has_kind=drum | has_kind=tabla | has_kind=xylophone | requires=being struck
+keyboard instrument | is_a=musical instrument | has_kind=piano | has_kind=organ | has_kind=harpsichord | has_part=keyboard
+violin | is_a=string instrument | has_property=played with a bow | has_property=the highest pitched instrument of its family
+guitar | is_a=string instrument | has_property=six strings on the common form | has_property=plucked or strummed
+sitar | is_a=string instrument | located_in=India | has_property=sympathetic strings that ring without being played
+piano | is_a=keyboard instrument | has_property=strings struck by hammers | inventor=Bartolomeo Cristofori
+flute | is_a=wind instrument | has_property=played by blowing across an opening
+trumpet | is_a=wind instrument | has_property=brass | has_part=valve
+drum | is_a=percussion instrument | has_part=membrane | has_property=played by striking
+tabla | is_a=percussion instrument | located_in=India | has_property=a pair of hand drums
+orchestra | is_a=musical ensemble | has_part=string section | has_part=woodwind section | has_part=brass section | has_part=percussion section | requires=an orchestra conductor@0.8
+choir | is_a=musical ensemble | consists_of=singers | has_part=soprano part | has_part=alto part | has_part=tenor part | has_part=bass part
+band | is_a=musical ensemble | has_kind=rock band | has_kind=brass band | has_kind=jazz band
+
+# --- music: forms and traditions -------------------------------------------------------------- #
+symphony | is_a=musical work | purpose=being played by an orchestra | has_property=usually in four movements@0.8
+opera | is_a=performing art | consists_of=drama sung throughout | requires=singers | requires=an orchestra | birthplace=Italy
+concerto | is_a=musical work | involves=a soloist set against an orchestra
+sonata | is_a=musical work | purpose=being played by one or two instruments
+song | is_a=musical work | consists_of=a melody set to words
+classical music | is_a=musical tradition | has_kind=Western classical music | has_kind=Hindustani classical music | has_kind=Carnatic music
+Hindustani classical music | is_a=classical music | located_in=northern India | involves=raga | involves=tala
+Carnatic music | is_a=classical music | located_in=southern India | involves=raga | involves=tala
+raga | is_a=melodic framework | located_in=India | means=a set of notes and rules for moving among them that gives a piece its mood
+tala | is_a=rhythmic cycle | located_in=India | means=a repeating cycle of beats a piece is measured in
+jazz | is_a=musical genre | birthplace=New Orleans | involves=improvisation | involves=syncopation
+blues | is_a=musical genre | birthplace=the United States | involves=a twelve bar form@0.8 | causes=jazz@0.7
+rock music | is_a=musical genre | involves=electric guitar | involves=a strong backbeat
+folk music | is_a=musical genre | means=music passed on within a community rather than composed for publication
+improvisation | is_a=musical practice | means=composing the music while performing it
+Ludwig van Beethoven | is_a=composer | birthplace=Bonn | has_property=continued composing after going deaf
+Wolfgang Amadeus Mozart | is_a=composer | birthplace=Salzburg
+Johann Sebastian Bach | is_a=composer | birthplace=Eisenach
+Ravi Shankar | is_a=musician | birthplace=Varanasi | is_a=sitar player
+
+# --- visual art ------------------------------------------------------------------------------- #
+painting | is_a=fine art | has_kind=oil painting | has_kind=watercolour | has_kind=fresco | has_kind=mural
+sculpture | is_a=fine art | means=art made as a three dimensional form | consists_of=stone | consists_of=bronze | consists_of=wood
+drawing | is_a=fine art | requires=a mark making tool | has_kind=sketch
+printmaking | is_a=fine art | means=making art by transferring ink from a prepared surface | has_kind=woodcut | has_kind=etching
+photography | is_a=art form | requires=a camera | requires=light | inventor=Louis Daguerre
+pigment | is_a=material | purpose=giving paint its colour | has_property=insoluble in the medium that carries it
+canvas | is_a=material | purpose=providing a surface to paint on | consists_of=woven cloth
+fresco | is_a=painting technique | means=painting onto wet plaster so the colour becomes part of the wall | requires=plaster
+portrait | is_a=painting | means=a picture of a particular person
+landscape | is_a=painting | means=a picture whose subject is the land itself
+still life | is_a=painting | means=a picture of arranged inanimate objects
+perspective | is_a=technique | purpose=making a flat picture read as depth | involves=a vanishing point
+composition | is_a=property of a picture | means=how the parts of a work are arranged within it
+art movement | is_a=category | means=a group of artists working from a shared aim in one period | has_kind=Renaissance art | has_kind=Impressionism | has_kind=Cubism | has_kind=Surrealism
+Impressionism | is_a=art movement | located_in=France | involves=painting the effect of light | has_property=visible brushstrokes
+Cubism | is_a=art movement | involves=showing a subject from several viewpoints at once
+Surrealism | is_a=art movement | involves=images drawn from dreams and the unconscious
+Renaissance art | is_a=art movement | located_in=Italy | involves=perspective | involves=the study of classical antiquity
+Vincent van Gogh | is_a=painter | birthplace=the Netherlands | is_a=post-impressionist
+Pablo Picasso | is_a=painter | birthplace=Malaga | is_a=cubist
+Claude Monet | is_a=painter | birthplace=Paris | is_a=impressionist
+Michelangelo | is_a=sculptor | is_a=painter | birthplace=Italy
+Sistine Chapel ceiling | is_a=fresco | located_in=Vatican City | author=Michelangelo
+Starry Night | is_a=painting | author=Vincent van Gogh
+gallery | is_a=building | purpose=showing works of art
+Louvre | is_a=museum | located_in=Paris | has_part=Mona Lisa
+
+# --- architecture ------------------------------------------------------------------------------ #
+architecture | is_a=applied art | purpose=designing buildings | involves=structure | involves=use | involves=appearance
+architect | is_a=person | purpose=designing a building and overseeing its construction
+column | is_a=structural element | purpose=carrying a load downward | has_kind=Doric column | has_kind=Ionic column | has_kind=Corinthian column
+arch | is_a=structural element | purpose=spanning an opening | has_property=carries load into compression | causes=a span wider than one stone
+dome | is_a=structural element | means=an arch rotated about its axis | purpose=roofing a wide space without internal supports
+vault | is_a=structural element | means=an arched ceiling of stone or brick
+buttress | is_a=structural element | purpose=resisting the outward push of an arch or vault
+facade | is_a=part of a building | means=the face a building shows to the street
+floor plan | is_a=drawing | means=a building seen in section from above
+Gothic architecture | is_a=architectural style | involves=the pointed arch | involves=the flying buttress | involves=large stained glass windows | located_in=Europe
+Classical architecture | is_a=architectural style | located_in=Ancient Greece | involves=the column | involves=symmetry
+Mughal architecture | is_a=architectural style | located_in=India | involves=the dome | involves=inlaid stone
+Taj Mahal | is_a=mausoleum | located_in=Agra | is_a=example of Mughal architecture | consists_of=white marble
+Great Wall of China | is_a=fortification | located_in=China | purpose=defending a frontier
+Colosseum | is_a=amphitheatre | located_in=Rome | purpose=holding public spectacles
+Pyramids of Giza | is_a=tomb | located_in=Egypt | consists_of=stone
+
+# --- theatre, dance and film -------------------------------------------------------------------- #
+theatre | is_a=performing art | requires=actors | requires=an audience | has_part=script
+actor | is_a=person | purpose=performing a role in front of an audience
+theatre script | is_a=document | purpose=setting down what a play's characters say and do | has_part=dialogue | has_part=stage direction
+stage | is_a=part of a theatre | purpose=giving the performance a place the audience can see
+rehearsal | is_a=activity | purpose=preparing a performance before it is given | causes=a performance that holds together
+dance | is_a=performing art | consists_of=movement organised in time | has_kind=ballet | has_kind=folk dance | has_kind=Bharatanatyam | has_kind=Kathak
+ballet | is_a=dance | birthplace=Europe | has_property=a codified vocabulary of positions
+Bharatanatyam | is_a=classical dance | located_in=southern India | involves=hand gestures | involves=facial expression
+Kathak | is_a=classical dance | located_in=northern India | involves=rapid footwork | involves=spinning
+film | consists_of=moving images | requires=a camera | has_part=scene | has_part=shot | has_kind=documentary | has_kind=animation
+cinema | is_a=building | purpose=showing films to an audience
+director | is_a=person | purpose=deciding how a film or play is performed
+screenplay | is_a=document | purpose=setting down a film before it is shot
+documentary | is_a=film | means=a film that presents itself as a record of real events
+animation | is_a=film | means=film made from a sequence of drawn or modelled images | requires=many images per second
+Bollywood | is_a=film industry | located_in=Mumbai | has_property=Hindi language films

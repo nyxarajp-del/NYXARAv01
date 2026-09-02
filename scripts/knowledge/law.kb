@@ -1,0 +1,121 @@
+# law.kb — law, government and the machinery of the state.
+#
+# `society.kb` has fifteen lines covering government, democracy, courts and rights — enough to
+# place the subject, not enough to answer inside it. Nothing said what a bill is, what the
+# difference between a law and a policy is, what a bureaucracy does, what evidence has to be, or
+# what happens between an arrest and a verdict. Those are the questions a general-knowledge exam
+# asks about civics, and every one of them is structural, which a fact store holds well.
+#
+# Written to describe institutions rather than to endorse them: a line says what a body *does*,
+# never whether it is doing it well, because the store has no way to mark a judgement as one.
+
+# --- what law is ---------------------------------------------------------------------------------- #
+rule of law | is_a=principle | means=that everyone, including the government, is bound by law | causes=power being exercised through known rules rather than by will
+legislation | is_a=law | means=law made by a legislature | occurs_when=a bill is passed and receives assent
+statute | is_a=legislation | means=a single written law as enacted
+bill | is_a=proposal | means=a draft law placed before a legislature | causes=an act of parliament once it is passed and assented to
+act of parliament | is_a=statute | means=a bill that has become law
+amendment | is_a=change | means=a formal alteration to a law or a constitution | requires=the procedure the original document sets out
+repeal | is_a=action | means=cancelling a law that is in force
+regulation | is_a=rule | means=a detailed rule made under the authority of a statute | purpose=filling in how a law works in practice
+policy | is_a=plan | means=what a government intends to do about something | has_property=not itself binding law
+precedent | is_a=principle | means=an earlier decision that later courts are expected to follow | causes=like cases being decided alike
+jurisdiction | is_a=authority | means=the range of matters and places a court or body may decide on
+common law | is_a=legal system | means=a system in which judges' decisions are themselves a source of law
+civil law system | is_a=legal system | means=a system built on comprehensive written codes
+constitutional law | is_a=branch of law | means=the law about how the state itself is organised and limited
+criminal procedure | is_a=branch of law | means=the rules for how a criminal case is investigated and tried
+international law | is_a=branch of law | means=the law governing relations between states | involves=treaties | involves=custom
+treaty | is_a=agreement | means=a binding agreement between states | requires=ratification to take effect
+
+# --- crime, and the process ------------------------------------------------------------------------- #
+crime | is_a=action | means=an act the law forbids and punishes | has_kind=theft | has_kind=fraud | has_kind=assault | causes=prosecution by the state
+theft | is_a=crime | means=taking someone's property intending to keep it
+fraud | is_a=crime | means=gaining something by deliberate deception
+bribery | is_a=crime | means=offering or taking something of value to influence an official act | causes=corruption
+corruption | is_a=problem | means=the use of public office for private gain | causes=loss of trust in institutions | causes=public money not reaching what it was meant for
+arrest | is_a=action | means=taking a person into custody on suspicion of an offence | requires=lawful grounds
+warrant | is_a=document | purpose=authorising an arrest or a search | requires=being issued by a court
+bail | is_a=release | means=release before trial on conditions, usually including a promise to appear
+criminal charge | is_a=accusation | means=the formal statement of the offence a person is said to have committed
+prosecution | is_a=party | means=the side that brings a criminal case on behalf of the state
+defence | is_a=party | means=the side that answers the case against the accused
+trial | is_a=proceeding | purpose=deciding whether the case against the accused is proved | has_part=evidence | has_part=argument | has_part=verdict
+witness | is_a=person | purpose=giving evidence of what they saw or know | requires=an oath
+testimony | is_a=evidence | means=what a witness states under oath
+cross examination | is_a=procedure | purpose=testing a witness's account by questioning it
+verdict | is_a=decision | means=the finding on whether the case is proved
+acquittal | is_a=verdict | means=a finding that the case was not proved | causes=the accused going free
+conviction | is_a=verdict | means=a finding that the case was proved | causes=a criminal sentence
+criminal sentence | is_a=decision | means=the penalty a convicted person receives | has_kind=fine | has_kind=imprisonment | has_kind=community service
+appeal | is_a=proceeding | means=asking a higher court to review a decision | requires=a ground such as an error of law
+jury | is_a=body | means=ordinary people who decide the facts of a case | has_property=used in some legal systems and not others
+beyond reasonable doubt | is_a=standard of proof | means=the level of certainty a criminal conviction requires | has_property=higher than the standard in a civil case
+balance of probabilities | is_a=standard of proof | means=the standard in a civil case, that a thing is more likely than not
+double jeopardy | is_a=principle | means=that a person may not be tried twice for the same offence
+
+# --- civil law and everyday legal life --------------------------------------------------------------- #
+civil case | is_a=proceeding | means=a dispute between private parties rather than a prosecution | causes=a remedy such as damages rather than a punishment
+damages | is_a=remedy | means=money awarded to make good a loss
+breach of contract | is_a=wrong | occurs_when=a party fails to do what a contract required | causes=a claim for damages
+negligence | is_a=wrong | means=failing to take the care a reasonable person would | causes=legal liability for the harm that follows
+legal liability | is_a=status | means=being legally responsible for something
+property | is_a=right | means=what a person may hold, use and dispose of | has_kind=movable property | has_kind=immovable property | has_kind=intellectual property
+intellectual property | is_a=property | means=rights over creations of the mind | has_kind=copyright | has_kind=patent | has_kind=trademark
+copyright | is_a=intellectual property | purpose=giving an author control over copying their work | has_property=lasts for a fixed term
+patent | is_a=intellectual property | purpose=giving an inventor exclusive rights for a period | requires=the invention being new and disclosed
+trademark | is_a=intellectual property | purpose=protecting a sign that identifies whose goods these are
+will | is_a=document | purpose=directing what happens to a person's property after their death | requires=witnesses
+deed | is_a=document | purpose=recording the transfer of property
+licence | is_a=permission | means=official permission to do something otherwise not allowed
+lease | is_a=contract | means=the right to use property for a period in return for rent
+insurance policy | is_a=contract | purpose=shifting the cost of a loss to an insurer in return for a premium
+consumer rights | is_a=right | purpose=protecting a buyer against unsafe or misdescribed goods | causes=a right to refund or repair
+right to information | is_a=right | purpose=letting a citizen ask a public body for its records | causes=greater accountability
+
+# --- how a government is put together -------------------------------------------------------------------- #
+legislature | is_a=branch of government | purpose=making law | has_kind=parliament | has_kind=congress | has_kind=assembly
+executive branch | is_a=branch of government | purpose=carrying out and enforcing law | has_part=head of government | has_part=civil service
+head of state | is_a=office | means=the person who formally represents the state | has_kind=president | has_kind=monarch
+head of government | is_a=office | means=the person who actually leads the government | has_kind=prime minister
+cabinet | is_a=body | means=the senior ministers who decide policy together | requires=collective responsibility
+minister | is_a=office | purpose=heading a department of government
+civil service | is_a=institution | purpose=carrying out government decisions and running public services | has_property=permanent while governments change
+bureaucracy | is_a=institution | means=administration by officials working to written rules | causes=consistency | causes=delay when rules multiply
+department | is_a=body | means=a division of government responsible for one field
+local government | is_a=institution | purpose=deciding and delivering local services | has_kind=municipality | has_kind=panchayat
+federalism | is_a=principle | means=power divided between a central government and regional ones | causes=some matters being decided regionally
+unitary state | is_a=state | means=a state where the central government holds the power and may delegate it
+separation of powers | is_a=principle | means=legislature, executive and judiciary kept in separate hands | purpose=stopping any one of them dominating
+checks and balances | is_a=principle | means=each branch able to restrain the others | requires=separation of powers
+coalition | is_a=government | means=a government formed by more than one party together | occurs_when=no party has a majority
+opposition | is_a=body | means=the parties not in government | purpose=scrutinising and challenging the government
+majority | is_a=condition | means=more than half the votes or seats
+quorum | is_a=requirement | means=the minimum number who must be present for business to be valid
+motion of no confidence | is_a=procedure | purpose=testing whether a government still has the support of the legislature | causes=the government falling if it is carried
+budget of a government | is_a=plan | purpose=setting out planned revenue and spending for the year | requires=approval by the legislature
+
+# --- elections and rights ------------------------------------------------------------------------------------- #
+suffrage | is_a=right | means=the right to vote | has_kind=universal adult suffrage
+universal adult suffrage | is_a=suffrage | means=every adult citizen having the vote regardless of property, sex or race
+constituency | is_a=area | means=the area whose voters elect one representative
+ballot | is_a=method | means=the paper or record on which a vote is cast | has_property=secret in a free election
+secret ballot | is_a=principle | purpose=letting a person vote without anyone knowing how | causes=voting free of intimidation
+electoral roll | is_a=register | means=the list of who may vote | requires=being kept up to date
+first past the post | is_a=electoral system | means=the candidate with the most votes wins the seat
+proportional representation | is_a=electoral system | means=seats allotted in proportion to votes received
+political party | is_a=organisation | purpose=contesting elections and forming a government | involves=a programme
+manifesto | is_a=document | purpose=setting out what a party promises to do if elected
+campaign | is_a=activity | purpose=persuading voters before an election
+census | is_a=survey | purpose=counting the population and recording what it is like | has_property=usually taken every ten years
+freedom of speech | is_a=right | means=the right to express views without prior restraint | has_property=limited by laws against defamation and incitement
+freedom of assembly | is_a=right | means=the right to gather peacefully
+freedom of religion | is_a=right | means=the right to hold and practise a belief or none
+equality before the law | is_a=right | means=that the same law applies to everyone
+due process | is_a=principle | means=that a person may not be deprived of liberty or property except by fair procedure
+habeas corpus | is_a=legal remedy | purpose=requiring that a detained person be brought before a court | causes=unlawful detention being ended
+rule against retrospective law | is_a=principle | means=that an act cannot be punished under a law passed after it was done
+civil disobedience | is_a=action | means=deliberately and openly breaking a law to protest against it | involves=accepting the penalty
+petition | is_a=document | purpose=asking an authority formally to do something
+ombudsman | is_a=office | purpose=investigating complaints against public bodies
+audit | is_a=examination | purpose=checking that money was spent as it was authorised | causes=accountability for public funds

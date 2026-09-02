@@ -1,0 +1,80 @@
+# microbes.kb — bacteria, viruses, fungi and the very small things that decide a great deal.
+#
+# `biology.kb` has `bacterium`, `virus` and `fungus` as one line each; `medicine.kb` has the
+# diseases they cause. Neither says what a virus actually is, why an antibiotic does nothing to
+# one, what fermentation is doing, or how immunity is acquired — which is most of what a question
+# about this subject asks, and all of it structural enough for a fact store to hold.
+#
+# It matters beyond biology: `health.kb` says handwashing causes large falls in disease and
+# `food.kb` says fermentation makes curd, and until this file neither had a mechanism behind it.
+
+# --- the microbial world ------------------------------------------------------------------------ #
+micro-organism | is_a=organism | means=an organism too small to see with the unaided eye | has_kind=bacterium | has_kind=virus | has_kind=fungus | has_kind=protozoan | has_kind=alga | requires=a microscope to be seen
+microbiology | is_a=discipline | means=the study of micro-organisms | involves=culture | involves=microscopy
+microbiome | is_a=community | means=all the micro-organisms living in one place, such as a gut | purpose=digestion and competition against harmful microbes | located_in=the human gut and skin
+pathogen | is_a=micro-organism | means=a micro-organism that causes disease | has_property=only a small minority of microbes are these
+culture of microbes | is_a=method | means=growing micro-organisms deliberately on a medium | purpose=identifying what is present and testing what kills it
+sterilisation | is_a=process | purpose=destroying every micro-organism on a surface or in a liquid | requires=heat, chemicals or radiation
+autoclave | is_a=equipment | purpose=sterilising with steam under pressure | requires=temperature above the ordinary boiling point
+petri dish | is_a=equipment | purpose=holding a growth medium so colonies can be seen and counted
+colony | is_a=group | means=a visible mass grown from a single micro-organism | causes=counting being possible
+
+# --- bacteria ------------------------------------------------------------------------------------- #
+bacterium | is_a=micro-organism | has_property=a single cell with no nucleus | is_a=prokaryotic cell | capable_of=dividing every twenty minutes in good conditions | has_property=most kinds are harmless or useful
+bacterial cell wall | is_a=structure | part_of=bacterium | purpose=holding the cell's shape against internal pressure | causes=the target several antibiotics act on
+flagellum | is_a=structure | purpose=driving a cell through liquid | located_in=some bacteria and some sperm cells
+spore | is_a=structure | purpose=surviving conditions that would kill the ordinary cell | has_property=can remain viable for years | causes=infection returning after apparent cleaning
+binary fission | is_a=process | means=one cell dividing into two identical cells | has_property=how bacteria reproduce | causes=exponential growth
+plasmid | is_a=structure | means=a small ring of DNA separate from the main chromosome | capable_of=being passed between bacteria | causes=antibiotic resistance spreading between species
+antibiotic resistance gene | is_a=gene | located_in=plasmids and chromosomes | causes=an antibiotic no longer working | occurs_when=resistant cells survive a course and multiply
+useful bacterium | is_a=bacterium | purpose=fermentation, nitrogen fixation and digestion | has_kind=lactobacillus | has_kind=rhizobium
+lactobacillus | is_a=useful bacterium | purpose=turning milk into curd | causes=lactic acid
+rhizobium | is_a=useful bacterium | located_in=the root nodules of legumes | purpose=nitrogen fixation | causes=soil fertility
+cyanobacteria | is_a=bacterium | capable_of=photosynthesis | causes=much of the oxygen in the early atmosphere
+tuberculosis bacterium | is_a=pathogen | causes=tuberculosis | has_property=slow growing, so treatment is long
+salmonella | is_a=pathogen | causes=food poisoning | located_in=undercooked meat and eggs | requires=thorough cooking to destroy
+
+# --- viruses -------------------------------------------------------------------------------------- #
+virus | is_a=micro-organism | means=genetic material in a protein coat that can only reproduce inside a host cell | has_property=not able to reproduce on its own | has_property=far smaller than a bacterium | requires=a host cell
+capsid | is_a=structure | part_of=virus | means=the protein coat around a virus's genetic material | purpose=protecting the genome and attaching to a host cell
+viral envelope | is_a=structure | part_of=virus | means=a fatty outer layer some viruses carry | causes=soap destroying those viruses readily
+host cell | is_a=cell | means=the cell a virus enters and uses to make copies of itself | causes=the cell usually being destroyed
+viral replication | is_a=process | means=a virus making copies of itself using a host cell's machinery | requires=a host cell | causes=new virus particles released
+mutation of a virus | is_a=process | means=a change in a virus's genetic material as it copies | causes=new variants | causes=vaccines needing to be updated
+variant | is_a=version | means=a form of a virus differing from those before it | occurs_when=mutations accumulate
+influenza virus | is_a=virus | causes=influenza | has_property=changes enough each year that the vaccine is reformulated
+coronavirus | is_a=virus | has_property=an envelope with projecting spikes | causes=respiratory illness
+bacteriophage | is_a=virus | means=a virus that infects bacteria | purpose=being investigated as an alternative to antibiotics
+antiviral | is_a=medicine | purpose=interfering with a virus's replication | has_property=works differently from an antibiotic
+antibiotic and virus | is_a=common confusion | means=that an antibiotic does nothing against a virus | causes=needless prescriptions and greater resistance | requires=knowing which kind of infection it is
+
+# --- fungi, protozoa and the rest ------------------------------------------------------------------- #
+fungus | is_a=organism | has_property=has a cell wall of chitin rather than cellulose | has_property=cannot photosynthesise | purpose=decomposition
+mould | is_a=fungus | located_in=damp surfaces and old food | causes=spoilage | causes=allergy in some people
+hyphae | is_a=structure | part_of=fungus | means=the fine threads a fungus grows as | causes=a network spreading through its food
+mycelium | is_a=structure | means=the whole mass of hyphae a fungus forms
+fungal infection | is_a=infection | occurs_when=a fungus grows on or in the body | has_kind=athlete's foot | has_kind=ringworm | requires=antifungal treatment
+protozoan | is_a=micro-organism | has_property=a single cell with a nucleus | has_kind=amoeba | has_kind=plasmodium
+amoeba | is_a=protozoan | capable_of=changing shape to move and feed | located_in=fresh water and soil
+plasmodium | is_a=protozoan | causes=malaria | requires=a mosquito to reach a new host
+parasitic worm | is_a=parasite | located_in=the gut of a host | causes=malnutrition | requires=sanitation to interrupt
+
+# --- infection and defence ------------------------------------------------------------------------------ #
+disease transmission | is_a=process | means=a pathogen passing from one host to another | has_kind=airborne transmission | has_kind=waterborne transmission | has_kind=vector borne transmission | has_kind=contact transmission
+airborne transmission | is_a=disease transmission | occurs_when=droplets or fine particles carry a pathogen through the air | requires=ventilation and distance to interrupt
+waterborne transmission | is_a=disease transmission | occurs_when=drinking water carries a pathogen | causes=cholera and typhoid | requires=safe water and sanitation to interrupt
+disease vector | is_a=organism | means=an animal that carries a pathogen between hosts without being made ill | has_kind=mosquito | has_kind=tick | causes=malaria and dengue reaching people
+zoonosis | is_a=disease | means=a disease that passes from animals to people | has_property=the origin of many new human diseases
+infection process | is_a=process | means=a pathogen entering, multiplying and damaging a host | requires=a route of entry
+immune response | is_a=process | purpose=recognising and destroying what does not belong | has_part=innate immunity | has_part=adaptive immunity
+innate immunity | is_a=immune response | means=the defences a body has from the start | has_property=fast and not specific | has_part=skin | has_part=inflammation
+adaptive immunity | is_a=immune response | means=defence tailored to a particular pathogen | requires=exposure | causes=memory of that pathogen | has_property=slower the first time and fast afterwards
+antigen | is_a=molecule | means=a marker on a pathogen that the immune system recognises | causes=antibodies being made against it
+antibody as a protein | is_a=protein | purpose=binding to one particular antigen | causes=the pathogen being neutralised or marked for destruction
+memory cell | is_a=cell | purpose=remembering a pathogen so a second exposure is dealt with quickly | causes=immunity lasting after an infection or a vaccine
+vaccine as a preparation | is_a=preparation | purpose=teaching adaptive immunity a pathogen without the disease | consists_of=a weakened, killed or partial pathogen | causes=memory cells
+booster dose | is_a=dose | purpose=restoring protection that has faded | occurs_when=antibody levels fall over time
+inflammation as a response | is_a=response | means=redness, heat, swelling and pain where tissue is damaged or infected | purpose=bringing immune cells and sealing the area | has_property=harmful when it persists
+fever as a response | is_a=response | means=a raised body temperature | purpose=making conditions worse for many pathogens | requires=medical attention when very high or prolonged
+disinfection | is_a=process | purpose=killing most micro-organisms on a surface | has_property=less complete than sterilisation
+soap and microbes | is_a=mechanism | means=soap breaking the fatty membranes of many microbes and lifting the rest off the skin | causes=handwashing working without any antiseptic

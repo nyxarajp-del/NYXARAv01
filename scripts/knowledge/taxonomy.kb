@@ -1,0 +1,129 @@
+# taxonomy.kb — the joins that make the hierarchy walkable.
+#
+# A taxonomy is only as good as its links, and 839 of this corpus's 1,269 kinds had no parent at
+# all. Most of those are roots and belong that way — `process`, `activity`, `phenomenon` sit at the
+# top and nothing is above them. But 124 were **compound nouns whose head is itself a classified
+# kind**, sitting unattached: `island country` had no parent, so Japan was not a country by any
+# walk; `precious metal` had none, so gold was not a metal; `blood cell` had none, so a red blood
+# cell was not a cell.
+#
+# That is invisible until something walks the hierarchy. It made `constraint` refuse "what is the
+# capital of the country whose currency is the yen" — the search for a country found nothing,
+# because no country it knew about was one. Every inheritance, every commonality and every
+# odd-one-out was quietly weaker for the same reason.
+#
+# The rule these were found by is mechanical and stated so it can be checked: an English head-final
+# compound **is a** its head. An "island country" is a country; a "chemical element" is an element.
+# It does not hold for head-initial phrases — a "creature in mythology" is not a mythology, a "unit
+# of time" is not a time — so anything containing " of " or " in " was excluded, and a further list
+# was rejected by hand where the head is a different sense of the word ("gas giant" against the
+# giant of folklore) or where the phrase is a description rather than a compound.
+#
+# Nothing here is a new claim about the world. Every line says a thing is what its own name already
+# says it is, and the corpus simply never wrote it down.
+
+aerodynamic force | is_a=force
+agricultural scientist | is_a=scientist
+animal behaviour | is_a=behaviour
+astronomical discovery | is_a=discovery
+astronomical law | is_a=law
+biological polymer | is_a=polymer
+blood cell | is_a=cell
+building material | is_a=material
+character encoding standard | is_a=standard
+chemical element | is_a=element
+chess position | is_a=position
+chronic disease | is_a=disease
+classical dance | is_a=dance
+classical language | is_a=language
+combat sport | is_a=sport
+computer scientist | is_a=scientist
+connective tissue | is_a=tissue
+constructed language | is_a=language
+contact force | is_a=force
+cricket position | is_a=position
+cultural practice | is_a=practice
+deductive argument | is_a=argument
+diagnostic test | is_a=test
+dystopian novel | is_a=novel
+early modern novel | is_a=novel
+electromagnetic wave | is_a=wave
+ethical position | is_a=position
+federal republic | is_a=republic
+film director | is_a=director
+financial asset | is_a=asset
+financial contract | is_a=contract
+folk art | is_a=art
+food ingredient | is_a=ingredient
+football position | is_a=position
+football rule | is_a=rule
+fundamental force | is_a=force
+geometric quantity | is_a=quantity
+germanic language | is_a=language
+health risk | is_a=risk
+heat engine | is_a=engine
+homogeneous mixture | is_a=mixture
+household appliance | is_a=appliance
+hybrid sport | is_a=sport
+hygiene practice | is_a=practice
+indo-aryan language | is_a=language
+infectious disease | is_a=disease
+ionic compound | is_a=compound
+island country | is_a=country
+large molecule | is_a=molecule
+longitudinal wave | is_a=wave
+mangrove forest | is_a=forest
+markup language | is_a=language
+martial art | is_a=art
+mathematical theorem | is_a=theorem
+medical emergency | is_a=emergency
+motor sport | is_a=sport
+musical genre | is_a=genre
+musical practice | is_a=practice
+musical work | is_a=work
+natural hazard | is_a=hazard
+natural satellite | is_a=satellite
+nerve cell | is_a=cell
+neural network architecture | is_a=architecture
+nucleic acid | is_a=acid
+optimisation algorithm | is_a=algorithm
+organic compound | is_a=compound
+organic fertiliser | is_a=fertiliser
+philosophical position | is_a=position
+philosophical work | is_a=work
+physical law | is_a=law
+physical quantity | is_a=quantity
+physical state | is_a=state
+plant behaviour | is_a=behaviour
+plant material | is_a=material
+plant organ | is_a=organ
+plant tissue | is_a=tissue
+political territory | is_a=territory
+programming language | is_a=language
+protected area | is_a=area
+query language | is_a=language
+radioactive element | is_a=element
+reflected sound | is_a=sound
+religious position | is_a=position
+religious practice | is_a=practice
+religious teacher | is_a=teacher
+romance language | is_a=language
+scalar quantity | is_a=quantity
+semitic language | is_a=language
+sentence element | is_a=element
+service occupation | is_a=occupation
+slavic language | is_a=language
+small tool | is_a=tool
+social behaviour | is_a=behaviour
+spiral galaxy | is_a=galaxy
+staple food | is_a=food
+strong acid | is_a=acid
+structural element | is_a=element
+surface material | is_a=material
+synthetic polymer | is_a=polymer
+system software | is_a=software
+temperature scale | is_a=scale
+time standard | is_a=standard
+trade network | is_a=network
+vector quantity | is_a=quantity
+wave behaviour | is_a=behaviour

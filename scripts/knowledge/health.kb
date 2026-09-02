@@ -1,0 +1,99 @@
+# health.kb — safety, first aid, hygiene and public health.
+#
+# `medicine.kb` is diagnosis and disease; `body.kb` is anatomy. Neither says what to do when
+# something happens, and `everyday.kb` has `first aid` as a single line with no content behind it.
+# So the whole practical layer was missing: what a burn needs, what choking is, what a smoke alarm
+# does, what an epidemic requires to stop.
+#
+# **This is a fact store, not a clinician.** Every line is written as what a thing *is* or what a
+# recognised procedure *aims at*, never as an instruction addressed to a reader, and anything
+# whose answer depends on the particular person is left out entirely. Where the honest content of
+# a fact is "get professional help", that is what the fact says — `requires=medical help` appears
+# on every line where it is the truth, rather than a procedure being described in enough detail to
+# be attempted from it.
+
+# --- safety in general ---------------------------------------------------------------------------- #
+safety | is_a=condition | means=being free from unacceptable risk of harm | requires=hazards being identified | requires=controls that work without being remembered
+hazard | is_a=thing | means=something with the potential to cause harm
+risk of harm | is_a=measure | means=how likely a hazard is to cause harm and how bad it would be | causes=priorities for what to fix first
+accident | is_a=event | means=an unintended event causing harm | has_property=usually preceded by several smaller failures
+prevention | is_a=approach | means=stopping harm before it happens rather than treating it after | has_property=almost always cheaper than the harm
+protective equipment | is_a=equipment | purpose=putting a barrier between a person and a hazard | has_kind=helmet | has_kind=gloves | has_kind=goggles | has_kind=mask
+emergency | is_a=situation | means=a situation needing immediate action to prevent serious harm | requires=knowing who to call before it happens
+emergency number | is_a=service | purpose=reaching police, fire or ambulance quickly | requires=being known in advance
+evacuation | is_a=procedure | means=moving people away from danger | requires=a route that is kept clear | requires=an agreed assembly point
+fire safety | is_a=practice | purpose=preventing fires and surviving them | requires=smoke alarms | requires=clear exits | requires=an extinguisher suited to the fire
+smoke alarm | is_a=safety device | purpose=warning of a fire before it is seen | causes=far more time to get out | requires=working batteries
+fire extinguisher | is_a=safety device | purpose=putting out a small fire before it spreads | has_property=different kinds suit different fires
+fire triangle | is_a=model | means=that a fire needs fuel, heat and oxygen together | causes=removing any one of the three putting it out
+electrical safety | is_a=practice | purpose=preventing shock and fire from wiring and appliances | requires=earthing | requires=fuses | requires=not overloading a socket
+electric shock | is_a=injury | occurs_when=current passes through the body | causes=burns and disturbed heart rhythm | requires=the supply being switched off before anyone touches the person
+road safety | is_a=practice | purpose=reducing death and injury in traffic | requires=seat belts | requires=helmets | requires=speed suited to the road
+drowning | is_a=emergency | occurs_when=breathing is prevented by water | requires=medical help | has_property=often silent rather than noisy
+water safety | is_a=practice | purpose=preventing drowning | requires=supervision of children near water | requires=knowing how to swim
+poison | is_a=substance | means=a substance that causes harm when it enters the body | requires=medical help if swallowed | requires=being stored where children cannot reach it
+carbon monoxide | is_a=poison | has_property=colourless and odourless | occurs_when=fuel burns without enough air | causes=poisoning indoors | requires=ventilation and detectors
+disaster preparedness | is_a=practice | purpose=being ready before a flood, earthquake or storm arrives | requires=a plan | requires=supplies of water and medicine
+earthquake safety | is_a=practice | purpose=surviving a quake and its aftermath | requires=knowing where the safe places in a building are
+flood safety | is_a=practice | purpose=surviving a flood | requires=moving to higher ground early | has_property=moving water is far more dangerous than it looks
+
+# --- first aid, described honestly ---------------------------------------------------------------------- #
+first aid | means=the immediate help given before professional care arrives | purpose=preserving life and preventing the injury getting worse | requires=training to be done well | has_property=not a substitute for medical help
+first aid kit | is_a=equipment | purpose=having the basics to hand when they are needed | has_part=bandage | has_part=antiseptic | has_part=scissors | has_part=gloves
+bandage | is_a=dressing | purpose=holding a dressing in place and supporting an injury
+dressing | is_a=material | purpose=covering a wound to keep it clean
+antiseptic | is_a=substance | purpose=killing micro-organisms on skin or a wound
+wound | is_a=injury | means=a break in the skin | requires=being kept clean | causes=infection if contaminated
+bleeding | is_a=emergency | occurs_when=a blood vessel is cut | requires=medical help when heavy or continuing | has_property=direct pressure is the recognised first response
+burn | is_a=injury | occurs_when=skin is damaged by heat, chemicals or electricity | requires=cooling with clean running water | requires=medical help when large, deep or on the face or hands
+fracture as an injury | is_a=injury | means=a broken bone | requires=medical help | requires=the limb not being moved unnecessarily
+sprain | is_a=injury | means=a stretched or torn ligament at a joint | causes=swelling and pain on movement
+choking | is_a=emergency | occurs_when=the airway is blocked | requires=immediate action | requires=medical help | has_property=a person who cannot speak or cough is completely obstructed
+CPR as a procedure | is_a=emergency procedure | means=chest compressions and rescue breaths given when the heart has stopped | purpose=keeping blood moving until help arrives | requires=training | requires=an ambulance being called first
+recovery position | is_a=procedure | purpose=keeping the airway open in an unconscious person who is breathing | requires=training
+fainting | is_a=event | occurs_when=blood flow to the brain briefly falls | causes=a short loss of consciousness | requires=medical help if it repeats or follows an injury
+heatstroke | is_a=emergency | occurs_when=the body can no longer shed heat fast enough | causes=confusion and a very high temperature | requires=medical help | requires=cooling and shade at once
+dehydration as an emergency | is_a=condition | occurs_when=more water is lost than taken in | causes=dizziness and reduced urine | requires=fluids | requires=medical help when severe
+oral rehydration solution | is_a=treatment | purpose=replacing water and salts lost in diarrhoea | causes=a very large fall in deaths from diarrhoeal disease | consists_of=clean water, salt and sugar in fixed proportions
+snakebite | is_a=emergency | requires=medical help | requires=the limb being kept still and below the heart | has_property=antivenom is the definitive treatment
+allergic reaction | is_a=emergency | occurs_when=the immune system responds strongly to a harmless substance | requires=medical help when breathing or swelling is involved
+
+# --- hygiene and prevention ---------------------------------------------------------------------------------- #
+handwashing with soap | is_a=practice | purpose=removing and killing micro-organisms on the hands | causes=large falls in diarrhoeal and respiratory disease | requires=soap and twenty seconds
+personal hygiene | is_a=practice | means=keeping the body and its surroundings clean | causes=fewer infections | has_kind=handwashing with soap | has_kind=oral hygiene
+oral hygiene | is_a=personal hygiene | purpose=preventing tooth decay and gum disease | requires=brushing twice a day
+safe drinking water | is_a=need | means=water free of pathogens and harmful chemicals | requires=treatment or boiling where the source is unsafe | causes=most waterborne disease when absent
+boiling water for safety | is_a=technique | purpose=killing pathogens in drinking water | requires=a rolling boil
+food hygiene | is_a=practice | purpose=stopping food causing illness | requires=clean hands | requires=cooking through | requires=raw and cooked food kept apart
+immunisation | is_a=practice | means=giving vaccines on a schedule | purpose=protecting a person and, through herd immunity, those who cannot be vaccinated
+herd immunity | is_a=phenomenon | occurs_when=enough of a population is immune that a disease cannot spread freely | causes=protection for those who cannot be vaccinated
+screening | is_a=practice | means=testing people without symptoms to find a disease early | causes=treatment starting when it works better
+incubation period | is_a=period | means=the time between infection and the first symptoms | causes=a person spreading a disease before knowing they have it
+isolation | is_a=measure | means=separating people who are ill from those who are not
+contact tracing | is_a=practice | purpose=finding who an infected person may have exposed | causes=chains of transmission being broken
+outbreak | is_a=event | means=more cases of a disease than expected in a place and time | requires=investigation to find the source
+notifiable disease | is_a=category | means=a disease that must be reported to health authorities | purpose=letting an outbreak be seen while it is small
+sanitisation | is_a=practice | means=reducing micro-organisms on surfaces to a safe level
+
+# --- health as a system and a habit ------------------------------------------------------------------------------ #
+public health | is_a=discipline | means=protecting and improving the health of whole populations | involves=immunisation | involves=nutrition | has_property=works on causes rather than cases
+health system | is_a=system | purpose=delivering care to a population | has_part=primary care | has_part=hospital | has_part=medicines supply | requires=financing
+primary care | is_a=service | means=the first level of care a person meets | purpose=treating common problems and referring the rest | causes=better outcomes at lower cost when it is strong
+hospital | is_a=building | purpose=treating people who need care that cannot be given at home | has_part=operating theatre | has_part=emergency department
+clinic | is_a=building | purpose=outpatient consultation and treatment
+health insurance | is_a=insurance policy | purpose=paying for care so a person is not ruined by an illness
+prescription | is_a=document | purpose=authorising a pharmacist to supply a particular medicine to a particular person
+dosage | is_a=instruction | means=how much of a medicine to take and how often | has_property=depends on the person, which is why it is prescribed
+side effect | is_a=effect | means=an unwanted effect of a treatment alongside its intended one
+generic medicine | is_a=medicine | means=a medicine sold under its chemical name after the patent has lapsed | causes=the same treatment at a much lower price
+self medication | is_a=practice | means=treating oneself without a professional assessment | causes=masked symptoms and resistance when antibiotics are involved
+antimicrobial resistance | is_a=problem | occurs_when=micro-organisms survive the drugs used against them | causes=infections that were treatable becoming untreatable | requires=antibiotics being used only when they are needed
+physical activity | is_a=practice | purpose=maintaining fitness and health | causes=lower risk of heart disease and diabetes | requires=regularity more than intensity
+sedentary lifestyle | is_a=pattern | means=long periods of sitting with little movement | causes=raised risk of several chronic conditions
+nutrition | is_a=discipline | means=the study of what a body needs from food and what happens when it does not get it | involves=balanced diet
+obesity | is_a=condition | means=body fat at a level that raises the risk of disease | causes=raised risk of diabetes and heart disease
+tobacco | is_a=substance | causes=lung cancer | causes=heart disease | has_property=addictive | causes=harm to bystanders through smoke
+alcohol | is_a=substance | causes=liver disease at sustained high intake | causes=impaired judgement and reaction time | has_property=affects the ability to drive at levels below obvious drunkenness
+addiction | is_a=condition | means=continued use despite harm, with difficulty stopping | requires=support and often treatment to overcome
+mental health support | is_a=service | purpose=help for psychological distress | requires=being available without stigma
+health literacy | is_a=skill | means=being able to find, understand and act on health information | causes=better decisions and fewer harmful remedies

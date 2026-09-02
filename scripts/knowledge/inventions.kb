@@ -1,0 +1,109 @@
+# inventions.kb — what was invented or discovered, and by whom.
+#
+# `technology.kb` names about fifty devices and gives an `inventor` to four of them.
+# `history.kb` gives a handful of discoveries their discoverer. So "who invented the telephone"
+# and "who discovered penicillin" — two of the most-asked general-knowledge questions there are —
+# had no answer for almost every device in the corpus.
+#
+# `inventor` and `discoverer` are functional: exactly one value each. That constraint is doing
+# real work in a domain where most inventions have a contested history, so the rule this file
+# follows is strict: **where credit is genuinely disputed or shared, no `inventor` is written at
+# all.** The device still gets its entry, with `occurs_when` for the period and `purpose` for what
+# it did; it simply carries no name. A store that must name one person cannot represent "several
+# people, independently, around the same time", and inventing a single winner to fill the field
+# would be putting a guess where the corpus promises a fact.
+
+# --- what an invention is -------------------------------------------------------------------------- #
+invention | is_a=creation | means=a device or method made for the first time | requires=a problem worth solving | causes=new possibilities that were not foreseen
+discovery | is_a=event | means=finding something that was already there but not known | has_property=different from an invention
+innovation | is_a=process | means=putting an invention into use so that it changes practice | requires=more than the invention itself
+prototype | is_a=object | means=a first working version built to test an idea | purpose=finding out what is wrong before committing
+serendipity | is_a=phenomenon | means=finding something valuable while looking for something else | causes=penicillin | causes=the microwave oven
+patent of an invention | is_a=right | purpose=letting an inventor stop others copying for a period | requires=disclosing how the invention works
+industrial research | is_a=activity | purpose=turning science into products a company can sell
+prior art | is_a=record | means=what was already known before a claimed invention | causes=a patent being refused if the idea was already public
+
+# --- the ancient and the fundamental ------------------------------------------------------------------ #
+control of fire | is_a=invention | purpose=cooking, warmth, light and protection | causes=food that is safer and easier to digest | has_property=among the oldest human technologies
+stone tool | is_a=invention | purpose=cutting, scraping and hunting | has_property=the earliest surviving human technology
+agriculture as an invention | is_a=invention | causes=settled villages | causes=food surpluses | causes=specialised trades | occurs_when=people began sowing rather than only gathering
+pottery | is_a=invention | purpose=storing and cooking food | requires=clay and fire
+writing | is_a=invention | purpose=recording language so it outlasts memory | causes=history being possible | causes=law that can be consulted
+wheel and axle | is_a=invention | purpose=moving heavy loads with less effort | causes=carts, pottery wheels and machines
+plough as an invention | is_a=invention | purpose=turning soil far faster than by hand | causes=larger fields being worked by fewer people
+irrigation as an invention | is_a=invention | purpose=growing crops where rain is unreliable | causes=cities in dry river valleys
+smelting | is_a=invention | means=getting metal out of its ore with heat | causes=the Bronze Age | causes=the Iron Age
+alphabet as an invention | is_a=invention | purpose=writing any word with a few dozen signs | causes=literacy spreading beyond a scribal class
+zero as an invention | is_a=invention | birthplace=India | purpose=marking an empty place in a written number | causes=positional notation and modern arithmetic
+paper as an invention | is_a=invention | birthplace=China | purpose=a cheap, light surface for writing | causes=records that ordinary people could keep
+gunpowder | is_a=invention | birthplace=China | causes=firearms | causes=the end of the castle as a defence
+compass as an invention | is_a=invention | birthplace=China | purpose=finding direction out of sight of land | causes=long ocean voyages
+printing press | purpose=making many identical copies of a text | causes=books becoming affordable | causes=ideas spreading faster than authorities could control
+mechanical clock | is_a=invention | purpose=dividing the day into equal measured parts | causes=coordinated work and travel
+
+# --- machines and industry ----------------------------------------------------------------------------- #
+steam engine as an invention | is_a=invention | inventor=James Watt | purpose=turning heat into useful work | causes=the Industrial Revolution | causes=factories away from rivers
+spinning jenny | is_a=invention | inventor=James Hargreaves | purpose=spinning several threads at once | causes=cloth becoming far cheaper
+cotton gin | is_a=invention | inventor=Eli Whitney | purpose=separating cotton fibre from its seed
+sewing machine | is_a=invention | purpose=stitching cloth far faster than by hand | causes=ready made clothing
+assembly line | is_a=invention | inventor=Henry Ford | purpose=building a product by moving it past workers who each do one step | causes=cars cheap enough for the people who made them
+dynamite | is_a=invention | inventor=Alfred Nobel | purpose=blasting rock safely for mining and building
+elevator brake | is_a=invention | inventor=Elisha Otis | purpose=stopping a lift if its cable breaks | causes=tall buildings being acceptable to use
+bicycle as an invention | is_a=invention | purpose=personal transport needing no fuel and no animal | causes=greater independence of movement
+motor car | is_a=invention | inventor=Karl Benz | purpose=personal transport under its own power | causes=cities spreading outward
+aeroplane as an invention | is_a=invention | purpose=powered heavier than air flight | occurs_when=the Wright brothers flew at Kitty Hawk in 1903 | causes=journeys of days becoming journeys of hours
+diesel engine | is_a=invention | inventor=Rudolf Diesel | purpose=an engine igniting fuel by compression alone
+jet engine as an invention | is_a=invention | inventor=Frank Whittle | purpose=thrust without a propeller | causes=fast high altitude flight
+helicopter as an invention | is_a=invention | inventor=Igor Sikorsky | purpose=flight without a runway
+rocket as an invention | is_a=invention | purpose=thrust that works where there is no air | causes=spaceflight
+
+# --- light, sound and signals -------------------------------------------------------------------------------- #
+telegraph | is_a=invention | inventor=Samuel Morse | purpose=sending messages over wire faster than a rider | causes=news arriving before the person carrying it
+Morse code | is_a=code | author=Samuel Morse | purpose=sending letters as short and long signals
+telephone as an invention | is_a=invention | inventor=Alexander Graham Bell | purpose=carrying the voice itself over a wire
+radio as an invention | is_a=invention | inventor=Guglielmo Marconi | purpose=sending signals without wires | causes=broadcasting to many at once
+television as an invention | is_a=invention | inventor=John Logie Baird | purpose=sending moving pictures at a distance
+photography as an invention | is_a=invention | inventor=Louis Daguerre | purpose=fixing an image made by light | causes=a record nobody had to draw
+cinema as an invention | is_a=invention | purpose=projecting moving pictures to an audience
+electric light | is_a=invention | inventor=Thomas Edison | purpose=light without flame | causes=the working day no longer ending at dusk
+phonograph | is_a=invention | inventor=Thomas Edison | purpose=recording and replaying sound | causes=music outliving the performance
+laser | is_a=invention | purpose=producing a narrow beam of one wavelength | causes=barcode scanners, surgery and fibre communication
+optical fibre as an invention | is_a=invention | purpose=carrying light down a glass thread | causes=the capacity that made the internet possible
+transistor as an invention | is_a=invention | purpose=switching and amplifying with no moving parts | causes=every computer that followed | has_property=shared credit among several researchers
+integrated circuit | is_a=invention | purpose=putting many transistors on one chip | causes=computers small and cheap enough for a desk
+microprocessor | is_a=invention | purpose=a whole processor on a single chip | causes=the personal computer
+World Wide Web as an invention | is_a=invention | inventor=Tim Berners-Lee | purpose=linked documents readable anywhere on the internet | causes=information becoming navigable by anyone
+electronic mail | is_a=invention | purpose=sending written messages between computers
+mobile telephone | is_a=invention | purpose=telephony without being tied to a place | causes=communication reaching places wire never did
+Global Positioning System | is_a=invention | purpose=finding one's position anywhere from satellite signals | requires=very accurate clocks
+
+# --- medicine and life ------------------------------------------------------------------------------------------ #
+vaccination | is_a=invention | inventor=Edward Jenner | purpose=making a person immune without their having the disease | causes=smallpox being eradicated
+penicillin as a discovery | is_a=discovery | discoverer=Alexander Fleming | purpose=killing bacteria inside the body | causes=infections that had been fatal becoming treatable | occurs_when=a mould contaminated a culture plate
+germ theory | is_a=discovery | discoverer=Louis Pasteur | means=that many diseases are caused by micro-organisms | causes=antiseptic surgery | causes=sanitation as public policy
+antiseptic surgery | is_a=invention | inventor=Joseph Lister | purpose=keeping micro-organisms out of a wound | causes=surgery surviving its own infections
+anaesthesia as an invention | is_a=invention | purpose=surgery without pain | causes=operations that could take time
+X ray as a discovery | is_a=discovery | discoverer=Wilhelm Rontgen | purpose=seeing inside the body without cutting
+structure of DNA | is_a=discovery | means=the double helix that explains how heredity is copied | causes=molecular biology | has_property=built on Rosalind Franklin's diffraction images
+insulin as a discovery | is_a=discovery | purpose=treating diabetes | causes=a fatal disease becoming a managed one
+blood circulation | is_a=discovery | discoverer=William Harvey | means=that blood is pumped round the body in a circuit
+microscope as an invention | is_a=invention | purpose=seeing what is too small for the eye | causes=cells and micro-organisms being found at all
+stethoscope | is_a=invention | inventor=Rene Laennec | purpose=listening to the heart and lungs
+pacemaker | is_a=invention | purpose=keeping a heart beating in rhythm by electrical pulses
+
+# --- the laws that were found ---------------------------------------------------------------------------------------- #
+law of gravitation | is_a=discovery | discoverer=Isaac Newton | means=that every mass attracts every other | causes=the motion of planets being explained by the same law as a falling apple
+laws of motion | is_a=discovery | discoverer=Isaac Newton | purpose=describing how force changes motion
+theory of evolution | is_a=discovery | discoverer=Charles Darwin | means=that species change over time through natural selection
+periodic table as a discovery | is_a=discovery | discoverer=Dmitri Mendeleev | means=that the elements fall into a pattern by their properties | causes=undiscovered elements being predicted before they were found
+electromagnetic induction | is_a=discovery | means=that a changing magnetic field produces a current | causes=the generator and the electric motor
+radioactivity | is_a=discovery | means=that some atoms break down and emit radiation
+electron | is_a=discovery | discoverer=J J Thomson | means=that the atom has smaller charged parts inside it
+atomic nucleus | is_a=discovery | discoverer=Ernest Rutherford | means=that an atom's mass and positive charge sit in a tiny centre
+special relativity | is_a=discovery | discoverer=Albert Einstein | means=that time and length depend on relative motion and the speed of light is fixed
+quantum theory | is_a=discovery | means=that energy comes in discrete packets | causes=chemistry, lasers and semiconductors being explicable
+expanding universe | is_a=discovery | discoverer=Edwin Hubble | means=that distant galaxies are moving away from us | causes=the Big Bang model
+continental drift | is_a=discovery | discoverer=Alfred Wegener | means=that the continents have moved across the Earth's surface
+oxygen as a discovery | is_a=discovery | means=identifying the gas that makes burning and breathing possible | causes=the overthrow of the phlogiston theory
+Archimedes principle | is_a=discovery | discoverer=Archimedes | means=that a floating body displaces its own weight of fluid
+Pythagoras theorem as a discovery | is_a=discovery | means=that the square on the hypotenuse equals the sum of the squares on the other two sides
