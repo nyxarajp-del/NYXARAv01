@@ -1,0 +1,110 @@
+# finance.kb — money, banking, business and the paperwork of earning and spending.
+#
+# `economics.kb` has the theory — supply, demand, inflation, GDP, comparative advantage — and
+# stops exactly where a person's actual questions start. What is a cheque. What is EMI. What does
+# a balance sheet show. What is the difference between a debit card and a credit card. Between
+# the macroeconomics and the wallet there was nothing at all.
+#
+# Every line here describes an instrument or a mechanism. Nothing recommends a course of action,
+# because a fact store cannot hold who the advice is for, and stating "diversify" as a fact about
+# the world would be stating advice as a fact.
+
+# --- money and payment ------------------------------------------------------------------------------ #
+cash | is_a=money | means=notes and coins in hand | has_property=settles a payment immediately | has_property=leaves no record of itself
+banknote | is_a=money | consists_of=paper or polymer | purpose=carrying value in a convenient form | requires=being issued by a central bank
+coin | is_a=money | consists_of=metal | purpose=small payments | has_property=lasts much longer than a note
+legal tender | is_a=status | means=money a creditor is obliged to accept in settlement of a debt
+fiat money | is_a=money | means=money that has value because the state declares it does, not because of what it is made of
+cheque | is_a=instrument | purpose=instructing a bank to pay a stated sum from an account | requires=a signature | requires=funds in the account
+demand draft | is_a=instrument | purpose=a payment the bank itself guarantees | has_property=cannot bounce for lack of funds
+debit card | is_a=payment card | purpose=paying directly from money already in an account | causes=the balance falling at once
+credit card | is_a=payment card | purpose=paying with money borrowed from the issuer | causes=a debt that accrues interest if not repaid in the billing period
+digital payment | is_a=payment | means=paying by transferring money electronically | has_kind=bank transfer | has_kind=mobile payment | requires=a network
+UPI | is_a=digital payment | located_in=India | purpose=instant transfers between bank accounts from a phone
+transaction | is_a=event | means=an exchange of value between two parties | causes=a record in both parties' accounts
+receipt | is_a=document | purpose=evidence that a payment was made
+invoice | is_a=document | purpose=stating what is owed for goods or services supplied | requires=being issued before payment
+exchange rate | is_a=price | means=what one currency costs in terms of another | causes=imports becoming dearer when the home currency falls
+foreign exchange | is_a=market | means=the market in which currencies are traded
+remittance | is_a=payment | means=money sent home by someone working abroad | causes=a major source of income for some countries
+
+# --- banking -------------------------------------------------------------------------------------------- #
+bank account | is_a=arrangement | purpose=holding money with a bank and moving it | has_kind=savings account | has_kind=current account | requires=identification to open
+savings account | is_a=bank account | purpose=holding money that is not needed at once | causes=interest being earned
+current account | is_a=bank account | purpose=frequent payments in and out | has_property=usually pays little or no interest
+fixed deposit | is_a=investment | means=money locked with a bank for a stated period | causes=a higher rate than a savings account | has_property=penalty for early withdrawal
+passbook | is_a=document | purpose=recording the transactions on an account
+bank statement | is_a=document | purpose=listing what went in and out of an account over a period
+ATM | is_a=machine | purpose=withdrawing cash and doing simple banking without a teller | requires=a card and a PIN
+PIN | is_a=credential | means=a personal identification number | purpose=proving that the cardholder authorised this
+interest | is_a=payment | means=what is paid for the use of borrowed money | has_kind=simple interest | has_kind=compound interest
+simple interest | is_a=interest | means=interest calculated only on the original sum
+compound interest | is_a=interest | means=interest calculated on the original sum and on interest already added | causes=a balance growing faster and faster | has_property=works against a borrower as strongly as for a saver
+principal | is_a=amount | means=the sum borrowed or invested, before interest
+mortgage | is_a=loan | purpose=buying property | requires=the property as security | has_property=repaid over many years
+EMI | is_a=payment | means=an equated monthly instalment on a loan | consists_of=part interest and part principal
+collateral | is_a=security | means=something a borrower pledges that the lender may take if the loan is not repaid
+credit score | is_a=measure | means=an assessment of how reliably a borrower has repaid before | causes=the rate a lender offers
+default | is_a=event | occurs_when=a borrower fails to repay as agreed | causes=recovery action and a damaged credit record
+overdraft | is_a=facility | means=permission to draw more than the balance in an account | causes=interest on the amount overdrawn
+central bank | is_a=bank | purpose=issuing currency and setting the policy interest rate | capable_of=acting as lender of last resort
+monetary policy | is_a=policy | purpose=influencing inflation and demand through interest rates and money supply | causes=borrowing becoming dearer when rates rise
+fiscal policy | is_a=policy | purpose=influencing the economy through government spending and taxation
+repo rate | is_a=interest rate | means=the rate at which the central bank lends to commercial banks | causes=other rates moving with it
+deposit insurance | is_a=protection | purpose=guaranteeing small depositors if a bank fails
+
+# --- saving, investing and risk ------------------------------------------------------------------------------- #
+investment | is_a=activity | means=putting money into something in the expectation of a return | involves=risk | has_kind=stock | has_kind=bond | has_kind=mutual fund | has_kind=real estate
+return | is_a=measure | means=what an investment gains or loses, as a proportion of what was put in
+risk | is_a=property of an investment | means=the chance that the outcome differs from what was expected | has_property=generally higher where expected return is higher
+diversification | is_a=technique | means=spreading money across investments that do not move together | causes=a smoother overall result
+mutual fund | is_a=investment | means=money pooled from many investors and managed together | causes=diversification a small investor could not reach alone
+share | is_a=investment | means=a unit of ownership in a company | causes=a claim on its profits | also_known_as=equity
+dividend | is_a=payment | means=a share of profit paid to shareholders | requires=the company making a profit and choosing to distribute it
+bond issue | is_a=investment | means=lending to a government or company for a fixed period at a stated rate | has_property=generally less risky than shares
+stock exchange | is_a=market | purpose=where shares are bought and sold | has_property=prices set by what buyers and sellers agree
+index of a stock market | is_a=measure | means=a number tracking the price of a chosen basket of shares | purpose=summarising how the market moved
+bull market | is_a=condition | means=a period of generally rising prices
+bear market | is_a=condition | means=a period of generally falling prices
+speculation | is_a=activity | means=buying in the hope of a price move rather than for the income | has_property=higher risk than investing for income
+pension | is_a=arrangement | purpose=providing an income after a person stops working | requires=contributions made over working life
+premium | is_a=payment | means=what is paid for an insurance policy
+claim | is_a=request | means=asking an insurer to pay for a loss the policy covers
+deductible | is_a=amount | means=the part of a loss the insured pays before the insurer pays anything
+
+# --- business ---------------------------------------------------------------------------------------------------- #
+business | is_a=organisation | purpose=producing goods or services for sale | requires=capital | requires=customers
+sole proprietorship | is_a=business | means=a business owned by one person who is personally liable for it
+partnership | is_a=business | means=a business owned by two or more people who share the profits and the liability
+limited company | is_a=business | means=a company whose owners are liable only for what they put in | causes=investors risking a known amount
+shareholder | is_a=person | means=an owner of shares in a company | capable_of=voting on major decisions
+board of directors | is_a=body | purpose=directing a company on behalf of its shareholders
+startup | is_a=business | means=a young company built around an idea it is still testing | requires=funding before it earns
+venture capital | is_a=investment | purpose=funding young companies with high risk and high potential
+profit | is_a=measure | means=revenue minus cost | causes=a business being able to continue and grow
+loss | is_a=measure | occurs_when=cost exceeds revenue | causes=capital being used up
+revenue | is_a=measure | means=the total value of what a business sold
+cost | is_a=measure | means=what was spent to produce and sell | has_kind=fixed cost | has_kind=variable cost
+fixed cost | is_a=cost | means=a cost that does not change with how much is produced | has_kind=rent
+variable cost | is_a=cost | means=a cost that rises and falls with output | has_kind=raw material
+break even point | is_a=level | means=the output at which revenue exactly covers cost
+balance sheet | is_a=statement | purpose=showing what a business owns and owes at one moment | has_part=assets | has_part=liabilities | has_part=equity
+profit and loss account | is_a=statement | purpose=showing revenue, cost and profit over a period
+asset | is_a=item | means=something of value a business or person owns
+liability | is_a=item | means=something a business or person owes
+equity of a business | is_a=measure | means=assets minus liabilities | means=what the owners' stake amounts to
+cash flow | is_a=measure | means=the money actually moving in and out over a period | has_property=a profitable business can still fail without it
+accounting | is_a=discipline | purpose=recording and reporting what a business did with money | requires=every entry balancing
+bookkeeping | is_a=activity | means=the day to day recording of transactions
+depreciation | is_a=process | means=spreading the cost of a long lived asset over the years it is used
+inventory | is_a=asset | means=the goods a business holds ready to sell | causes=money tied up while it sits
+supply chain | is_a=system | means=everything and everyone between raw material and the customer | causes=a delay anywhere showing up everywhere
+marketing | is_a=activity | purpose=finding out what customers want and telling them what is offered
+brand | is_a=asset | means=what a name has come to stand for in customers' minds
+market share | is_a=measure | means=the fraction of a market's sales that one seller has
+wholesale | is_a=trade | means=selling in bulk to those who will resell
+retail | is_a=trade | means=selling to the final customer
+goods and services tax | is_a=tax | means=a tax on the value added at each stage of supply | has_property=collected by the seller and borne by the buyer
+income tax | is_a=tax | means=a tax on what a person or company earns | has_property=usually charged at rising rates on higher income
+audit of accounts | is_a=examination | purpose=checking that a business's accounts show a true picture
+bankruptcy | is_a=status | occurs_when=a person or business cannot pay what it owes | causes=assets being distributed among creditors under law

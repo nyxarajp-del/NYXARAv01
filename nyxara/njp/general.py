@@ -68,43 +68,55 @@ confident answer. Measured: ``recall`` reported **4,572 of 4,572 right with no a
 all**, on a corpus where the shipped QA file abstains on 19% of its questions. It is its own
 verdict — ``declined`` — and it is neither right nor silent.
 
-What it measures, on the corpus as shipped (6,024 facts over 1,565 subjects, 21 domains), 400
-items a paper, in about 53 seconds::
+What it measures, on the corpus as shipped (11,402 facts over 3,144 subjects, 38 domains), 400
+items a paper, in about 145 seconds::
 
     paper          asked  right  wrong  declined  silent   score
     recall           400    334      0        66       0   0.835
-    membership       400    398      2         0       0   0.995
-    taxonomy         400    397      3         0       0   0.993
+    membership       400    399      1         0       0   0.998
+    taxonomy         400    399      1         0       0   0.998
     inheritance      400    400      0         0       0   1.000
-    inverse          304    295      0         9       0   0.970
+    inverse          400    389      0        11       0   0.973
     abstention       400    400      0         0       0   1.000   (silence is the pass)
-    soundness        328    328      0         0       0   1.000   (silence is the pass)
+    soundness        400    400      0         0       0   1.000   (silence is the pass)
 
-    2552/2632 = 0.970 overall
-    of what she answered: 1424 through English, 400 only through the derivation ladder
+    2721/2800 = 0.972 overall
+    of what she answered: 1521 through English, 400 only through the derivation ladder
+    not asked: 43 inheritance chains longer than 3 hops, which the walk cannot afford
 
-Read four of those rows before the total.
+Read five of those rows before the total.
 
 ``membership`` and ``taxonomy`` scored **0.000** before this change set — 0 of 300 and 0 of 300,
 re-measured by putting the table back the way it was. "Is the sun a star" returned UNKNOWN with
 ``why="no claim either way about this pair"`` and ``sun is_a star`` sitting in the store, because
 ``is_a`` appeared in no row of ``grounding._POLAR_PREFERENCE`` nor in its default, so the only
 relations the scan ever tried were ``has_property`` and ``capable_of``. One name added to one
-table moved both papers to 0.99. The three items still wrong are one subject — *One Hundred Years
+table moved both papers to 0.99. The two items still wrong are one subject — *One Hundred Years
 of Solitude* — and one cause: :meth:`Grounder._read_polar_surface` searches at most four words for
-where the subject ends, and five of the corpus's 1,565 subjects are longer than that. It is a real
-ceiling, it is 0.3% of the corpus, and it is named here rather than tuned away.
+where the subject ends, and a handful of the corpus's 3,144 subjects are longer than that. It is a real
+ceiling, it is a fraction of a percent of the corpus, and it is named here rather than tuned away.
 
 ``inheritance`` is 400/400 and **every one of them came through the ladder, none through English**.
 That is the most useful number in the table: she can derive a property she was never told and
-there is no English sentence that asks her to. The 1,424-to-400 split at the foot of the report is
+there is no English sentence that asks her to. The 1,521-to-400 split at the foot of the report is
 the size of that gap.
 
 ``soundness`` is the acceptance test for :data:`nyxara.njp.core._NOT_INHERITABLE`, and it swings
-**328/328 with the guard to 0/328 without it**. Every one of those 328 was answered before the
-guard, and every answer was false with a chain behind it: "the types of aircraft: car"; "the types
-of an ammeter: a ruler"; "the types of the Amazon rainforest: the Amazon rainforest". Inheritance
-was being applied to relations that carry no downward inference at all.
+**every item with the guard to none of them without it** — measured at 328/328 against 0/328 when
+the corpus was half this size, and re-measured whenever the paper runs. Every one of those was
+answered before the guard, and every answer was false with a chain behind it: "the types of
+aircraft: car"; "the types of an ammeter: a ruler"; "the types of the Amazon rainforest: the
+Amazon rainforest". Inheritance was being applied to relations that carry no downward inference
+at all.
+
+The **43 chains not asked** are the other half of that discipline, in the opposite direction. They
+are inheritance opportunities four or more ``is_a`` hops up, which
+:meth:`~nyxara.njp.core.CognitiveLearningCore._inherit` prices below
+:data:`~nyxara.njp.core._MIN_LINK_CONFIDENCE` and correctly declines — "an actor has a backbone",
+true, and reached through *person → human being → mammal → vertebrate*, which is a very weak claim
+however true it happens to be. Asking them scored her at 0.973 for refusing to overreach. The
+bound is :data:`MAX_INHERITED_HOPS`, it was measured rather than chosen, and what it excludes is
+printed rather than dropped.
 
 ``recall``'s 66 declined are not misses. They are relations holding several objects at equal
 confidence, where she will not pick one — the same outcome ``prepare_knowledge_corpus`` documents
@@ -136,6 +148,39 @@ DEFAULT_LIMIT = 400
 #: The seed every paper's sampling uses, so two runs of the examination ask the same questions and
 #: a score that moved means something changed in her rather than in the dice.
 DEFAULT_SEED = 20260902
+
+#: How far up the ``is_a`` hierarchy the ``inheritance`` paper will reach for a gold answer.
+#:
+#: :attr:`CognitiveLearningCore.max_depth` is 4, and it is **not** the binding limit — price is.
+#: :meth:`~nyxara.njp.core.CognitiveLearningCore._inherit` multiplies the running confidence by the
+#: kind's own confidence and by the ``is_a`` transitivity posterior at every hop, and abandons the
+#: chain once the product falls under :data:`~nyxara.njp.core._MIN_LINK_CONFIDENCE` (0.05). On this
+#: corpus — curated facts at 0.85, an ``is_a`` posterior near 0.55 — the fourth ancestor arrives at
+#: roughly 0.042 and is refused.
+#:
+#: The cliff was measured rather than derived, over 687 inheritance opportunities:
+#:
+#: ===================================  ===============
+#: nearest ancestor holding the answer  answered
+#: ===================================  ===============
+#: level 1                              446 / 446  1.000
+#: level 2                              167 / 167  1.000
+#: level 3                                58 / 58  1.000
+#: level 4                                 0 / 13  0.000
+#: level 5                                  0 / 3  0.000
+#: ===================================  ===============
+#:
+#: Perfectly sharp, and in the right place. ``actor is_a person is_a human being is_a mammal is_a
+#: vertebrate has_part backbone`` is a true statement she correctly declines to make, because a
+#: property inherited from four levels up is a very weak claim and the walk prices it as one.
+#:
+#: So the exam stops where the walk can still pay. That is the same rule the corpus builder applies
+#: to a subject English cannot name (``prepare_knowledge_corpus.unaskable_subjects``) and to the
+#: relations with no question form (``_GRAPH_ONLY``): **an item guaranteed to be unanswerable is a
+#: guaranteed-wrong item, and scoring it measures the corpus rather than her.** What is *not* done
+#: is hiding the exclusion. :meth:`GeneralKnowledgeExam.sit` counts every opportunity it dropped for
+#: this reason and :func:`render` prints the count, so the bound can never quietly widen.
+MAX_INHERITED_HOPS = 3
 
 #: Relations that a `what does X ...` style question can reach, paired with the template whose
 #: `Grounder._read_question` output is exactly ``(subject, predicate)``.
@@ -269,6 +314,8 @@ class ExamReport:
     papers: List[PaperReport] = field(default_factory=list)
     facts: int = 0
     subjects: int = 0
+    #: Inheritance opportunities the hop bound excluded. See :data:`MAX_INHERITED_HOPS`.
+    priced_out: int = 0
     ms: float = 0.0
 
     @property
@@ -292,7 +339,8 @@ class ExamReport:
     def to_dict(self) -> Dict[str, Any]:
         return {"facts": self.facts, "subjects": self.subjects,
                 "asked": self.asked, "right": self.right,
-                "score": round(self.score, 3), "ms": round(self.ms, 1),
+                "score": round(self.score, 3), "priced_out": self.priced_out,
+                "ms": round(self.ms, 1),
                 "papers": [p.to_dict() for p in self.papers]}
 
 
@@ -318,6 +366,8 @@ class GeneralKnowledgeExam:
         #: because every paper reads it and re-walking the store per paper is most of the runtime.
         self.by_sp: Dict[Tuple[str, str], List[str]] = collections.defaultdict(list)
         self.kinds: Dict[str, List[str]] = collections.defaultdict(list)
+        #: Set by :meth:`paper_inheritance`; reported by :meth:`sit`.
+        self.priced_out = 0
         self._index()
 
     # ---- the store, read once ------------------------------------------- #
@@ -461,11 +511,12 @@ class GeneralKnowledgeExam:
                                      via=(f"{subject} is_a {kind}", f"{kind} is_a {higher}")))
         return self._sample(pool)
 
-    def _ancestors(self, subject: str, *, depth: int = 4) -> List[str]:
+    def _ancestors(self, subject: str, *, depth: int = MAX_INHERITED_HOPS) -> List[str]:
         """Every kind reachable from ``subject`` by stated ``is_a`` edges, nearest first.
 
-        Bounded at ``depth`` to match :attr:`CognitiveLearningCore.max_depth`, so the exam looks
-        exactly as far up the hierarchy as the walk being examined is allowed to.
+        Bounded at ``depth`` — see :data:`MAX_INHERITED_HOPS` — so the exam looks exactly as far
+        up the hierarchy as the walk it is examining can *afford* to, which is a shorter distance
+        than the walk is *allowed* to go.
         """
         seen: Set[str] = {subject}
         out: List[str] = []
@@ -495,8 +546,19 @@ class GeneralKnowledgeExam:
         them as an error.
         """
         pool: List[Item] = []
+        self.priced_out = 0
         for subject in list(self.kinds):
             ancestors = self._ancestors(subject)
+            # Everything the bound excluded, counted rather than quietly skipped. See
+            # :data:`MAX_INHERITED_HOPS` for why the bound is where it is.
+            beyond = [k for k in self._ancestors(subject, depth=MAX_INHERITED_HOPS + 3)
+                      if k not in ancestors]
+            for kind in beyond:
+                self.priced_out += sum(
+                    1 for predicate in INHERITABLE
+                    if not self.by_sp.get((subject, predicate))
+                    and self.by_sp.get((kind, predicate))
+                    and not any(self.by_sp.get((near, predicate)) for near in ancestors))
             if not ancestors:
                 continue
             for predicate in INHERITABLE:
@@ -647,6 +709,7 @@ class GeneralKnowledgeExam:
                     if len(got.misses) < 12:
                         got.misses.append(response)
             out.papers.append(got)
+        out.priced_out = int(getattr(self, "priced_out", 0))
         out.ms = (time.perf_counter() - started) * 1000.0
         return out
 
@@ -691,6 +754,9 @@ def render(report: ExamReport) -> str:
     if english or derived:
         lines.append(f"  of what she answered: {english} through English, "
                      f"{derived} only through the derivation ladder")
+    if report.priced_out:
+        lines.append(f"  not asked: {report.priced_out} inheritance chains longer than "
+                     f"{MAX_INHERITED_HOPS} hops, which the walk cannot afford")
     return "\n".join(lines)
 
 

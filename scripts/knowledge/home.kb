@@ -1,0 +1,122 @@
+# home.kb — the house, what is in it, what is worn, and how a household runs.
+#
+# `everyday.kb` is a list of objects — door, window, kettle, broom, umbrella — with a purpose each
+# and almost no structure: no room, no garment, no appliance category, nothing about how a house
+# is built or supplied. This file is the structure those objects sit in, so that "what are the
+# parts of a house", "what is a wardrobe for" and "what does a fuse do" all resolve.
+#
+# It also carries the domestic half of `materials.kb` and `work.kb`: a garment names its fibre, an
+# appliance names what it needs, so the walk from "shirt" to "cotton" to "absorbs water" is a real
+# chain rather than three unrelated entries.
+
+# --- the building ---------------------------------------------------------------------------------- #
+building | is_a=structure | purpose=enclosing space for people to use | has_part=foundation | has_part=wall | has_part=roof | has_part=floor | has_kind=house | has_kind=flat | has_kind=office building
+house | purpose=a place for a household to live | has_part=room
+flat | is_a=dwelling | means=a self contained home on one floor within a larger building | also_known_as=apartment
+hut | is_a=dwelling | has_property=small and simply built | consists_of=locally available material
+foundation | is_a=part of a building | purpose=spreading the building's weight into the ground | located_in=below ground level | requires=firm soil or piling
+wall | is_a=part of a building | purpose=enclosing space and often carrying load | consists_of=brick | consists_of=concrete
+load bearing wall | is_a=wall | purpose=carrying the weight of what is above it | has_property=cannot be removed without replacing its support
+roof | is_a=part of a building | purpose=keeping out rain and sun | has_kind=flat roof | has_kind=sloping roof | requires=drainage
+ceiling | is_a=part of a room | means=the surface overhead inside a room
+floor of a room | is_a=part of a room | means=the surface underfoot
+staircase | is_a=part of a building | purpose=moving between floors on foot | has_part=step | has_part=handrail
+balcony | is_a=part of a building | purpose=outdoor space off an upper room
+veranda | is_a=part of a building | purpose=a covered open space along the outside of a house
+courtyard | is_a=part of a building | means=an open space enclosed by the building around it | purpose=light and air in the middle of a house
+room | is_a=part of a house | has_kind=bedroom | has_kind=kitchen | has_kind=bathroom | has_kind=living room | has_kind=store room
+bedroom | is_a=room | purpose=sleeping | has_part=bed | has_part=wardrobe
+living room | is_a=room | purpose=sitting together and receiving visitors | has_part=sofa
+bathroom | is_a=room | purpose=washing | has_part=tap | has_part=drain | requires=a water supply
+store room | is_a=room | purpose=keeping things that are not in daily use
+terrace | is_a=part of a building | purpose=open space on a roof
+ventilation | is_a=system | purpose=exchanging stale indoor air for fresh | causes=damp and smells being carried away | requires=an opening or a fan
+insulation of a building | is_a=material | purpose=slowing heat passing through a wall or roof | causes=less energy needed to heat or cool
+damp | is_a=problem | occurs_when=water gets into a wall and cannot dry out | causes=mould and crumbling plaster
+
+# --- what a house is connected to ---------------------------------------------------------------------- #
+utility | is_a=service | means=a service supplied to a building | has_kind=water supply | has_kind=electricity supply | has_kind=gas supply | has_kind=sewerage
+water supply | is_a=utility | purpose=delivering clean water to a building | has_part=pipe | has_part=tap | has_part=tank
+tap | is_a=fitting | purpose=letting water out and shutting it off | has_part=valve
+water tank | is_a=container | purpose=storing water so supply is steady | located_in=a roof or underground
+sewerage | is_a=utility | purpose=carrying waste water away | has_part=drain | has_part=sewer | causes=disease when it fails
+drain | is_a=fitting | purpose=carrying waste water out of a building | requires=a fall to work by gravity
+septic tank | is_a=structure | purpose=treating sewage where there is no sewer
+electricity supply | is_a=utility | purpose=delivering electric power to a building | has_part=meter | has_part=switchboard | has_part=wiring
+meter | is_a=instrument | purpose=recording how much of a utility was used | causes=the utility bill
+fuse | is_a=safety device | purpose=breaking a circuit if too much current flows | causes=wiring not overheating | has_property=sacrificial by design
+circuit breaker | is_a=safety device | purpose=cutting the current automatically on a fault | has_property=can be reset rather than replaced
+earthing | is_a=safety measure | purpose=giving stray current a safe path to the ground | causes=a metal case not becoming live
+switch | is_a=device | purpose=making and breaking a circuit
+socket | is_a=fitting | purpose=where an appliance is plugged into the supply
+inverter | is_a=device | purpose=running household equipment from a battery when the mains fails
+solar water heater | is_a=appliance | purpose=heating water with sunlight | causes=lower fuel use
+
+# --- appliances and household objects ------------------------------------------------------------------------ #
+appliance | is_a=machine | means=a machine kept in a home to do a household task | has_kind=refrigerator | has_kind=washing machine | has_kind=fan | requires=electricity in most cases
+washing machine | is_a=appliance | purpose=washing clothes | requires=water | requires=detergent
+mixer grinder | is_a=appliance | purpose=grinding and blending food | requires=a motor
+pressure cooker | is_a=utensil | purpose=cooking faster by raising the boiling point under pressure | requires=a sealed lid and a safety valve | causes=less fuel used
+gas stove | is_a=appliance | purpose=cooking with a controllable flame | requires=a gas supply
+microwave oven | is_a=appliance | purpose=heating food by exciting its water molecules | has_property=heats the food rather than the air
+electric fan | is_a=appliance | purpose=moving air so that sweat evaporates faster | causes=a person feeling cooler without the air being cooler
+air conditioner | is_a=appliance | purpose=cooling and drying indoor air | causes=heat being moved outside | requires=a great deal of electricity
+water purifier | is_a=appliance | purpose=removing contaminants from drinking water | causes=fewer waterborne diseases
+iron for clothes | is_a=appliance | purpose=pressing creases out of cloth with heat
+vacuum cleaner | is_a=appliance | purpose=drawing up dust by suction
+utensil | is_a=object | means=an implement used in a kitchen | has_kind=pan | has_kind=pot | has_kind=ladle | has_kind=pressure cooker
+furniture | is_a=object | means=movable articles that make a room usable | has_kind=chair | has_kind=table | has_kind=bed | has_kind=cupboard | has_kind=sofa
+cupboard | is_a=furniture | purpose=storing things behind a door
+wardrobe | is_a=furniture | purpose=hanging and storing clothes
+shelf | is_a=furniture | purpose=holding things at a height where they can be seen and reached
+mattress | is_a=object | purpose=making a bed comfortable and supporting the body
+mosquito net | is_a=object | purpose=keeping mosquitoes off a sleeper | causes=fewer bites and less malaria risk
+candle | is_a=object | purpose=giving light by burning wax | requires=a wick
+torch | is_a=device | purpose=portable electric light | requires=a battery
+lock | is_a=device | purpose=preventing something from being opened by whoever lacks the key
+bucket | is_a=container | purpose=carrying and holding water
+detergent | is_a=substance | purpose=lifting grease and dirt into water | requires=water to work | has_property=molecules with a water-loving and an oil-loving end
+disinfectant | is_a=substance | purpose=killing micro-organisms on a surface
+dustbin | is_a=container | purpose=holding waste until it is collected
+
+# --- clothing ---------------------------------------------------------------------------------------------- #
+clothing | is_a=object | purpose=protecting the body and expressing identity | consists_of=fabric | has_kind=shirt | has_kind=trousers | has_kind=dress | has_kind=coat
+fabric | is_a=material | means=cloth made by weaving or knitting fibre | consists_of=thread | has_kind=cotton fabric | has_kind=woollen fabric | has_kind=silk fabric
+thread | is_a=material | occurs_when=fibres are spun together | purpose=weaving and sewing
+weaving | is_a=process | means=interlacing threads at right angles into cloth | requires=a loom
+knitting | is_a=process | means=making cloth from interlocking loops of yarn | has_property=stretches more than woven cloth
+spinning | is_a=process | means=drawing and twisting fibre into thread | causes=yarn strong enough to weave
+dyeing | is_a=process | purpose=giving cloth or yarn a colour | requires=a dye and usually a fixative
+shirt | is_a=clothing | consists_of=cotton | purpose=covering the upper body
+trousers | is_a=clothing | purpose=covering the legs separately
+dress | is_a=clothing | purpose=a single garment covering the body and legs
+coat | is_a=clothing | purpose=keeping the body warm and dry outdoors | consists_of=wool
+sweater | is_a=clothing | consists_of=wool | purpose=trapping warm air near the body
+shoes | consists_of=leather | has_part=sole
+sandal | is_a=shoes | has_property=open topped | purpose=footwear in hot weather
+sock | is_a=clothing | purpose=cushioning the foot and absorbing sweat
+glove | is_a=clothing | purpose=protecting or warming the hands
+hat | is_a=clothing | purpose=shading the head or keeping it warm
+scarf | is_a=clothing | purpose=warming the neck or covering the head
+uniform | is_a=clothing | purpose=showing which organisation a person belongs to
+stitching | is_a=process | means=joining cloth with thread | requires=a needle
+button | is_a=fastening | purpose=holding two pieces of cloth together through a hole
+zip | is_a=fastening | purpose=joining two edges by interlocking teeth
+laundry | is_a=activity | means=washing and drying clothes | requires=water and detergent
+
+# --- running a household ------------------------------------------------------------------------------------- #
+household | is_a=group | means=the people who live together in one home and share its arrangements
+family | is_a=group | means=people related by birth, marriage or adoption | has_kind=nuclear family | has_kind=joint family
+nuclear family | is_a=family | means=parents and their children living as one household
+joint family | is_a=family | means=several generations or several siblings' families living as one household | located_in=South Asia and elsewhere
+housework | is_a=activity | means=the unpaid work of running a home | has_kind=cooking | has_kind=cleaning | has_kind=laundry
+household budget | is_a=plan | purpose=matching what a household spends to what it earns | has_part=income | has_part=expenses | causes=saving when income exceeds spending
+rent | is_a=payment | means=what is paid for the use of a property one does not own
+utility bill | is_a=document | purpose=stating what is owed for a service used | has_kind=electricity bill | has_kind=water bill
+hygiene | is_a=practice | purpose=keeping oneself and one's surroundings free of what causes disease | requires=clean water | requires=soap
+sanitation | is_a=system | purpose=safely separating people from human waste | causes=large falls in infectious disease
+waste segregation | is_a=practice | means=separating waste into kinds at the point where it is thrown | causes=recycling being possible at all
+neighbour | is_a=person | means=someone who lives nearby
+housing | is_a=need | means=a place to live that is safe and secure | requires=affordability to be met in practice
+slum | is_a=settlement | means=a densely built area lacking secure tenure and basic services | requires=water, sanitation and tenure to be resolved
+urbanisation as a process | is_a=process | means=people moving from countryside to town | causes=pressure on housing and services

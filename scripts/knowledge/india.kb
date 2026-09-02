@@ -1,0 +1,149 @@
+# india.kb — India: its states, rivers, monuments, institutions, people and festivals.
+#
+# `geography.kb` has India as one line among forty countries; `history.kb` has the Maurya and
+# Mughal empires, Gandhi and Independence. Neither has a state, a river beyond the Ganges, a
+# constitutional office, or a single one of the things a general-knowledge question about India
+# actually asks for.
+#
+# It belongs in this corpus for a plain reason: `njp/tongue.py`, `njp/dialects.py` and
+# `tests/njp/test_hinglish.py` say this brain is expected to work in Hindi and Hinglish, and a
+# system that reads "Ganga kahan hai" and holds nothing about the Ganga answers in the right
+# language and says nothing.
+#
+# `capital` and `located_in` are functional here as everywhere, so each state carries exactly one
+# capital and each place exactly one location.
+
+# --- the country ---------------------------------------------------------------------------------- #
+Republic of India | is_a=country | is_a=federal republic | located_in=South Asia | capital=New Delhi | currency=Indian rupee | has_property=the most populous country in the world | has_property=a parliamentary democracy
+Indian rupee | is_a=currency | symbol=₹ | located_in=India
+New Delhi | is_a=capital city | located_in=India | part_of=Delhi
+Indian subcontinent | is_a=region | has_part=India | has_part=Pakistan | has_part=Bangladesh | has_part=Nepal | has_part=Sri Lanka | has_part=Bhutan
+Indian Independence Day | is_a=national day | occurs_when=the fifteenth of August comes round | means=the day British rule over India ended in 1947
+Republic Day of India | is_a=national day | occurs_when=the twenty-sixth of January comes round | means=the day the Constitution of India came into force
+Tricolour | is_a=national flag | located_in=India | has_part=Ashoka Chakra | has_property=saffron, white and green bands
+Ashoka Chakra | is_a=symbol | part_of=Tricolour | means=a twenty-four spoked wheel standing for the law of righteousness
+Jana Gana Mana | is_a=national anthem | located_in=India | author=Rabindranath Tagore
+Bengal tiger | is_a=tiger | located_in=India | has_property=the national animal of India
+Indian peafowl | is_a=peacock | located_in=India | has_property=the national bird of India
+national emblem of India | is_a=symbol | means=the lion capital of Ashoka | located_in=Sarnath originally
+
+# --- states and cities --------------------------------------------------------------------------- #
+Indian state | is_a=administrative division | part_of=India | has_property=its own legislature and chief minister | has_kind=Maharashtra | has_kind=Tamil Nadu | has_kind=Uttar Pradesh
+Maharashtra | is_a=Indian state | capital=Mumbai | has_property=India's largest economy among the states
+Uttar Pradesh | is_a=Indian state | capital=Lucknow | has_property=the most populous state
+Tamil Nadu | is_a=Indian state | capital=Chennai | involves=Bharatanatyam | involves=Carnatic music
+Karnataka | is_a=Indian state | capital=Bengaluru | has_property=India's centre of information technology
+Kerala | is_a=Indian state | capital=Thiruvananthapuram | has_property=the highest literacy rate among the states | has_part=backwaters
+West Bengal | is_a=Indian state | capital=Kolkata | has_part=Sundarbans
+Gujarat | is_a=Indian state | capital=Gandhinagar | has_part=Rann of Kutch
+Rajasthan | is_a=Indian state | capital=Jaipur | has_part=Thar Desert | has_property=the largest state by area
+Punjab | is_a=Indian state | capital=Chandigarh | has_property=a centre of wheat farming
+Bihar | is_a=Indian state | capital=Patna | has_part=Nalanda
+Madhya Pradesh | is_a=Indian state | capital=Bhopal | has_property=the largest forest cover among the states
+Odisha | is_a=Indian state | capital=Bhubaneswar | has_part=Konark Sun Temple
+Assam | is_a=Indian state | capital=Dispur | purpose=tea growing | has_part=Kaziranga National Park
+Telangana | is_a=Indian state | capital=Hyderabad
+Andhra Pradesh | is_a=Indian state | capital=Amaravati
+Haryana | is_a=Indian state | capital=Chandigarh city
+Jharkhand | is_a=Indian state | capital=Ranchi | purpose=mining
+Goa | is_a=Indian state | capital=Panaji | has_property=the smallest state by area
+Uttarakhand | is_a=Indian state | capital=Dehradun | has_part=Char Dham
+Himachal Pradesh | is_a=Indian state | capital=Shimla | located_in=the Himalayas
+Mumbai | is_a=city | located_in=Maharashtra | has_property=India's financial capital | has_part=Gateway of India | is_a=port
+Delhi | is_a=city | is_a=union territory | has_part=Red Fort | has_part=Qutub Minar | has_property=India's capital territory
+Kolkata | is_a=city | located_in=West Bengal | has_part=Howrah Bridge | has_part=Victoria Memorial
+Chennai | is_a=city | located_in=Tamil Nadu | is_a=port | has_part=Marina Beach
+Bengaluru | is_a=city | located_in=Karnataka | has_property=India's centre of software and aerospace
+Hyderabad | is_a=city | located_in=Telangana | has_part=Charminar
+Jaipur | is_a=city | located_in=Rajasthan | has_part=Hawa Mahal | also_known_as=the Pink City
+Varanasi | is_a=city | located_in=Uttar Pradesh | has_property=among the oldest continuously inhabited cities
+Agra | is_a=city | located_in=Uttar Pradesh | has_part=Taj Mahal | has_part=Agra Fort
+Amritsar | is_a=city | located_in=Punjab | has_part=Golden Temple
+union territory | is_a=administrative division | part_of=India | means=a territory administered directly by the central government | has_kind=Delhi | has_kind=Ladakh | has_kind=Puducherry
+
+# --- rivers, mountains and forests -------------------------------------------------------------------- #
+Ganga | is_a=river | located_in=India | also_known_as=Ganges | has_part=Ganges Delta | purpose=irrigation and drinking water for hundreds of millions | has_property=held sacred in Hinduism
+Yamuna | is_a=river | located_in=India | purpose=water for Delhi and Agra | part_of=the Ganges basin
+Brahmaputra | is_a=river | located_in=Assam | has_property=one of the largest rivers by flow | causes=annual floods in Assam
+Godavari | is_a=river | located_in=peninsular India | has_property=the longest river of peninsular India
+Krishna river | is_a=river | located_in=peninsular India | purpose=irrigation across four states
+Narmada | is_a=river | located_in=central India | has_property=flows westward, unlike most peninsular rivers
+Kaveri | is_a=river | located_in=southern India | purpose=irrigating the Tamil Nadu delta
+Indus | is_a=river | located_in=South Asia | involves=Indus Valley Civilisation
+Western Ghats | is_a=mountain range | located_in=western India | has_property=a global biodiversity hotspot | causes=heavy monsoon rain on their windward side
+Eastern Ghats | is_a=mountain range | located_in=eastern India | has_property=broken by river valleys
+Aravalli Range | is_a=mountain range | located_in=Rajasthan | has_property=among the oldest fold mountains in the world
+Deccan Plateau | is_a=plateau | located_in=peninsular India | consists_of=basalt
+Thar Desert | is_a=desert | located_in=Rajasthan | has_property=among the most densely populated deserts
+Sundarbans | is_a=mangrove forest | located_in=the Ganges Delta | has_property=the largest mangrove forest in the world | purpose=habitat of the Bengal tiger
+Kaziranga National Park | is_a=national park | located_in=Assam | purpose=protecting the one horned rhinoceros
+Gir Forest | is_a=forest | located_in=Gujarat | purpose=the last wild home of the Asiatic lion
+Andaman and Nicobar Islands | is_a=archipelago | located_in=the Bay of Bengal | is_a=union territory
+Indian monsoon | is_a=wind system | occurs_when=summer heating draws moist air off the ocean | causes=most of India's annual rainfall | requires=a temperature difference between land and sea
+
+# --- the constitution and the state --------------------------------------------------------------------- #
+Constitution of India | is_a=constitution | purpose=setting out how India is governed and what rights citizens hold | has_property=the longest written constitution of any sovereign country | author=Constituent Assembly of India | has_part=Fundamental Rights | has_part=Directive Principles
+B R Ambedkar | is_a=jurist | is_a=social reformer | purpose=chairing the drafting committee of the Constitution of India | birthplace=Mhow
+Fundamental Rights | is_a=part of a constitution | located_in=the Constitution of India | purpose=guaranteeing rights the state may not take away | has_kind=right to equality | has_kind=right to freedom | has_kind=right against exploitation
+Directive Principles | is_a=part of a constitution | purpose=setting goals the state should work toward | has_property=not enforceable in a court
+Parliament of India | is_a=parliament | has_part=Lok Sabha | has_part=Rajya Sabha | purpose=making the laws of India
+Lok Sabha | is_a=legislative chamber | part_of=Parliament of India | means=the house whose members are elected directly by the people | has_property=the lower house
+Rajya Sabha | is_a=legislative chamber | part_of=Parliament of India | means=the house representing the states | has_property=the upper house
+President of India | is_a=office | purpose=the head of state | has_property=elected by an electoral college | has_property=acts on the advice of the council of ministers
+Prime Minister of India | is_a=office | purpose=the head of government | requires=the confidence of the Lok Sabha
+Chief Justice of India | is_a=office | purpose=heading the Supreme Court of India
+Supreme Court of India | is_a=court | purpose=the highest court of appeal and the guardian of the Constitution | located_in=New Delhi
+Election Commission of India | is_a=institution | purpose=conducting elections free of the government of the day
+Reserve Bank of India | is_a=central bank | purpose=issuing currency and setting monetary policy | located_in=Mumbai
+Panchayati Raj | is_a=system of government | means=elected self government at village, block and district level | purpose=deciding local matters locally
+ISRO | is_a=agency | purpose=India's space programme | located_in=Bengaluru | involves=Chandrayaan | involves=Mangalyaan
+Chandrayaan | is_a=space mission | purpose=exploring the Moon | involves=ISRO
+Mangalyaan | is_a=space mission | purpose=orbiting Mars | involves=ISRO | also_known_as=Mars Orbiter Mission
+
+# --- people ------------------------------------------------------------------------------------------------- #
+Jawaharlal Nehru | is_a=statesman | purpose=the first Prime Minister of India | birthplace=Allahabad
+Sardar Vallabhbhai Patel | is_a=statesman | purpose=integrating the princely states into India | birthplace=Nadiad
+Subhas Chandra Bose | is_a=freedom fighter | birthplace=Cuttack
+Bhagat Singh | is_a=freedom fighter | birthplace=Punjab
+Rani Lakshmibai | is_a=ruler | located_in=Jhansi | involves=the revolt of 1857
+Ashoka | is_a=emperor | part_of=Maurya Empire | involves=spreading Buddhism | has_property=renounced war after Kalinga
+Akbar | is_a=emperor | part_of=Mughal Empire | has_property=known for religious tolerance
+Chhatrapati Shivaji | is_a=ruler | located_in=Maharashtra | involves=founding the Maratha kingdom
+Chanakya | is_a=scholar | author=Arthashastra | involves=statecraft and economics
+Aryabhata | is_a=mathematician | is_a=astronomer | located_in=ancient India | involves=the place value system | involves=an early value for pi
+Srinivasa Ramanujan | is_a=mathematician | birthplace=Erode | has_property=self taught | involves=number theory
+C V Raman | is_a=physicist | is_a=Nobel laureate | discoverer=Raman effect | birthplace=Tiruchirappalli
+Homi Bhabha | is_a=physicist | purpose=founding India's nuclear programme
+APJ Abdul Kalam | is_a=scientist | is_a=President of India | involves=India's missile programme | birthplace=Rameswaram
+M S Swaminathan | is_a=agricultural scientist | involves=the green revolution in India
+Mother Teresa | is_a=missionary | is_a=Nobel laureate | located_in=Kolkata | purpose=work among the destitute
+Sarojini Naidu | is_a=poet | is_a=freedom fighter | birthplace=Hyderabad
+Kalidasa | is_a=poet | located_in=ancient India | author=Shakuntala
+Premchand | is_a=novelist | located_in=India | has_property=wrote in Hindi and Urdu
+Arthashastra | is_a=treatise | author=Chanakya | involves=statecraft | involves=economics
+
+# --- culture and festivals ---------------------------------------------------------------------------------- #
+Hindi | has_property=among the most spoken languages in the world
+Devanagari | is_a=script | purpose=writing Hindi, Marathi, Nepali and Sanskrit | has_property=written left to right with a headline
+Ayurveda | is_a=traditional system of medicine | located_in=India | involves=diet | involves=herbs | has_property=ancient in origin
+yoga | is_a=practice | birthplace=India | involves=posture | involves=breathing | involves=meditation | causes=flexibility and calm
+Kathakali | is_a=classical dance | located_in=Kerala | involves=elaborate makeup and costume
+Odissi | is_a=classical dance | located_in=Odisha
+Madhubani painting | is_a=folk art | located_in=Bihar | has_property=bold outlines and natural dyes
+Warli painting | is_a=folk art | located_in=Maharashtra | has_property=white figures on a mud ground
+saree | is_a=garment | located_in=India | has_property=a single unstitched length of cloth
+kurta | is_a=garment | located_in=South Asia | has_property=a loose collarless shirt
+Onam | is_a=festival | located_in=Kerala | involves=a harvest and a boat race
+Pongal | is_a=festival | located_in=Tamil Nadu | involves=the harvest | occurs_when=January comes round
+Baisakhi | is_a=festival | located_in=Punjab | involves=the harvest | involves=the founding of the Khalsa
+Durga Puja | is_a=festival | located_in=West Bengal | involves=clay images of the goddess Durga
+Ganesh Chaturthi | is_a=festival | located_in=Maharashtra | involves=images of Ganesha
+Navratri | is_a=festival | located_in=India | involves=nine nights of dance and fasting
+Raksha Bandhan | is_a=festival | located_in=India | involves=a thread tied by a sister on her brother's wrist
+Chhath | is_a=festival | located_in=Bihar | involves=offerings to the setting and rising Sun
+biryani | is_a=dish | located_in=South Asia | consists_of=rice | consists_of=spices
+dal | is_a=dish | consists_of=pulses | has_property=a staple across India
+roti | is_a=bread | consists_of=wheat flour | has_property=unleavened | purpose=eaten with dal and vegetables
+idli | is_a=dish | located_in=southern India | occurs_when=a rice and lentil batter is fermented and steamed
+masala | is_a=food ingredient | means=a blend of ground spices | purpose=giving a dish its character
+chai | is_a=beverage | consists_of=tea | consists_of=milk | consists_of=spices | located_in=South Asia

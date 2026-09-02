@@ -1807,20 +1807,32 @@ General knowledge cannot be examined that way. There is no minting a fresh fact 
 what she knows of it is exactly what she was told. So the held-out surface has to be built the
 other way round: **from facts she was told, compose questions whose answers she was never told.**
 
-**What she was taught.** `scripts/knowledge/*.kb` grew by six domains — `arts` (literature, music,
-the visual arts, architecture, theatre, dance, film), `sport` (rules, equipment, competitions,
-games of skill), `philosophy` (the branches, the vocabulary of argument, the ethical theories, and
-the world religions described rather than asserted), `body` (anatomy and physiology, the layer
-below `medicine`, which was all disorder and no organ), `food` (nutrition, cooking, agriculture)
-and `measurement` (units, prefixes, instruments, time and calendars). The corpus went from
-**3,745 facts over 966 subjects in 15 domains to 6,024 over 1,565 in 21**, and every one of them
-is written as a relation between two named things, so every one can be asked for.
+**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 38 — from **3,745 facts
+over 966 subjects to 11,402 over 3,144**, a little over three times the corpus.
 
-Three collisions were resolved by hand rather than left to merge, and it is worth saying why: the
-store keys on the name, so `pulse` the arterial beat and `pulse` the legume would have become one
-subject that is both a sign and a crop. `metre` (verse against distance) and `lens` (eye against
-optics) were the other two. Everything else that collides — `cricket`, `music`, `ethics`,
-`calendar` — is the *same* concept in two files and merges correctly.
+The first pass added the six subjects that were simply absent: `arts`, `sport`, `philosophy`
+(with the world religions described rather than asserted), `body` (the anatomy `medicine` assumed
+and never stated), `food` and `measurement`.
+
+The second went after a different kind of gap — places where the corpus named a *category* and
+never a member of it. `biology.kb` defined `mammal`, `bird`, `reptile`, `insect` and `vertebrate`
+and did not name one animal, so a taxonomy with kinds and no members was a hierarchy one level
+deep and the inheritance machinery in `njp/core.py` had almost nothing to walk through. Seventeen
+more domains: `animals`, `plants`, `materials`, `mind` (psychology — the terms this package uses
+about itself, with `attention` and `episodic memory` as modules and no fact about either),
+`environment`, `transport`, `world` (fifty more countries, and the organisations between them),
+`india`, `law`, `finance`, `inventions`, `people`, `space`, `media`, `work`, `home` and `health`.
+
+**Nine name collisions were resolved by hand**, and they are the interesting part of a merge at
+this scale, because the store keys on the name: `bat` the animal against the cricket bat, `python`
+the snake against the language, `memory` the faculty against RAM, `attention` the psychological
+process against the transformer mechanism, `bus` the vehicle against the data bus, `tree` the
+plant against the data structure, `trade` the exchange against the skilled trade, `charge` the
+electric quantity against the criminal one, and `act` the deed against the Act of Parliament. That
+last one was caught by the exam rather than by inspection: `arrest is_a act`, `act is_a statute`,
+and "what is arrest used for" inherited the purpose of legislation. Everything else that collides
+— `cricket`, `ethics`, `calendar`, `steel`, `road` — is the same concept in two files, and those
+merge correctly and enrich each other.
 
 **How she is examined.** `nyxara.njp.general` is seven papers, each defined by what it holds out:
 
@@ -1834,23 +1846,25 @@ optics) were the other two. Everything else that collides — `cricket`, `music`
 | `abstention` | subjects the corpus never heard of — **silence is the pass** |
 | `soundness` | the relations that cannot cross from kind to member — **silence is the pass** |
 
-Measured on the corpus as shipped, 400 items a paper, ~53 s:
+Measured on the corpus as shipped, 400 items a paper, ~145 s:
 
 ```
 paper          asked  right  wrong  declined  silent   score
 recall           400    334      0        66       0   0.835
-membership       400    398      2         0       0   0.995
-taxonomy         400    397      3         0       0   0.993
+membership       400    399      1         0       0   0.998
+taxonomy         400    399      1         0       0   0.998
 inheritance      400    400      0         0       0   1.000
-inverse          304    295      0         9       0   0.970
+inverse          400    389      0        11       0   0.973
 abstention       400    400      0         0       0   1.000   (silence is the pass)
-soundness        328    328      0         0       0   1.000   (silence is the pass)
+soundness        400    400      0         0       0   1.000   (silence is the pass)
 
-2552/2632 = 0.970 overall
-of what she answered: 1424 through English, 400 only through the derivation ladder
+2721/2800 = 0.972 overall
+of what she answered: 1521 through English, 400 only through the derivation ladder
+not asked: 43 inheritance chains longer than 3 hops, which the walk cannot afford
 ```
 
-Four rows carry the argument.
+Every paper held its score when the corpus tripled, which is the first thing worth saying about
+it: the numbers below are about mechanisms, not about how much happened to be in the store.
 
 **`membership` and `taxonomy` scored 0.000 before this change set** — 0 of 300 and 0 of 300,
 re-measured by putting the table back. `answer("is the sun a star?")` returned UNKNOWN, with
@@ -1858,44 +1872,66 @@ re-measured by putting the table back. `answer("is the sun a star?")` returned U
 appeared in no row of `grounding._POLAR_PREFERENCE` nor in its default: the only relations an
 `is X ...` question ever scanned were `has_property` and `capable_of`. "Is a whale a mammal", "is
 copper a metal", "is Peru a country" — the commonest question form in general knowledge, and none
-of them could ever have been answered. One relation name added to one table moved both papers to
-0.99, and the same change made the *two-hop* question answerable as a side effect, because the
-polar scan already searched the subject's neighbours.
+of it could ever have been answered. One relation name added to one table moved both papers to
+0.998, and made the *two-hop* question answerable as a side effect, because the polar scan already
+searched the subject's neighbours.
 
-The three items still wrong are one subject and one cause: `_read_polar_surface` searches at most
-four words for where the subject ends, and five of the corpus's 1,565 subjects are longer —
-*One Hundred Years of Solitude* is the one that was sampled. A real ceiling over 0.3% of the
-corpus, named here rather than tuned away.
+The items still wrong are one subject and one cause: `_read_polar_surface` searches at most four
+words for where the subject ends, and a handful of the corpus's 3,144 subjects are longer —
+*One Hundred Years of Solitude* is the one that keeps being sampled. A real ceiling over a
+fraction of a percent of the corpus, named here rather than tuned away.
 
-**`soundness` swings 328/328 to 0/328** when `core._NOT_INHERITABLE` is emptied. Inheritance —
-"a bird needs water, so a sparrow probably does" — was being applied to every relation alike, and
-over the corpus that is wrong 89 times in 247: `has_kind` points *down* the taxonomy, so
-inheriting it inverts the hierarchy ("the types of aircraft: car", "the types of an ammeter: a
-ruler", "the types of the Amazon rainforest: the Amazon rainforest"); `means`, `symbol` and
-`also_known_as` identify their subject, so the kind's answer is the wrong size ("combustion means
-a rearrangement of atoms into new substances" — the definition of *chemical reaction*; "the cpu is
-also known as the cpu"); `capital`, `currency`, `author`, `inventor`, `discoverer` and `birthplace`
-name one particular thing about one particular subject. The table refuses rather than discounts,
-because there is no confidence at which "the sun is a red giant" becomes a thing to say.
+**`soundness` swings every item to none of them** when `core._NOT_INHERITABLE` is emptied — 328/328
+against 0/328 when it was first measured, re-measured on every run. Inheritance — "a bird needs
+water, so a sparrow probably does" — was being applied to every relation alike, and over the
+corpus that was wrong 89 times in 247: `has_kind` points *down* the taxonomy, so inheriting it
+inverts the hierarchy ("the types of aircraft: car", "the types of an ammeter: a ruler", "the types
+of the Amazon rainforest: the Amazon rainforest"); `means`, `symbol` and `also_known_as` identify
+their subject, so the kind's answer is the wrong size ("combustion means a rearrangement of atoms
+into new substances" — the definition of *chemical reaction*; "the cpu is also known as the cpu");
+`capital`, `currency`, `author`, `inventor`, `discoverer` and `birthplace` name one particular
+thing about one particular subject. The table refuses rather than discounts, because there is no
+confidence at which "the sun is a red giant" becomes a thing to say.
 
 **`inheritance` is 400/400, and every one came through the derivation ladder — none through
 English.** That is the most useful number in the table and the one that is not a success: she can
 derive a property she was never told, and there is no English sentence that asks her to. The
-1,426-to-400 split at the foot of the report is the exact size of what she knows and cannot be
+1,521-to-400 split at the foot of the report is the exact size of what she knows and cannot be
 asked for.
 
-**`recall`'s 66 declined are not misses.** They are relations holding several objects at equal
-confidence, where `Grounder.answer` refuses to pick one — the outcome
-`prepare_knowledge_corpus` documents over the same corpus and counts separately for the same
-reason. Reading them as gaps is how the first version of this exam reported **4,572 of 4,572 with
-no abstentions at all** on a corpus that abstains on 19% of the shipped QA file: the derivation
-ladder was being asked next, and `_direct` takes `max` over the tied triples and answers happily.
-A refusal the next rung overrules is not a refusal.
+**The 43 chains not asked** are the same discipline pointing the other way, and they are the
+finding the corpus growth produced. On the bigger corpus `inheritance` fell to 0.973, and the
+misses were all five-link chains: "an actor has a backbone", true, reached through
+*person → human being → mammal → vertebrate*. `_inherit` prices each hop by the `is_a` transitivity
+posterior and abandons the chain under `core._MIN_LINK_CONFIDENCE`, so she declines — correctly,
+because a property inherited from four levels up is a very weak claim however true it is. The exam
+was scoring her at 0.973 for refusing to overreach. The cliff was then measured rather than
+argued: **levels 1, 2 and 3 answer 446/446, 167/167 and 58/58; level 4 answers 0 of 13 and level 5
+0 of 3.** `general.MAX_INHERITED_HOPS` is set to that measured edge, a test asserts the bound from
+both sides against the live Core, and what the bound excludes is printed in the report rather than
+dropped from it.
 
-Two more of the exam's own numbers were wrong before they were right, and both were one-value
-golds on many-valued relations: `inverse` graded "what causes fever" against `infection` and
-marked `influenza` wrong; `inheritance` graded "what does muscle consist of" against `tissue` and
-marked `cells` wrong, which she had inherited correctly through the subject's *other* stated kind.
+**`recall`'s 66 declined are not misses.** They are relations holding several objects at equal
+confidence, where `Grounder.answer` refuses to pick one — the outcome `prepare_knowledge_corpus`
+documents over the same corpus and counts separately for the same reason. Reading them as gaps is
+how the first version of this exam reported **4,572 of 4,572 with no abstentions at all** on a
+corpus that abstains on 19% of the shipped QA file: the derivation ladder was being asked next, and
+`_direct` takes `max` over the tied triples and answers happily. A refusal the next rung overrules
+is not a refusal.
+
+Three more of the exam's own numbers were wrong before they were right, and each is pinned by a
+test: one-value golds on many-valued relations (`inverse` graded "what causes fever" against
+`infection` and marked `influenza` wrong; `inheritance` graded "what does muscle consist of"
+against `tissue` and marked `cells` wrong, which she had inherited correctly through the subject's
+*other* stated kind), and inverted papers that never asked the ladder — the acceptance test for a
+table, unable to see the table deleted.
+
+The corpus builder also learned that a subject can be lost by its own spelling. `_read_question`
+strips a leading article, so "What is The Odyssey?" comes back as `('odyssey', 'is_a')` and "What
+is a priori?" as `('priori', 'is_a')`. Where a rename survives it the subject was renamed; where
+the article is part of the term it is not available, so `unaskable_subjects` keeps the triples and
+drops the questions — as `_GRAPH_ONLY` predicates already do, for the same reason — and `--check`
+names them rather than subtracting them silently.
 
 Run it: `python -m nyxara.njp.general`, or `NJPBrain.sit_general_exam()`. Nothing in it writes to
 the brain, so it may be run twice around something that does.

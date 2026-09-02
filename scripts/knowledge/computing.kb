@@ -4,17 +4,17 @@
 # carefully.
 
 # --- hardware -----------------------------------------------------------------------------------#
-computer | is_a=machine | purpose=processing data | has_part=processor | has_part=memory | has_part=storage | has_part=input device | has_part=output device
+computer | is_a=machine | purpose=processing data | has_part=processor | has_part=computer memory | has_part=storage | has_part=input device | has_part=output device
 processor | is_a=hardware component | also_known_as=CPU | purpose=executing instructions | has_part=control unit | has_part=arithmetic logic unit | has_part=register | has_part=cache
 CPU | means=central processing unit | is_a=processor
 GPU | means=graphics processing unit | is_a=processor | purpose=parallel computation | purpose=training neural networks | has_property=many simple cores
-memory | is_a=hardware component | purpose=holding data the processor is working on | has_kind=RAM | has_kind=ROM | has_kind=cache
-RAM | means=random access memory | is_a=memory | has_property=volatile | has_property=fast
+computer memory | is_a=hardware component | purpose=holding data the processor is working on | has_kind=RAM | has_kind=ROM | has_kind=cache
+RAM | means=random access memory | is_a=computer memory | has_property=volatile | has_property=fast
 storage | is_a=hardware component | purpose=keeping data when the power is off | has_kind=hard disk drive | has_kind=solid state drive
 transistor | is_a=electronic component | purpose=switching a current | purpose=amplifying a signal | part_of=integrated circuit | inventor=John Bardeen, Walter Brattain and William Shockley
 integrated circuit | is_a=electronic component | consists_of=transistors | located_in=a silicon chip | causes=the miniaturisation of computers
 motherboard | is_a=circuit board | purpose=connecting the components of a computer
-bus | is_a=hardware pathway | purpose=carrying data between components
+data bus | is_a=hardware pathway | purpose=carrying data between components
 peripheral | is_a=device | means=hardware attached to a computer rather than inside it | has_kind=keyboard | has_kind=mouse | has_kind=printer
 
 # --- data ----------------------------------------------------------------------------------------#
@@ -39,11 +39,11 @@ operating system | is_a=system software | purpose=managing hardware and running 
 kernel | is_a=core of an operating system | purpose=mediating access to hardware
 program | is_a=sequence of instructions | requires=a language | requires=a processor to execute it
 algorithm | is_a=procedure | means=a finite sequence of steps that solves a problem | has_property=terminating | purpose=solving a problem reliably
-data structure | is_a=way of organising data | has_kind=array | has_kind=linked list | has_kind=stack | has_kind=queue | has_kind=tree | has_kind=graph | has_kind=hash table
+data structure | is_a=way of organising data | has_kind=array | has_kind=linked list | has_kind=stack | has_kind=queue | has_kind=tree data structure | has_kind=graph | has_kind=hash table
 array | is_a=data structure | has_property=fixed size@0.7 | has_property=constant time access by index
 stack | is_a=data structure | has_property=last in first out | has_part=push | has_part=pop
 queue | is_a=data structure | has_property=first in first out
-tree | is_a=data structure | has_part=root | has_part=node | has_part=leaf | has_property=hierarchical
+tree data structure | is_a=data structure | has_part=root node | has_part=tree node | has_part=leaf node | has_property=hierarchical
 graph | is_a=data structure | has_part=vertex | has_part=edge | purpose=representing relations between things
 hash table | is_a=data structure | requires=a hash function | has_property=average constant time lookup
 recursion | is_a=programming technique | means=a function that calls itself | requires=a base case | causes=a stack overflow without one
@@ -93,8 +93,8 @@ gradient descent | is_a=optimisation algorithm | purpose=reducing a loss by step
 backpropagation | is_a=algorithm | purpose=computing the gradient of the loss with respect to each weight | requires=the chain rule
 overfitting | is_a=failure mode | occurs_when=a model learns the training data rather than the pattern | causes=poor performance on new data | requires=regularisation or more data to fix
 underfitting | is_a=failure mode | occurs_when=a model is too simple for the pattern in the data
-transformer | is_a=neural network architecture | has_part=attention | has_part=feed forward layer | purpose=modelling sequences | causes=the modern language model
-attention | is_a=neural network mechanism | purpose=letting a model weigh which parts of the input matter | part_of=transformer
+transformer | is_a=neural network architecture | has_part=attention mechanism | has_part=feed forward layer | purpose=modelling sequences | causes=the modern language model
+attention mechanism | is_a=neural network mechanism | purpose=letting a model weigh which parts of the input matter | part_of=transformer
 language model | is_a=machine learning model | purpose=predicting the next token in a sequence | requires=a tokenizer | requires=text
 tokenizer | is_a=component of a language model | purpose=splitting text into tokens | has_kind=byte pair encoding
 token | is_a=unit of text | means=the smallest piece a language model reads | part_of=a sequence

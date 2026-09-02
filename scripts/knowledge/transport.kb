@@ -1,0 +1,115 @@
+# transport.kb — how people and goods move, and the infrastructure that lets them.
+#
+# `technology.kb` has `vehicle`, `car`, `train`, `aircraft`, `ship` and `bicycle` — six lines that
+# say what a thing is and nothing about the system it belongs to. The general knowledge here is
+# mostly *system* knowledge: a road is not a vehicle, an airport is not an aeroplane, a licence is
+# not a wheel, and none of those had a fact.
+#
+# `everyday.kb` has `road` and `traffic light`; this file is the layer above them.
+
+# --- modes ------------------------------------------------------------------------------------- #
+transport | is_a=activity | means=moving people or goods from one place to another | has_kind=road transport | has_kind=rail transport | has_kind=water transport | has_kind=air transport | requires=a vehicle | requires=a route
+road transport | is_a=transport | requires=roads | has_kind=car | has_kind=bus | has_kind=truck | has_property=door to door | has_property=flexible in route
+rail transport | is_a=transport | requires=track | has_property=efficient for heavy loads over land | has_property=fixed route
+water transport | is_a=transport | requires=a waterway | has_property=the cheapest way to move bulk goods far | has_property=slow
+air transport | is_a=transport | has_property=the fastest way to travel far | has_property=the most expensive per tonne | requires=an airport
+public transport | is_a=transport | means=shared transport open to anyone who pays a fare | has_kind=bus | has_kind=metro | has_kind=train | causes=less congestion than the same journeys by car
+freight | is_a=transport | means=the carriage of goods rather than people | requires=loading and unloading
+logistics | is_a=activity | means=planning how goods get from where they are made to where they are needed | involves=warehousing | involves=routing
+
+# --- road vehicles -------------------------------------------------------------------------------- #
+bus | is_a=vehicle | is_a=public transport | purpose=carrying many passengers along a fixed route | has_property=cheaper per passenger than a car
+truck | is_a=vehicle | purpose=carrying goods by road | also_known_as=lorry | has_property=heavy
+motorcycle | is_a=vehicle | has_property=two wheels and an engine | has_property=cheap to run | requires=a helmet for safety
+scooter | is_a=vehicle | has_property=small wheels and a step through frame | purpose=short urban journeys
+auto rickshaw | is_a=vehicle | has_property=three wheels | located_in=South Asia | purpose=short hired journeys
+bullock cart | is_a=vehicle | requires=draught animals | purpose=carrying loads on rural tracks
+ambulance | is_a=vehicle | purpose=carrying a patient to hospital quickly | has_property=right of way over other traffic | has_part=siren
+fire engine | is_a=vehicle | purpose=carrying firefighters, water and ladders to a fire
+tractor trailer | is_a=vehicle | purpose=hauling large loads | has_part=trailer
+electric vehicle | is_a=vehicle | requires=a battery | requires=charging | causes=no exhaust emissions at the point of use | has_property=quieter than an engine
+hybrid vehicle | is_a=vehicle | consists_of=an engine and an electric motor | purpose=lower fuel use in town
+
+# --- how a vehicle works -------------------------------------------------------------------------- #
+engine | is_a=machine | purpose=turning fuel into motion | has_kind=internal combustion engine | has_kind=jet engine | requires=fuel
+transmission | is_a=machine part | purpose=passing the engine's power to the wheels at a useful speed | has_part=gear
+gear | is_a=machine part | purpose=trading speed for turning force | has_property=toothed
+clutch | is_a=machine part | purpose=connecting and disconnecting the engine from the transmission
+brake | is_a=machine part | purpose=slowing or stopping a vehicle | causes=kinetic energy turning into heat | requires=friction
+tyre | is_a=vehicle part | consists_of=rubber | purpose=gripping the road and cushioning the ride | requires=correct air pressure
+steering wheel | is_a=vehicle part | purpose=pointing the front wheels
+axle | is_a=machine part | purpose=carrying a pair of wheels and letting them turn
+chassis | is_a=vehicle part | purpose=the frame everything else is mounted on
+suspension | is_a=vehicle part | purpose=keeping the wheels on the road over bumps | causes=a smoother ride
+speedometer | is_a=instrument | purpose=showing how fast a vehicle is going
+fuel | is_a=substance | purpose=supplying the energy an engine burns | has_kind=petrol | has_kind=diesel | has_kind=compressed natural gas
+petrol | is_a=fuel | purpose=fuelling spark ignition engines | occurs_when=crude oil is refined
+diesel | is_a=fuel | purpose=fuelling compression ignition engines | has_property=more energy per litre than petrol
+
+# --- rail ------------------------------------------------------------------------------------------- #
+railway | is_a=infrastructure | has_part=track | has_part=station | has_part=signal | purpose=carrying trains
+track | is_a=infrastructure | consists_of=rails | consists_of=sleepers | purpose=guiding and carrying a train | has_property=a fixed gauge
+locomotive | is_a=vehicle | purpose=pulling a train | has_kind=steam locomotive | has_kind=diesel locomotive | has_kind=electric locomotive
+carriage | is_a=vehicle | purpose=carrying passengers in a train | also_known_as=coach
+railway station | is_a=building | purpose=where passengers join and leave a train | has_part=railway platform
+railway platform | is_a=structure | purpose=letting passengers step level into a train
+railway signal | is_a=device | purpose=telling a driver whether the line ahead is clear | causes=trains being kept apart
+level crossing | is_a=structure | means=where a road crosses a railway on the same level | causes=danger if the barrier is ignored
+metro | is_a=rail transport | is_a=public transport | located_in=cities | has_property=usually underground or elevated | purpose=moving many people across a city quickly
+tram | is_a=vehicle | is_a=public transport | located_in=city streets | requires=rails laid in the road
+high speed rail | is_a=rail transport | has_property=runs far faster than conventional trains | requires=dedicated track
+
+# --- water --------------------------------------------------------------------------------------------- #
+boat | is_a=vehicle | located_in=water | purpose=carrying people or goods on water | requires=buoyancy
+ferry | is_a=boat | purpose=carrying passengers and vehicles across water on a fixed route
+cargo ship | is_a=ship | purpose=carrying goods across oceans | has_property=the cheapest way to move bulk far
+container ship | is_a=cargo ship | purpose=carrying standard steel containers | causes=much faster loading than loose cargo
+tanker | is_a=ship | purpose=carrying oil or other liquids in bulk
+submarine | is_a=vehicle | capable_of=travelling under water | requires=ballast tanks to sink and rise
+sail | is_a=vehicle part | purpose=catching wind to drive a boat | requires=wind
+anchor | is_a=equipment | purpose=holding a vessel in one place | requires=weight and a grip on the bottom
+rudder | is_a=vehicle part | purpose=steering a boat or aircraft
+port | is_a=infrastructure | purpose=where ships load and unload | has_part=dock | has_part=crane | located_in=a coast or a river mouth
+canal | is_a=waterway | means=an artificial channel cut for boats or for water | purpose=shortening a route or carrying irrigation water
+lighthouse | is_a=building | purpose=warning ships away from a hazard | located_in=a headland or a rock | has_part=lamp
+buoy | is_a=marker | purpose=marking a channel or a hazard in water | has_property=floats and is anchored
+
+# --- air and space ----------------------------------------------------------------------------------------- #
+aeroplane | is_a=vehicle | capable_of=flight | has_part=wing | has_part=jet engine | has_part=fuselage | requires=a runway | requires=lift
+wing | is_a=vehicle part | purpose=generating lift | has_property=curved on top so air moves faster over it
+lift force | is_a=force | means=the upward force that holds an aircraft up | requires=air moving over a wing | causes=flight
+drag | is_a=force | means=the resistance of air to something moving through it | causes=fuel being burned to keep speed up
+thrust | is_a=force | means=the forward force an engine produces | causes=an aircraft accelerating
+jet engine | is_a=engine | purpose=producing thrust by pushing air backwards | requires=fuel and air
+propeller | is_a=machine part | purpose=producing thrust by turning blades | located_in=aircraft and boats
+helicopter | is_a=vehicle | capable_of=hovering | capable_of=taking off vertically | has_part=rotor | purpose=reaching places without a runway
+rotor | is_a=vehicle part | purpose=producing lift and thrust by spinning | located_in=a helicopter
+airport | is_a=infrastructure | purpose=where aircraft take off, land and are serviced | has_part=runway | has_part=terminal | has_part=control tower
+runway | is_a=structure | purpose=the strip an aircraft accelerates along to take off
+air traffic control | is_a=service | purpose=keeping aircraft safely apart | requires=radar | requires=radio
+cockpit | is_a=part of a vehicle | purpose=where the pilot sits and controls the aircraft
+pilot | is_a=person | purpose=flying an aircraft | requires=a licence | requires=training
+black box | is_a=device | purpose=recording flight data and cockpit voices | has_property=built to survive a crash | also_known_as=flight recorder
+
+# --- the network and its rules --------------------------------------------------------------------------------- #
+road | purpose=carrying vehicles between places | has_kind=highway | has_kind=street | has_kind=expressway | consists_of=asphalt
+highway | is_a=road | purpose=carrying traffic between towns at speed
+expressway | is_a=road | has_property=no crossings at the same level | has_property=access only at interchanges
+bridge | is_a=structure | purpose=carrying a route over an obstacle | has_kind=arch bridge | has_kind=suspension bridge | requires=support at each end
+tunnel | is_a=structure | purpose=carrying a route through an obstacle | located_in=under ground or water
+flyover | is_a=bridge | purpose=carrying one road over another | causes=less waiting at a junction
+roundabout | is_a=junction | purpose=letting traffic from several roads merge without stopping
+junction | is_a=structure | means=where two or more routes meet
+zebra crossing | is_a=road marking | purpose=giving people on foot a place to cross | causes=vehicles being required to stop
+traffic sign | is_a=sign | purpose=telling drivers what the rules are here | has_kind=stop sign | has_kind=speed limit sign
+speed limit | is_a=rule | means=the fastest a vehicle may legally go here | purpose=reducing the severity of crashes
+traffic jam | is_a=condition | occurs_when=more vehicles want to use a road than it can carry | causes=delay | causes=more fuel burnt
+congestion | is_a=condition | means=traffic moving far below the road's design speed | causes=lost time and higher emissions
+driving licence | is_a=document | purpose=permitting a person to drive | requires=a test
+seat belt | is_a=safety device | purpose=holding an occupant in place in a crash | causes=far fewer serious injuries
+helmet | is_a=safety device | purpose=protecting the head | requires=being fastened to work
+airbag | is_a=safety device | purpose=cushioning an occupant in a crash | occurs_when=a severe impact is detected
+toll | is_a=charge | purpose=paying for a road or bridge from those who use it
+fare | is_a=charge | means=what a passenger pays for a journey on public transport
+timetable | is_a=document | purpose=saying when a service departs and arrives
+navigation | is_a=activity | means=working out where one is and how to get where one is going | requires=a map or a positioning system

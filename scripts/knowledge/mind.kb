@@ -1,0 +1,122 @@
+# mind.kb — psychology: perception, memory, emotion, learning and how people behave.
+#
+# The whole subject was missing. `body.kb` has the brain as an organ and `philosophy.kb` has
+# consciousness as a problem; between the anatomy and the metaphysics sits the ordinary knowledge
+# — what a habit is, why people forget, what stress does, what an illusion is — and none of it had
+# a fact behind it.
+#
+# It is a domain this package has a particular reason to hold, because these are the terms it uses
+# about *itself*: `njp/memory.py` distinguishes episodic from semantic memory, `njp/attention.py`
+# is named for a thing this file defines, and `njp/curiosity.py` implements one. A system with
+# an attention module and no fact about what attention is can describe its own behaviour and
+# cannot answer a question about it.
+#
+# Nothing here is clinical advice. Where a condition is named it is named as a category with a
+# definition, and the line stops there.
+
+# --- the field ------------------------------------------------------------------------------- #
+psychology | is_a=discipline | means=the study of mind and behaviour | has_kind=cognitive psychology | has_kind=developmental psychology | has_kind=social psychology | has_kind=clinical psychology | involves=experiment | involves=observation
+cognitive psychology | is_a=psychology | means=the study of how people perceive, remember, reason and decide
+developmental psychology | is_a=psychology | means=the study of how mind and behaviour change across a lifetime
+social psychology | is_a=psychology | means=the study of how people are affected by other people
+clinical psychology | is_a=psychology | means=the study and treatment of psychological distress and disorder
+neuroscience | is_a=discipline | means=the study of the nervous system | involves=the brain | involves=neurons
+behaviour | is_a=phenomenon | means=what an organism does that can be observed from outside
+mental state | is_a=phenomenon | means=a condition of mind such as a belief, a desire or a feeling | has_property=not directly observable
+
+# --- perception --------------------------------------------------------------------------------- #
+sensation | is_a=process | means=a sense organ registering something | requires=a stimulus | causes=a signal to the brain
+perception | is_a=process | means=making sense of what the senses register | requires=sensation | has_property=shaped by expectation as well as by the signal
+stimulus | is_a=event | means=something in the world that a sense organ can register
+attention | is_a=process | means=selecting some of what is available and setting the rest aside | has_property=limited | causes=missing what was not selected | requires=effort to sustain
+selective attention | is_a=attention | means=following one thing while other things are present | causes=hearing one voice in a crowded room
+optical illusion | is_a=phenomenon | means=a picture the visual system reads wrongly and reliably | causes=seeing motion, size or colour that is not there | has_property=persists even once it is explained
+blind spot | is_a=phenomenon | located_in=the eye | means=the place where the optic nerve leaves the retina and there are no receptors | has_property=filled in by the brain without being noticed
+depth perception | is_a=perception | means=seeing how far away things are | requires=cues such as two eyes, shading and relative size
+pattern recognition | is_a=process | means=matching what is sensed against something already known | causes=seeing faces in clouds when it misfires
+
+# --- memory ---------------------------------------------------------------------------------------- #
+memory | is_a=faculty | means=holding information over time and getting it back | has_part=encoding | has_part=storage | has_part=retrieval | has_kind=working memory | has_kind=episodic memory | has_kind=semantic memory | has_kind=procedural memory
+encoding | is_a=part of memory | means=turning an experience into something that can be stored
+retrieval | is_a=part of memory | means=bringing something stored back into mind | requires=a cue
+working memory | is_a=memory | means=the small amount held in mind while it is being used | has_property=holds only a few items at once | has_property=lost within seconds without memory rehearsal
+short term memory | is_a=memory | means=what is held for seconds to minutes | has_property=limited in capacity
+long term memory | is_a=memory | means=what is held for hours to a lifetime | has_property=very large capacity
+episodic memory | is_a=long term memory | means=memory for particular events one lived through | has_property=tied to a time and a place
+semantic memory | is_a=long term memory | means=memory for facts, detached from when they were learned
+procedural memory | is_a=long term memory | means=memory for how to do something | has_property=hard to put into words | has_kind=riding a bicycle
+forgetting | is_a=process | means=losing access to something once known | occurs_when=a memory is not retrieved for a long time | causes=a gap that feels like it was never learned
+memory interference | is_a=cause of forgetting | means=one memory getting in the way of another
+recall | is_a=retrieval | means=producing something from memory without it being present
+recognition | is_a=retrieval | means=identifying something as familiar when it is present | has_property=easier than recall
+memory rehearsal | is_a=technique | means=repeating something to keep it in mind | purpose=moving it into long term memory
+mnemonic | is_a=technique | purpose=making something easier to remember | involves=a rhyme, an image or a first letter
+spaced repetition | is_a=technique | means=reviewing at widening intervals | purpose=learning that lasts | causes=better retention than cramming
+chunking | is_a=technique | means=grouping items so several count as one | purpose=getting more into working memory
+
+# --- learning and thinking ------------------------------------------------------------------------- #
+learning | is_a=process | means=a lasting change in what one knows or can do, caused by experience | requires=practice | requires=feedback
+conditioning | is_a=learning | means=learning that two things go together | has_kind=classical conditioning | has_kind=operant conditioning
+classical conditioning | is_a=conditioning | means=learning that one signal predicts another | discoverer=Ivan Pavlov
+operant conditioning | is_a=conditioning | means=learning from the consequences of what one does | involves=reward | involves=punishment
+reinforcement | is_a=consequence | means=a consequence that makes a behaviour more likely | causes=the behaviour being repeated
+punishment | is_a=consequence | means=a consequence that makes a behaviour less likely
+habit | is_a=behaviour | means=an action that has become automatic through repetition | requires=repetition | has_property=triggered by a cue rather than a decision | has_property=hard to break
+practice | is_a=activity | purpose=making a skill faster and more reliable | causes=skill | requires=repetition with feedback
+skill | is_a=ability | means=something one can do well through practice | has_property=improves with deliberate practice
+motivation | is_a=mental state | means=what moves a person to act | has_kind=intrinsic motivation | has_kind=extrinsic motivation
+intrinsic motivation | is_a=motivation | means=doing something because the doing itself is rewarding
+extrinsic motivation | is_a=motivation | means=doing something for a reward or to avoid a penalty
+curiosity | is_a=motivation | means=wanting to know something for its own sake | causes=exploration | occurs_when=something is surprising but not incomprehensible
+intelligence | is_a=capacity | means=the capacity to learn, reason and adapt to new problems | has_property=measured only imperfectly by any single test
+creativity | is_a=capacity | means=producing something both new and useful | involves=combining ideas that were kept apart
+reasoning | is_a=process | means=working out what follows from what one holds | has_kind=deduction | has_kind=induction
+problem solving | is_a=process | means=getting from a situation to a goal when the way is not obvious | involves=representing the problem | involves=searching for a step
+insight | is_a=experience | means=a solution arriving suddenly and whole | has_property=often follows a period of being stuck
+mental model | is_a=representation | means=an internal picture of how something works | purpose=predicting what a thing will do
+
+# --- decision and its errors -------------------------------------------------------------------------- #
+decision | is_a=action | means=choosing one option over others | involves=weighing outcomes | requires=at least two options
+heuristic | is_a=strategy | means=a rule of thumb that is usually good enough and quick | has_property=trades accuracy for speed | causes=a systematic error when it misfires
+cognitive bias | is_a=phenomenon | means=a systematic departure from good reasoning | has_kind=confirmation bias | has_kind=anchoring | has_kind=availability bias | has_kind=hindsight bias | has_property=not corrected by knowing about it
+confirmation bias | is_a=cognitive bias | means=noticing evidence that fits what one already believes and missing the rest
+anchoring | is_a=cognitive bias | means=being pulled toward the first number one heard
+availability bias | is_a=cognitive bias | means=judging how common something is by how easily an example comes to mind | causes=overestimating rare and vivid dangers
+hindsight bias | is_a=cognitive bias | means=believing after the fact that one knew it all along
+overconfidence | is_a=cognitive bias | means=being more certain than one's accuracy warrants
+placebo effect | is_a=phenomenon | means=improvement that follows an inert treatment because it was believed to be a treatment | causes=the need for controlled trials
+
+# --- emotion and well-being ------------------------------------------------------------------------------ #
+emotion | is_a=mental state | means=a felt response to something, with a bodily change and a tendency to act | has_kind=happiness | has_kind=sadness | has_kind=fear | has_kind=anger | has_kind=surprise | has_kind=disgust
+happiness | is_a=emotion | occurs_when=something goes better than expected | causes=approach and repetition
+sadness | is_a=emotion | occurs_when=something valued is lost | causes=withdrawal
+fear | is_a=emotion | occurs_when=a threat is perceived | causes=preparing to flee or freeze | requires=something taken to be dangerous
+anger | is_a=emotion | occurs_when=one is blocked or wronged | causes=confrontation
+surprise | is_a=emotion | occurs_when=something happens that was not expected | causes=attention turning to it | has_property=very brief
+disgust | is_a=emotion | occurs_when=something is taken to be contaminating | purpose=keeping away from what might make one ill
+empathy | is_a=capacity | means=feeling something of what another person feels | requires=taking another's point of view
+mood | is_a=mental state | means=a feeling that lasts longer and has no single object | has_property=less intense than an emotion
+stress | is_a=response | occurs_when=demands are felt to exceed what one can meet | causes=raised heart rate | causes=poorer sleep when prolonged | requires=recovery
+anxiety | is_a=emotion | means=fear about something that has not happened | has_property=persistent when it becomes a disorder
+resilience | is_a=capacity | means=recovering function after difficulty | requires=support | requires=recovery time
+mental health | is_a=condition | means=how well a person is functioning and feeling over time | requires=sleep | requires=connection with others | requires=meaningful activity
+sleep | is_a=process | purpose=recovery and the consolidation of memory | causes=poorer attention and mood when short
+dream | is_a=experience | occurs_when=a person is asleep | located_in=sleep
+
+# --- people together ---------------------------------------------------------------------------------------- #
+personality | is_a=pattern | means=a person's characteristic way of feeling, thinking and acting | has_property=fairly stable across situations
+temperament | is_a=pattern | means=the part of personality that shows from very early in life
+identity | is_a=self concept | means=how a person understands who they are
+self esteem | is_a=self concept | means=how favourably a person regards themselves
+conformity | is_a=social behaviour | means=changing what one does to match a group | occurs_when=a group is unanimous
+obedience | is_a=social behaviour | means=doing what an authority instructs
+peer pressure | is_a=social influence | means=pressure to act as one's own group acts | causes=behaviour a person would not choose alone
+stereotype | is_a=belief | means=a fixed idea about what members of a group are like | causes=judging a person by a category rather than by evidence
+prejudice | is_a=attitude | means=a hostile attitude held toward a group in advance of evidence
+cooperation | is_a=social behaviour | means=working together toward an outcome neither could reach alone | requires=trust
+trust | is_a=attitude | means=relying on someone without being able to check | requires=a record of being reliable
+communication | is_a=process | means=getting something across from one mind to another | requires=a shared code | has_kind=verbal communication | has_kind=non-verbal communication
+non-verbal communication | is_a=communication | means=what is conveyed by face, posture, gesture and tone
+body language | is_a=non-verbal communication | means=what posture and movement convey
+active listening | is_a=technique | means=attending fully and checking what was understood | causes=fewer misunderstandings
+theory of mind | is_a=capacity | means=understanding that another person's beliefs may differ from one's own | requires=development in childhood

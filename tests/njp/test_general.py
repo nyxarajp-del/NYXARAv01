@@ -33,7 +33,8 @@ from nyxara.njp import core as njp_core
 from nyxara.njp import general as njp_general
 from nyxara.njp import grounding as njp_grounding
 from nyxara.njp.general import (
-    ASKABLE, GeneralKnowledgeExam, INHERITABLE, UNTAUGHT, examine, load_brain, render,
+    ASKABLE, MAX_INHERITED_HOPS, GeneralKnowledgeExam, INHERITABLE, UNTAUGHT, examine,
+    load_brain, render,
 )
 
 #: Small enough that the whole file runs in seconds, large enough that one lucky subject cannot
@@ -222,6 +223,69 @@ def test_she_passes_every_paper_at_the_shipped_corpus(exam):
     for paper in report.papers:
         assert paper.score >= floors[paper.name], f"{paper.name}: {paper.score:.3f}"
         assert paper.wrong <= max(4, int(0.05 * paper.asked)), f"{paper.name}: {paper.wrong} wrong"
+
+
+def test_the_hop_bound_is_where_the_walk_stops_paying(brain):
+    """`MAX_INHERITED_HOPS` must be the last level that still answers, and the next must not.
+
+    A bound set one too low quietly excludes work she can do; one too high puts guaranteed-silent
+    items in the paper and reports her as failing at something the walk deliberately refuses. Both
+    are measured here against the live Core rather than trusted from the constant.
+
+    The cliff is sharp on this corpus — every level up to the bound answers, and the level past it
+    answers none — so this is an equality on both sides, not a floor.
+    """
+    exam = GeneralKnowledgeExam(brain, limit=10)
+    core = brain.learner
+
+    def nearest(subject, predicate, cap):
+        """Level of the nearest ancestor holding `predicate`, or None within `cap` levels."""
+        seen, frontier, level = {subject}, list(exam.kinds.get(subject, ())), 1
+        while frontier and level <= cap:
+            nxt = []
+            for kind in (k.strip().lower() for k in frontier):
+                if not kind or kind in seen:
+                    continue
+                seen.add(kind)
+                if exam.by_sp.get((kind, predicate)):
+                    return level
+                nxt.extend(exam.kinds.get(kind, ()))
+            frontier, level = nxt, level + 1
+        return None
+
+    at_bound = past_bound = 0
+    answered_at = answered_past = 0
+    for subject in list(exam.kinds)[:900]:
+        for predicate in INHERITABLE:
+            if exam.by_sp.get((subject, predicate)):
+                continue
+            level = nearest(subject, predicate, MAX_INHERITED_HOPS + 2)
+            if level is None:
+                continue
+            ok = core.predict(subject, predicate).ok
+            if level <= MAX_INHERITED_HOPS:
+                at_bound += 1
+                answered_at += bool(ok)
+            else:
+                past_bound += 1
+                answered_past += bool(ok)
+
+    assert at_bound > 50, "not enough affordable chains sampled to say anything"
+    assert answered_at == at_bound, (
+        f"{at_bound - answered_at} chains within the bound went unanswered; "
+        f"MAX_INHERITED_HOPS={MAX_INHERITED_HOPS} is too high")
+    if past_bound:
+        assert answered_past == 0, (
+            f"{answered_past} of {past_bound} chains past the bound answered; "
+            f"MAX_INHERITED_HOPS={MAX_INHERITED_HOPS} is too low and is excluding real work")
+
+
+def test_what_the_bound_excludes_is_counted_not_hidden(exam):
+    """A bound that silently shrinks the paper is a bound that can widen unnoticed."""
+    report = exam.sit(("inheritance",))
+    assert report.priced_out > 0, "this corpus does have chains past the bound"
+    assert "not asked" in render(report)
+    assert report.to_dict()["priced_out"] == report.priced_out
 
 
 def test_inheritance_is_answered_by_the_ladder_and_not_by_english(exam):

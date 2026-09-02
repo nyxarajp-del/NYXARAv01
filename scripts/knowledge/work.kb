@@ -1,0 +1,128 @@
+# work.kb — occupations, trades, tools and the shape of working life.
+#
+# `everyday.kb` has `job`, `teacher` and `shop`. That is the whole of it: no trade, no tool, no
+# workplace, nothing about what a contract or a wage or a union is. "What does a plumber do" and
+# "what is a carpenter's tool" are as ordinary as general knowledge gets, and every one of them
+# came back empty.
+#
+# Occupations are written as `is_a=occupation` with a `purpose` that says what the person actually
+# does, and tools as `is_a=tool` with a `purpose` and the trade that uses them, so the two halves
+# join up: "what does a spanner do" and "what does a mechanic use" reach each other.
+
+# --- work itself ------------------------------------------------------------------------------------ #
+occupation | is_a=activity | means=the work a person does regularly for a living | has_kind=profession | has_kind=skilled trade | has_kind=service occupation
+profession | is_a=occupation | means=work requiring long training and a recognised qualification | has_kind=doctor | has_kind=lawyer | has_kind=engineer | requires=a licence or registration in many cases
+skilled trade | is_a=occupation | means=skilled manual work learned by apprenticeship | has_kind=carpenter | has_kind=plumber | has_kind=electrician | requires=tools
+apprenticeship | is_a=training | means=learning a skilled trade by working under someone who has it | causes=skill transferred that a book cannot carry
+vocational training | is_a=education | purpose=preparing a person for a particular kind of work
+employment | is_a=relationship | means=working for another in return for a wage | requires=a contract | causes=obligations on both sides
+employer | is_a=party | means=the person or organisation that engages a worker
+employee | is_a=party | means=a person engaged to work for an employer
+self employment | is_a=employment | means=working for oneself rather than for an employer | causes=carrying one's own risk and one's own record keeping
+freelancer | is_a=self employment | means=someone who takes work from several clients rather than one employer
+contract of employment | is_a=contract | purpose=setting out the terms on which a person works | has_part=pay | has_part=hours | has_part=notice period
+wage | is_a=payment | means=what a worker is paid for their time or output | has_kind=minimum wage | has_kind=piece rate
+salary | is_a=wage | means=pay stated as a fixed annual or monthly amount
+minimum wage | is_a=wage | means=the lowest rate an employer may lawfully pay | purpose=preventing pay falling below a floor
+overtime | is_a=work | means=hours worked beyond the normal working time | causes=a higher rate of pay in many places
+shift work | is_a=arrangement | means=work organised in blocks so that a place runs beyond one working day | causes=disruption to sleep
+trade union | is_a=organisation | purpose=representing workers in bargaining with an employer | causes=terms negotiated collectively rather than one by one
+collective bargaining | is_a=process | means=negotiating pay and conditions for a group at once
+strike | is_a=action | means=workers collectively stopping work to press a demand | causes=production halting
+workplace safety | is_a=practice | purpose=keeping people from being injured at work | requires=training | requires=protective equipment
+occupational hazard | is_a=risk | means=a danger that comes with a particular kind of work
+retirement | is_a=event | means=leaving working life, usually at an age set by law or custom | requires=a pension or savings to follow it
+unemployment as a condition | is_a=condition | means=wanting paid work and not having it | causes=loss of income and of routine
+resume | is_a=document | purpose=setting out a person's education and work history | also_known_as=curriculum vitae
+job interview | is_a=meeting | purpose=deciding whether a candidate suits a role | involves=questions about experience and judgement
+promotion | is_a=event | means=being moved to a role of greater responsibility
+teamwork | is_a=practice | means=people working toward a shared result | requires=communication | requires=agreed roles
+deadline | is_a=constraint | means=the time by which work must be finished | causes=prioritising
+
+# --- the occupations ----------------------------------------------------------------------------------- #
+doctor | is_a=profession | purpose=diagnosing and treating illness | requires=a medical degree | requires=registration
+nurse | is_a=profession | purpose=caring for patients and administering treatment | requires=training and registration
+surgeon | is_a=doctor | purpose=treating by operating
+pharmacist | is_a=profession | purpose=dispensing medicines and advising on their use
+dentist | is_a=profession | purpose=treating teeth and gums
+veterinarian | is_a=profession | purpose=treating animals
+lawyer | is_a=profession | purpose=advising on the law and representing clients | requires=a legal qualification
+engineer | is_a=profession | purpose=designing and building things that must work and be safe | has_kind=civil engineer | has_kind=mechanical engineer | has_kind=electrical engineer | has_kind=software engineer
+civil engineer | is_a=engineer | purpose=designing roads, bridges, dams and buildings
+mechanical engineer | is_a=engineer | purpose=designing machines and how they move
+electrical engineer | is_a=engineer | purpose=designing electrical systems and equipment
+software engineer | is_a=engineer | purpose=designing and building programs | requires=knowing how to test what was written
+architect of buildings | is_a=profession | purpose=designing buildings and overseeing their construction
+accountant | is_a=profession | purpose=keeping and auditing financial records
+scientist | is_a=profession | purpose=investigating how the world works by evidence | requires=method | requires=publication for others to check
+researcher | is_a=profession | purpose=finding out what is not yet known in a field
+teacher | is_a=profession | requires=knowing the subject and knowing how it is learned
+professor | is_a=teacher | purpose=teaching and researching at a university
+librarian | is_a=profession | purpose=organising collections and helping people find what they need
+carpenter | is_a=skilled trade | purpose=making and fitting things from wood | requires=saw | requires=chisel
+plumber | is_a=skilled trade | purpose=fitting and repairing pipes, taps and drains | requires=wrench
+electrician | is_a=skilled trade | purpose=installing and repairing electrical wiring | requires=knowing the safety rules
+mason | is_a=skilled trade | purpose=building in brick and stone | requires=trowel
+welder | is_a=skilled trade | purpose=joining metal by melting it together | requires=protective mask
+mechanic | is_a=skilled trade | purpose=servicing and repairing vehicles | requires=spanner | requires=diagnostic tools
+tailor | is_a=skilled trade | purpose=cutting and sewing clothes to fit | requires=sewing machine | requires=measuring tape
+blacksmith | is_a=skilled trade | purpose=shaping iron by heating and hammering | requires=anvil | requires=forge
+potter | is_a=skilled trade | purpose=making vessels from clay | requires=potter's wheel | requires=kiln
+weaver | is_a=skilled trade | purpose=making cloth from thread | requires=loom
+cobbler | is_a=skilled trade | purpose=making and mending shoes
+barber | is_a=service occupation | purpose=cutting and dressing hair
+chef | is_a=service occupation | purpose=cooking professionally and running a kitchen
+baker | is_a=skilled trade | purpose=making bread and other baked goods | requires=oven
+butcher | is_a=skilled trade | purpose=preparing and selling meat
+farmer as an occupation | is_a=occupation | purpose=growing crops and raising livestock | requires=land | requires=plough
+fisherman | is_a=occupation | purpose=catching fish for a living | requires=a boat and nets
+driver | is_a=occupation | purpose=driving a vehicle for a living | requires=a driving licence
+pilot as an occupation | is_a=profession | purpose=flying aircraft | requires=a pilot's licence
+police officer | is_a=occupation | purpose=preventing and investigating crime and keeping order
+firefighter | is_a=occupation | purpose=putting out fires and rescuing people | requires=protective clothing
+soldier | is_a=occupation | purpose=serving in the armed forces
+postal worker | is_a=occupation | purpose=collecting and delivering post
+shopkeeper | is_a=occupation | purpose=selling goods to the public
+salesperson | is_a=occupation | purpose=finding buyers and closing sales
+manager | is_a=occupation | purpose=planning work, allocating it and being answerable for the result
+clerk | is_a=occupation | purpose=keeping records and handling routine administration
+receptionist | is_a=occupation | purpose=receiving visitors and directing enquiries
+cleaner | is_a=occupation | purpose=keeping premises clean and hygienic
+security guard | is_a=occupation | purpose=protecting premises and people
+translator | is_a=occupation | purpose=turning written text from one language into another
+language interpreter | is_a=occupation | purpose=turning speech from one language into another as it is spoken
+photographer | is_a=occupation | purpose=making photographs | requires=camera
+designer | is_a=occupation | purpose=deciding how something will look and work before it is made
+artisan | is_a=occupation | means=a skilled maker working largely by hand
+
+# --- tools ---------------------------------------------------------------------------------------------- #
+tool | is_a=object | purpose=letting a person do work they could not do, or not do well, by hand | has_kind=hand tool | has_kind=power tool
+hand tool | is_a=tool | means=a tool worked by muscle alone | has_kind=hammer | has_kind=saw | has_kind=screwdriver
+power tool | is_a=tool | requires=electricity or compressed air | has_kind=drill | causes=work done far faster than by hand
+hammer | is_a=hand tool | purpose=driving nails and shaping metal | has_part=head | has_part=handle
+saw | is_a=hand tool | purpose=cutting wood or metal | has_property=a toothed blade
+screwdriver | is_a=hand tool | purpose=turning screws | has_kind=flat screwdriver | has_kind=cross head screwdriver
+spanner | is_a=hand tool | purpose=turning nuts and bolts | also_known_as=wrench
+pliers | is_a=hand tool | purpose=gripping, bending and cutting wire
+chisel | is_a=hand tool | purpose=cutting or shaping wood, stone or metal | requires=being struck or pushed
+file as a tool | is_a=hand tool | purpose=smoothing or shaping by abrasion
+drill | is_a=power tool | purpose=making holes | has_part=bit
+axe | is_a=hand tool | purpose=splitting and felling wood
+shovel | is_a=hand tool | purpose=digging and moving loose material
+trowel | is_a=hand tool | purpose=spreading mortar or working soil
+crowbar | is_a=hand tool | purpose=levering things apart | has_property=works by mechanical advantage
+ladder | is_a=equipment | purpose=reaching a height safely | requires=being placed at a stable angle
+scaffolding | is_a=structure | purpose=giving workers a safe platform at height
+anvil | is_a=equipment | purpose=the surface a blacksmith hammers against
+forge | is_a=equipment | purpose=heating metal until it can be worked
+kiln | is_a=equipment | purpose=firing pottery or bricks at high temperature
+loom | is_a=machine | purpose=weaving thread into cloth | has_part=warp | has_part=weft
+lathe | is_a=machine | purpose=shaping a workpiece by turning it against a cutting tool
+crane | is_a=machine | purpose=lifting heavy loads | requires=a counterweight
+pulley | purpose=changing the direction of a force and multiplying it | has_property=a rope over a wheel
+lever | purpose=multiplying force about a pivot | requires=a fulcrum
+simple machine | is_a=machine | means=one of the basic devices that change a force | has_kind=lever | has_kind=pulley | has_kind=inclined plane | has_kind=wheel and axle | has_kind=screw | has_kind=wedge
+inclined plane | purpose=raising a load with less force over a longer distance
+wedge | is_a=simple machine | purpose=splitting or holding by concentrating a force
+screw | is_a=simple machine | purpose=holding parts together or converting turning into straight movement
+mechanical advantage | is_a=measure | means=how much a machine multiplies the force put into it | has_property=bought at the cost of distance moved

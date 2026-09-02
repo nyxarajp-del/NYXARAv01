@@ -1,0 +1,99 @@
+# media.kb — how information is published, carried and paid for, and how it goes wrong.
+#
+# `society.kb` has one line for journalism; `computing.kb` has the internet as plumbing — IP, DNS,
+# HTTP — and nothing about what runs on it. So the whole vocabulary in which people discuss what
+# they read and watch was absent: what an editor does, what a source is, what fake news is, what
+# an algorithm feed does, what privacy means.
+#
+# This domain matters more than most for a system that will be asked about its own outputs. A
+# brain that can generate text and holds no fact about misinformation can be part of the problem
+# and cannot describe it.
+
+# --- the press and its craft ------------------------------------------------------------------------ #
+mass media | is_a=institution | means=the channels that carry information to a large audience | has_kind=newspaper | has_kind=radio | has_kind=television | has_kind=online media
+news | is_a=information | means=an account of recent events thought to matter to an audience
+newspaper | is_a=publication | purpose=reporting news in print on a regular schedule | has_part=headline | has_part=editorial | has_part=byline
+headline | is_a=part of an article | purpose=telling the reader in a line what the piece is about | causes=most of what a passing reader takes away
+byline | is_a=part of an article | means=the line naming who wrote it | purpose=attaching responsibility to a name
+editorial | is_a=article | means=a piece stating the publication's own opinion | has_property=distinct from reporting
+journalist | is_a=person | purpose=gathering, checking and writing news | requires=sources
+editor | is_a=person | purpose=deciding what is published and in what form | capable_of=cutting, checking and rejecting a piece
+source | is_a=person or document | means=where a journalist got the information | has_kind=primary source | has_kind=anonymous source
+primary source | is_a=source | means=a record made by someone directly involved | has_property=stronger evidence than an account of an account
+fact checking | is_a=process | purpose=verifying claims before or after publication | requires=going back to a primary source
+correction | is_a=notice | purpose=setting right something a publication got wrong | causes=trust being maintained rather than lost
+press freedom | is_a=right | means=the press being able to report without prior permission or reprisal | causes=power being reported on
+censorship | is_a=practice | means=suppressing what may be published or said | causes=the public not knowing what was removed
+libel | is_a=wrong | means=publishing a false statement that damages a reputation | causes=a claim for damages
+plagiarism | is_a=wrong | means=passing off someone else's work as one's own | causes=loss of standing and of qualifications
+attribution | is_a=practice | means=saying where a claim or a quotation came from | purpose=letting a reader check it
+interview | is_a=method | means=getting information by asking a person directly
+investigative journalism | is_a=journalism | means=reporting that uncovers what someone wanted hidden | requires=time and legal protection
+propaganda | is_a=communication | means=material designed to promote a cause rather than to inform | has_property=may be true and still be propaganda
+advertisement | is_a=communication | purpose=persuading an audience to buy or believe something | has_property=paid for by whoever benefits
+public relations | is_a=activity | purpose=shaping how an organisation is seen
+
+# --- broadcasting and publishing ------------------------------------------------------------------------ #
+broadcasting | is_a=activity | means=sending the same content to many receivers at once | requires=a transmitter or a network
+radio station | is_a=organisation | purpose=broadcasting sound programmes | requires=a frequency allocation
+television channel | is_a=organisation | purpose=broadcasting picture and sound programmes
+public broadcaster | is_a=organisation | purpose=broadcasting funded publicly rather than by advertising | requires=independence from the government of the day
+streaming | is_a=technology | means=sending audio or video to be played as it arrives | requires=steady bandwidth | causes=viewing on demand rather than on a schedule
+podcast | is_a=publication | means=an audio programme published for downloading or streaming
+publishing | is_a=activity | means=making a work available to the public | has_kind=book publishing | has_kind=self publishing
+edition | is_a=version | means=one issued form of a published work
+circulation | is_a=measure | means=how many copies of a publication are distributed
+audience | is_a=group | means=the people who receive a piece of communication
+ratings | is_a=measure | means=an estimate of how many watched or listened | causes=what gets commissioned
+paywall | is_a=mechanism | purpose=charging for access to content | causes=revenue not dependent on advertising
+
+# --- the network and its platforms ---------------------------------------------------------------------------- #
+social media | is_a=online media | means=platforms where users publish to each other | causes=anyone being able to reach an audience | causes=misinformation spreading as fast as news
+platform | is_a=service | means=a service that hosts what other people make | has_property=usually not the author of what it carries
+user generated content | is_a=content | means=material made by the audience rather than by a publisher
+recommendation algorithm | is_a=algorithm | purpose=choosing what a user is shown next | causes=engagement being optimised rather than accuracy | causes=filter bubbles
+filter bubble | is_a=phenomenon | means=seeing mostly what one already agrees with | occurs_when=a feed is tuned to what a user already clicked | causes=a distorted sense of what others think
+echo chamber | is_a=phenomenon | means=a group in which the same view is repeated and rarely challenged | causes=beliefs hardening
+viral content | is_a=content | means=material spreading rapidly by being shared | has_property=spread does not depend on being true
+engagement | is_a=measure | means=how much an audience clicks, watches, comments or shares | causes=what a platform promotes
+influencer | is_a=person | means=someone whose recommendations reach a large following
+search engine | is_a=service | purpose=finding pages that answer a query | requires=an index of the web | causes=what most people ever see of the web
+hyperlink | is_a=element | purpose=connecting one document to another | causes=the web being navigable
+blog | is_a=publication | means=a site of dated entries by one author or a few
+forum | is_a=service | purpose=discussion in threads on a topic
+wiki | is_a=service | means=a site any reader may edit | requires=version history and review to stay reliable
+open source | is_a=practice | means=publishing source code so anyone may read, use and change it | causes=review by people who did not write it
+digital divide | is_a=problem | means=the gap between those with reliable network access and those without | causes=services moving online leaving people out
+
+# --- truth, error and harm --------------------------------------------------------------------------------------- #
+misinformation | is_a=false information | means=false information spread without intent to deceive | causes=harm even where nobody meant it
+disinformation | is_a=false information | means=false information spread deliberately to mislead | requires=intent
+fake news | is_a=disinformation | means=fabricated material presented in the form of a news report
+rumour | is_a=claim | means=a claim passed on without its source being checked | causes=panic when it concerns safety
+conspiracy theory | is_a=belief | means=explaining events as the secret work of a powerful group | has_property=treats absence of evidence as evidence of concealment
+clickbait | is_a=technique | means=a headline written to be clicked rather than to describe | causes=disappointment and distrust
+deepfake | is_a=synthetic media | means=a convincing fabricated image, video or voice | requires=machine learning | causes=recordings no longer being self-evidently evidence
+media literacy | is_a=skill | means=being able to judge who made a piece of media, why, and how well it is evidenced | purpose=not being misled | requires=checking the source
+lateral reading | is_a=technique | means=leaving a page to find out who is behind it before judging its claims | causes=faster and better assessment than reading it closely
+primary evidence | is_a=evidence | purpose=checking a claim against the record rather than against another report
+bias in reporting | is_a=problem | means=a slant in what is selected and how it is framed | has_property=present in selection as well as in wording
+false balance | is_a=problem | means=presenting two sides as equal when the evidence is not | causes=a settled question looking open
+
+# --- privacy and data ------------------------------------------------------------------------------------------------ #
+privacy | is_a=right | means=control over what is known about oneself and by whom | causes=a limit on what may be collected
+personal data | is_a=information | means=information about an identified or identifiable person | requires=protection by law in many countries
+data protection | is_a=practice | purpose=keeping personal data safe and used only as agreed
+consent | is_a=permission | means=agreement freely given after being told what it is for | requires=being informed to be real
+surveillance | is_a=practice | means=systematic watching of people | causes=a chilling effect on what people say and do
+tracking | is_a=practice | means=following what a person does across sites or places | requires=identifiers such as cookies
+cookie | is_a=file | purpose=letting a site remember a visitor between requests | causes=tracking when shared across sites
+anonymisation | is_a=technique | purpose=removing what would identify a person from a data set | has_property=harder than it looks, since records can be re-linked
+encryption in transit | is_a=technique | purpose=stopping anyone between two parties from reading what passes
+phishing | is_a=attack | means=a message pretending to be from someone trusted to obtain credentials | causes=account takeover | requires=the target acting on it
+password | is_a=credential | purpose=proving who is asking | requires=being unique to each service to be worth much
+two factor authentication | is_a=technique | means=requiring a second proof besides a password | causes=a stolen password no longer being enough
+malware | is_a=software | means=software written to damage or intrude | has_kind=virus | has_kind=ransomware | has_kind=spyware
+ransomware | is_a=malware | means=software that encrypts a victim's files and demands payment | requires=backups to recover from without paying
+backup | is_a=copy | purpose=being able to restore data after loss | requires=being kept somewhere the original problem cannot reach
+cyber security | is_a=discipline | purpose=protecting systems and data from attack | involves=access control | involves=patching known flaws
+digital footprint | is_a=record | means=the trail a person's online activity leaves behind | has_property=hard to remove once it is copied

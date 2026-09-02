@@ -49,8 +49,8 @@ FIFA World Cup | is_a=tournament | involves=national football teams | has_proper
 UEFA Champions League | is_a=tournament | involves=European club football teams
 
 # --- cricket -------------------------------------------------------------------------------------- #
-cricket | is_a=team sport | has_property=eleven players a side | requires=a bat | requires=a ball | requires=a pitch | involves=scoring runs | birthplace=England
-bat | is_a=sports equipment | purpose=striking the ball | consists_of=wood
+cricket | is_a=team sport | has_property=eleven players a side | requires=a cricket bat | requires=a ball | requires=a pitch | involves=scoring runs | birthplace=England
+cricket bat | is_a=sports equipment | purpose=striking the ball | consists_of=wood
 wicket | is_a=part of a cricket pitch | has_part=stump | has_part=bail | purpose=giving the bowler a target to hit
 stump | is_a=part of a wicket | consists_of=wood | has_property=three to a wicket
 over | is_a=unit of a cricket innings | means=a set of six deliveries bowled from one end
