@@ -1475,6 +1475,7 @@ class Grounder:
     """
 
     def __init__(self, *, graph: Any = None, ladder: Any = None, llm: Any = None,
+                 grammar: Any = None,
                  min_confidence: float = 0.35, known_floor: float = 0.75,
                  recall_floor: float = 0.6,
                  learn_patterns: bool = True, max_learned: int = 512,
@@ -1482,6 +1483,13 @@ class Grounder:
                  affinity_floor: float = _AFFINITY_FLOOR) -> None:
         self.graph = graph
         self.ladder = ladder
+        #: Her :class:`~nyxara.njp.language.LanguageFaculty`, if she has one. Optional and
+        #: **empty on day one** — a faculty holds no construction until somebody demonstrates a
+        #: sentence with its meaning — so attaching it changes nothing at all until a lesson has
+        #: run. See :meth:`_extract_learned` for what it is allowed to do once one has.
+        self.grammar = grammar
+        #: Triples that came from a construction rather than from a shipped pattern.
+        self.learned_reads = 0
         self._llm = llm
         self._llm_tried = llm is not None
         self.min_confidence = float(min_confidence)
@@ -1592,6 +1600,12 @@ class Grounder:
                 return out
 
             triples = self._extract(out.text)
+            # Before the fluent surface, because it is free, offline and already verified against
+            # the lessons that produced it. What it may do to a triple the core already produced
+            # is decided by evidence, in `_extract_learned`, and not by being second in this line.
+            learned = self._extract_learned(out.text, over=triples)
+            if learned:
+                triples = learned
             if not triples and deep:
                 triples = self._extract_deep(out.text)
                 if triples:
@@ -2002,6 +2016,77 @@ class Grounder:
             return out
         except Exception:  # noqa: BLE001 — an unparsed causal sentence grounds to nothing
             return out
+
+    def _extract_learned(self, text: str,
+                         over: Sequence[GroundedTriple] = ()) -> List[GroundedTriple]:
+        """A sentence read by a construction somebody demonstrated, and when it is allowed to win.
+
+        This is the one edge from :mod:`nyxara.njp.language` into what she actually believes.
+
+        **Why it is not simply a fallback.** It was, for one afternoon, and it was dead code. The
+        shipped core never returns *nothing* for a well-formed sentence: the semantic compiler's
+        positional frame reads any three tokens as subject-verb-object, so ``zorb plag glim``
+        grounds to ``(zorb, plag, glim)`` and a fallback that waits for silence waits forever.
+        That is the same fact the school reports from the other side — 192 minted sentences,
+        **192 readable and 0 correct**.
+
+        **So precedence is decided on evidence, and the rule is one sentence.** A learned
+        construction outranks the positional frame when it matched **fixed material** — a literal
+        particle, a case marker, a tense ending — because that is a fact about the words in front
+        of it, and order alone is a guess about which language this is. It never outranks a
+        shipped *pattern*: those name their relation lexically and are the more specific reading
+        by the same argument.
+
+        Four refusals hold whatever the precedence says:
+
+        * **It never invents a language.** The faculty holds no construction until somebody showed
+          it a sentence *and* what that sentence meant, and a construction is kept only after two
+          demonstrations with different fillers agreed on it. On a brain nobody has taught this
+          returns nothing at all, which is the correct day-one behaviour rather than a gap.
+        * **It reads assertions and nothing else.** A question read here would enter the fact
+          store as a fact, and "what does a zorbin eat" is not the claim that a zorbin eats
+          something called *what*.
+        * **It is confident about nothing.** The triple carries the construction's own confidence,
+          capped below certainty where it is computed, and is labelled ``learned-grammar`` so a
+          later audit can tell a lesson's work from the shipped core's.
+        * **A tie is not a win.** An unanchored learned reading of a sentence the core already
+          read is discarded, because two positional guesses disagreeing is not evidence for
+          either.
+
+        Negation crosses intact, which is the whole reason :attr:`GroundedTriple.negated` exists:
+        a denial read here and stored as an assertion would be this module's oldest bug arriving
+        by a new road.
+        """
+        if self.grammar is None:
+            return []
+        if over:
+            # A lexical pattern owns its sentence; only the positional frame can be outranked, and
+            # only by a reading that matched something the sentence actually contains.
+            if any(triple.source != "semantics" for triple in over):
+                return []
+            try:
+                if not self.grammar.anchored(text):
+                    return []
+            except Exception:  # noqa: BLE001
+                return []
+        try:
+            meaning = self.grammar.read(text)
+        except Exception:  # noqa: BLE001 — a faculty that raises is a faculty that read nothing
+            return []
+        if meaning is None or not getattr(meaning, "readable", False):
+            return []
+        if meaning.kind != "assertion" or not meaning.complete:
+            return []
+        subject, predicate = self.resolve(meaning.subject), self._predicate(meaning.relation)
+        obj = _clean(meaning.object)
+        if not subject or not predicate or not obj:
+            return []
+        self.learned_reads += 1
+        return [GroundedTriple(
+            subject=subject, predicate=predicate, object=obj,
+            confidence=max(0.0, min(0.95, float(meaning.confidence or 0.5))),
+            source="learned-grammar", text=text, negated=bool(meaning.negated),
+            modality=meaning.modality or "", temporal=meaning.temporal or "")]
 
     def _extract_deep(self, text: str) -> List[GroundedTriple]:
         """Ask the fluent surface for a sentence the core could not parse.
