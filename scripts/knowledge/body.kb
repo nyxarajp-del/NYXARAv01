@@ -1,0 +1,131 @@
+# body.kb — the human body: its systems, organs, tissues and the processes that keep it running.
+#
+# medicine.kb is about what goes *wrong* — disease, symptom, diagnosis, treatment. It assumes an
+# anatomy it never states, so "what does the heart do" and "what is the liver part of" had no
+# answer while "what causes anaemia" did. This file is the anatomy and physiology those questions
+# need, and it is deliberately the layer *below* medicine: nothing here is a disorder.
+#
+# `part_of` is used heavily and on purpose. It is graph-only (no question form parses) but it
+# carries the highest transitivity prior in `njp/core.py`, so an organ filed under a system under
+# the body is reachable by a chain even where no single fact states it.
+
+# --- the body and its systems -------------------------------------------------------------------- #
+human body | is_a=organism | consists_of=cells | consists_of=water | has_part=organ system | has_property=about sixty percent water by mass
+organ system | is_a=biological structure | means=a group of organs working at one function together | has_kind=circulatory system | has_kind=respiratory system | has_kind=digestive system | has_kind=nervous system | has_kind=skeletal system | has_kind=muscular system | has_kind=immune system | has_kind=endocrine system | has_kind=excretory system | has_kind=reproductive system
+organ | is_a=biological structure | means=a structure of several tissues doing one job | consists_of=tissue | part_of=organ system
+tissue | is_a=biological structure | means=a group of similar cells doing one job | consists_of=cells | has_kind=epithelial tissue | has_kind=connective tissue | has_kind=muscle tissue | has_kind=nervous tissue
+
+# --- circulation --------------------------------------------------------------------------------- #
+circulatory system | purpose=carrying blood around the body | also_known_as=cardiovascular system
+heart | part_of=circulatory system | purpose=pumping blood around the body | has_part=heart valve | has_property=four chambers | consists_of=cardiac muscle
+atrium | is_a=heart chamber | purpose=receiving blood returning to the heart | has_property=two of them
+ventricle | is_a=heart chamber | purpose=pumping blood out of the heart | has_property=thicker walled than an atrium
+heart valve | is_a=part of the heart | purpose=stopping blood flowing backwards
+blood | is_a=tissue | purpose=transporting oxygen, nutrients and heat
+plasma | is_a=part of blood | consists_of=water | purpose=carrying cells, nutrients and waste in suspension
+red blood cell | is_a=blood cell | purpose=carrying oxygen | consists_of=haemoglobin | has_property=no nucleus when mature
+haemoglobin | located_in=red blood cells | purpose=binding oxygen | causes=the red colour of blood
+white blood cell | is_a=blood cell | purpose=defending the body against infection | part_of=immune system
+platelet | is_a=blood component | purpose=helping blood to clot | causes=clotting at a wound
+blood vessel | is_a=organ | has_kind=artery | has_kind=vein | has_kind=capillary | purpose=carrying blood
+artery | has_property=thick muscular walls
+vein | has_property=thinner walled than an artery
+capillary | purpose=exchanging gases and nutrients with the tissues
+pulse | is_a=sign | means=the beat of an artery felt at the skin | requires=a heartbeat
+blood pressure | is_a=physical quantity | means=the force blood exerts on the artery walls | unit=millimetre of mercury
+blood type | is_a=classification | has_kind=A | has_kind=B | has_kind=AB | has_kind=O | purpose=matching donor and recipient in a transfusion
+
+# --- breathing ------------------------------------------------------------------------------------- #
+respiratory system | purpose=taking oxygen in and carbon dioxide out | has_part=nose
+lung | part_of=respiratory system | purpose=exchanging oxygen and carbon dioxide with the blood | has_property=two of them
+alveolus | is_a=structure in the lung | purpose=where gas passes between air and blood | has_property=thin walled | has_property=surrounded by capillaries
+trachea | is_a=organ | part_of=respiratory system | purpose=carrying air between throat and lungs | also_known_as=windpipe
+bronchus | is_a=airway | part_of=respiratory system | purpose=carrying air from the trachea into a lung
+diaphragm | is_a=muscle | part_of=respiratory system | purpose=drawing air into the lungs | causes=inhalation when it contracts
+breathing | is_a=process | part_of=respiration | consists_of=inhalation | consists_of=exhalation | requires=the diaphragm | purpose=moving air in and out of the lungs
+inhalation | is_a=part of breathing | occurs_when=the diaphragm contracts and the chest expands | causes=air entering the lungs
+exhalation | is_a=part of breathing | occurs_when=the diaphragm relaxes | causes=air leaving the lungs
+gas exchange | is_a=process | located_in=the alveoli | means=oxygen passing into the blood and carbon dioxide passing out
+
+# --- digestion --------------------------------------------------------------------------------------- #
+digestive system | purpose=breaking food down into what the body can absorb | has_part=oesophagus | has_part=pancreas
+mouth | is_a=organ | part_of=digestive system | purpose=taking in and chewing food | has_part=tooth | has_part=tongue | has_part=salivary gland
+tooth | is_a=organ | part_of=mouth | purpose=cutting and grinding food | consists_of=enamel | has_kind=incisor | has_kind=canine | has_kind=molar
+enamel | is_a=tissue | part_of=tooth | has_property=the hardest substance in the body
+saliva | is_a=body fluid | located_in=the mouth | purpose=moistening food and beginning the digestion of starch | consists_of=enzymes
+oesophagus | is_a=organ | part_of=digestive system | purpose=carrying swallowed food to the stomach
+stomach | part_of=digestive system | purpose=mixing food with acid and enzymes | consists_of=muscle | has_property=acidic inside
+gastric acid | is_a=body fluid | located_in=the stomach | purpose=killing bacteria and helping break down protein | has_property=strongly acidic
+small intestine | is_a=organ | part_of=digestive system | purpose=absorbing nutrients into the blood | has_property=long and folded | has_part=villus
+villus | is_a=structure in the small intestine | purpose=increasing the surface available for absorption
+large intestine | is_a=organ | part_of=digestive system | purpose=absorbing water and forming waste | also_known_as=colon
+liver | part_of=digestive system | purpose=processing nutrients and removing toxins from the blood | capable_of=storing glucose as glycogen | capable_of=making bile
+bile | is_a=body fluid | purpose=breaking fat into droplets so enzymes can act on it | located_in=the gall bladder
+gall bladder | is_a=organ | purpose=storing bile until it is needed
+pancreas | is_a=organ | purpose=making digestive enzymes and the hormone insulin | part_of=digestive system | part_of=endocrine system
+digestion | is_a=process | purpose=breaking food into molecules small enough to absorb | requires=enzymes | occurs_when=food passes along the digestive tract
+absorption | is_a=process | means=nutrients passing from the gut into the blood | located_in=the small intestine
+metabolism | is_a=process | means=the chemical reactions that keep an organism alive | has_kind=anabolism | has_kind=catabolism | requires=energy
+
+# --- the nervous system and the senses ------------------------------------------------------------------ #
+nervous system | purpose=carrying signals and coordinating the body | has_kind=central nervous system | has_kind=peripheral nervous system
+brain | part_of=nervous system | purpose=processing information and controlling the body | consists_of=neurons | has_property=uses a large share of the body's energy
+cerebrum | is_a=part of the brain | purpose=thought, language and voluntary movement | has_part=cerebral cortex | has_property=divided into two hemispheres
+cerebral cortex | is_a=part of the brain | purpose=higher processing | has_property=folded | has_property=the outer layer of the cerebrum
+cerebellum | is_a=part of the brain | purpose=coordinating movement and balance
+brainstem | is_a=part of the brain | purpose=controlling breathing and heartbeat | has_property=continuous with the spinal cord
+spinal cord | is_a=organ | part_of=nervous system | purpose=carrying signals between brain and body | located_in=the spine | causes=a reflex without the brain being involved
+nerve | is_a=organ | consists_of=neurons | purpose=carrying electrical signals
+neuron | is_a=cell | purpose=carrying an electrical signal | has_part=synapse
+dendrite | is_a=part of a neuron | purpose=receiving signals from other neurons
+axon | is_a=part of a neuron | purpose=carrying a signal away from the cell body
+synapse | is_a=junction | means=the gap across which one neuron signals the next | requires=a neurotransmitter
+neurotransmitter | is_a=chemical | purpose=carrying a signal across a synapse
+reflex | is_a=response | means=an automatic response that does not wait for the brain | purpose=acting faster than deliberation allows | requires=the spinal cord
+sense organ | is_a=organ | purpose=detecting something about the world | has_kind=eye | has_kind=ear | has_kind=nose | has_kind=tongue | has_kind=skin
+eye | is_a=sense organ | purpose=detecting light | has_part=cornea | has_part=iris | has_part=pupil | has_part=crystalline lens | has_part=retina | has_part=optic nerve
+cornea | is_a=part of the eye | purpose=bending light as it enters | has_property=transparent
+iris | is_a=part of the eye | purpose=controlling how much light enters | causes=the pupil changing size
+pupil | is_a=part of the eye | means=the opening light passes through | has_property=widens in darkness
+crystalline lens | is_a=part of the eye | purpose=focusing light on the retina | has_property=changes shape to focus at different distances
+retina | is_a=part of the eye | purpose=turning light into nerve signals | has_part=rod cell | has_part=cone cell
+rod cell | is_a=cell in the retina | purpose=seeing in dim light | has_property=does not distinguish colour
+cone cell | is_a=cell in the retina | purpose=seeing colour | requires=bright light
+optic nerve | is_a=nerve | purpose=carrying signals from the retina to the brain
+ear | is_a=sense organ | purpose=detecting sound | has_part=eardrum | has_part=cochlea | has_part=ossicle | capable_of=sensing balance
+eardrum | is_a=part of the ear | purpose=vibrating when sound reaches it
+cochlea | is_a=part of the ear | purpose=turning vibration into nerve signals | has_property=spiral shaped
+skin | purpose=covering the body and keeping water and pathogens out | has_part=epidermis | has_part=dermis | capable_of=sensing touch, pressure and temperature
+sweat gland | is_a=gland | located_in=the skin | purpose=cooling the body by releasing water | causes=sweat
+sweat | is_a=body fluid | purpose=cooling the body as it evaporates | occurs_when=the body is too warm
+tongue | is_a=sense organ | purpose=tasting and moving food | consists_of=muscle | part_of=mouth
+
+# --- bones, muscles, and the rest ---------------------------------------------------------------------------- #
+skeletal system | purpose=supporting the body and protecting the organs | has_property=about two hundred and six bones in an adult
+bone | is_a=organ | part_of=skeletal system | consists_of=collagen | purpose=support and protection | has_part=bone marrow | has_property=living tissue
+bone marrow | is_a=tissue | located_in=bone | purpose=making blood cells
+skull | is_a=bone | purpose=protecting the brain | part_of=skeletal system
+spine | is_a=bone structure | consists_of=vertebrae | purpose=supporting the body and protecting the spinal cord | also_known_as=vertebral column
+rib cage | is_a=bone structure | purpose=protecting the heart and lungs | consists_of=ribs
+joint | is_a=structure | means=where two bones meet | purpose=allowing movement | has_kind=hinge joint | has_kind=ball and socket joint | requires=cartilage
+cartilage | is_a=connective tissue | purpose=cushioning a joint | has_property=smooth | has_property=flexible
+ligament | is_a=connective tissue | purpose=holding bone to bone at a joint
+tendon | is_a=connective tissue | purpose=joining muscle to bone | causes=a bone moving when the muscle contracts
+muscular system | is_a=organ system | purpose=moving the body | has_part=muscle | has_kind=skeletal muscle | has_kind=smooth muscle | has_kind=cardiac muscle
+muscle | is_a=organ | purpose=producing movement by contracting | requires=energy | requires=oxygen | capable_of=contracting | capable_of=relaxing
+skeletal muscle | is_a=muscle | has_property=under voluntary control | requires=a tendon to move a bone
+smooth muscle | is_a=muscle | located_in=the walls of hollow organs | has_property=not under voluntary control
+cardiac muscle | is_a=muscle | located_in=the heart | has_property=contracts without tiring
+immune system | capable_of=remembering a pathogen it has met
+lymph node | is_a=organ | part_of=immune system | purpose=filtering lymph and holding immune cells
+endocrine system | purpose=signalling with hormones | has_part=adrenal gland
+hormone | purpose=carrying a signal through the blood | has_property=acts slowly and over a distance
+insulin | purpose=lowering blood glucose | located_in=the pancreas
+adrenaline | is_a=hormone | purpose=preparing the body for sudden effort | causes=a faster heartbeat | occurs_when=the body meets a threat
+thyroid gland | is_a=gland | part_of=endocrine system | purpose=setting the rate of metabolism
+excretory system | is_a=organ system | purpose=removing waste from the blood | has_part=kidney | has_part=bladder | has_part=ureter
+kidney | purpose=filtering waste and excess water from the blood | has_property=two of them | causes=urine
+bladder | is_a=organ | part_of=excretory system | purpose=storing urine until it is passed
+urine | is_a=body fluid | consists_of=water | consists_of=urea | purpose=carrying dissolved waste out of the body
+homeostasis | is_a=process | means=keeping the body's internal conditions steady | involves=temperature | involves=blood glucose | involves=water balance | purpose=keeping cells in conditions they can work in
+body temperature | is_a=physical quantity | has_property=about thirty-seven degrees Celsius in a healthy adult | requires=homeostasis

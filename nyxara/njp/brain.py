@@ -1855,6 +1855,27 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def sit_general_exam(self, *, limit: int = 400, seed: int = 20260902,
+                         papers: Any = None) -> Any:
+        """Sit the general-knowledge examination over whatever world corpus is already in her.
+
+        The counterpart to :meth:`go_to_school`, and the opposite of it in one respect worth
+        stating: the school teaches and this does not. Every paper in
+        :mod:`nyxara.njp.general` reads through :meth:`Grounder.answer` and
+        :meth:`CognitiveLearningCore.predict` and writes nothing, so this may be run twice and
+        give the same answer twice — which is what makes it usable as a before-and-after around
+        something that *does* mutate her.
+
+        It examines **this** brain rather than loading the shipped corpus into a fresh one, so a
+        brain that has never been fed world knowledge scores honestly rather than being quietly
+        topped up first.
+        """
+        try:
+            from nyxara.njp.general import GeneralKnowledgeExam
+            return GeneralKnowledgeExam(self, limit=limit, seed=seed).sit(papers)
+        except Exception:  # noqa: BLE001
+            return None
+
     def pursue(self, goal: Any, *, actuator: Any = None, steps: int = 4) -> Any:
         """Plan toward ``goal`` over the learned world model and act, re-planning each step.
 

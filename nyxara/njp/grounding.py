@@ -1453,15 +1453,29 @@ _POLAR_SURFACE = re.compile(
     r"^(?P<verb>is|are|was|were|does|do|did|can|could|has|have)\s+(?P<rest>.+?)\s*\??$")
 
 #: Which relation each opening verb reaches for first. The evidence still decides — this only sets
-#: the order the two are tried in, because "can X ..." is far more often a capability and
+#: the order they are tried in, because "can X ..." is far more often a capability and
 #: "is X ..." far more often a property, and trying the likelier one first costs nothing.
+#:
+#: ``is_a`` was missing from every row of this table and from the default, and the omission cost
+#: the single commonest general-knowledge question there is. Measured on the shipped world corpus
+#: with ``sun is_a star`` asserted, ``answer("is the sun a star?")`` returned UNKNOWN with
+#: ``why="no claim either way about this pair"`` — the subject resolved, the fact was in the
+#: store, and the only two relations the scan ever tried were ``has_property`` and ``capable_of``.
+#: "Is a whale a mammal", "is copper a metal", "is Peru a country": all of them, all UNKNOWN.
+#:
+#: It goes **last** rather than first, in every row. A membership question is the commonest
+#: reading of "is X a Y" but not of "does X Y" or "can X Y", and a relation tried before the
+#: verb's own preference would answer a capability question out of the taxonomy.
 _POLAR_PREFERENCE: Dict[str, Tuple[str, ...]] = {
-    "can": ("capable_of", "has_property"), "could": ("capable_of", "has_property"),
-    "does": ("capable_of", "has_property"), "do": ("capable_of", "has_property"),
-    "did": ("capable_of", "has_property"),
-    "has": ("has_part", "has_property"), "have": ("has_part", "has_property"),
+    "can": ("capable_of", "has_property", "is_a"),
+    "could": ("capable_of", "has_property", "is_a"),
+    "does": ("capable_of", "has_property", "is_a"),
+    "do": ("capable_of", "has_property", "is_a"),
+    "did": ("capable_of", "has_property", "is_a"),
+    "has": ("has_part", "has_property", "is_a"),
+    "have": ("has_part", "has_property", "is_a"),
 }
-_POLAR_DEFAULT: Tuple[str, ...] = ("has_property", "capable_of")
+_POLAR_DEFAULT: Tuple[str, ...] = ("has_property", "capable_of", "is_a")
 
 
 class Grounder:
@@ -2903,6 +2917,12 @@ class Grounder:
             readings: List[Tuple[str, str]] = []
             if tail and folded in _KNOWN_PREDICATES:
                 readings.append((folded, tail))
+            # The object's leading article needs no handling here and it is worth saying why,
+            # because it looks like it should: "is the sun a star" reaches this with the phrase
+            # "a star" while the store files the object as "star". `_key` routes through
+            # `canon.canonical_entity`, which strips a leading a/an/the from both ends, so the two
+            # keys already meet. A strip added here scored identically on 300 membership and 300
+            # taxonomy items — dead code with a plausible story attached, which is worse than none.
             readings.extend((predicate, phrase) for predicate in order)
             for predicate, target in readings:
                 wanted = self._key(target)

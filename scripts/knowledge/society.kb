@@ -36,11 +36,11 @@ police | is_a=institution | purpose=enforcing the law | purpose=keeping public o
 
 # --- belief and philosophy ---------------------------------------------------------------------------------------#
 religion | is_a=cultural system | involves=belief | involves=ritual | involves=community | has_kind=Christianity | has_kind=Islam | has_kind=Hinduism | has_kind=Buddhism | has_kind=Judaism | has_kind=Sikhism
-Christianity | is_a=religion | has_part=the Bible | has_property=centred on the teachings of Jesus
-Islam | is_a=religion | has_part=the Quran | has_property=centred on the teachings revealed to Muhammad
-Hinduism | is_a=religion | has_part=the Vedas | located_in=India | has_property=among the oldest living traditions
+Christianity | is_a=religion | has_part=Bible | has_property=centred on the teachings of Jesus
+Islam | is_a=religion | has_part=Quran | has_property=centred on the teachings revealed to Muhammad
+Hinduism | is_a=religion | has_part=Vedas | located_in=India | has_property=among the oldest living traditions
 Buddhism | is_a=religion | has_part=the four noble truths | has_property=founded on the teaching of the Buddha
-Judaism | is_a=religion | has_part=the Torah
+Judaism | is_a=religion | has_part=Torah
 Sikhism | is_a=religion | has_part=the Guru Granth Sahib | located_in=Punjab
 philosophy | is_a=discipline | has_kind=metaphysics | has_kind=epistemology | has_kind=ethics | has_kind=logic | purpose=examining fundamental questions by argument
 ethics | is_a=branch of philosophy | involves=right and wrong | purpose=working out how one ought to act

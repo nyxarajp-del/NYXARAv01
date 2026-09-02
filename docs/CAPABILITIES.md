@@ -1797,6 +1797,109 @@ narrower than "she knows English and Hindi" and is not nothing: **taught 167 sen
 languages, she reads and says 114 held-out items she was never shown, in three tongues at once,
 and translates between them.**
 
+### NJP V.21 — general knowledge, taught and then examined on what she was never told
+
+`nyxara.njp.school` examines reasoning, language and coding on **generated** items — nonsense
+vocabulary, minted grammars, held-out coding specs — because those three subjects are about
+structure, and structure can be tested on entities that did not exist when the lesson ran.
+
+General knowledge cannot be examined that way. There is no minting a fresh fact about the world;
+what she knows of it is exactly what she was told. So the held-out surface has to be built the
+other way round: **from facts she was told, compose questions whose answers she was never told.**
+
+**What she was taught.** `scripts/knowledge/*.kb` grew by six domains — `arts` (literature, music,
+the visual arts, architecture, theatre, dance, film), `sport` (rules, equipment, competitions,
+games of skill), `philosophy` (the branches, the vocabulary of argument, the ethical theories, and
+the world religions described rather than asserted), `body` (anatomy and physiology, the layer
+below `medicine`, which was all disorder and no organ), `food` (nutrition, cooking, agriculture)
+and `measurement` (units, prefixes, instruments, time and calendars). The corpus went from
+**3,745 facts over 966 subjects in 15 domains to 6,024 over 1,565 in 21**, and every one of them
+is written as a relation between two named things, so every one can be asked for.
+
+Three collisions were resolved by hand rather than left to merge, and it is worth saying why: the
+store keys on the name, so `pulse` the arterial beat and `pulse` the legume would have become one
+subject that is both a sign and a crop. `metre` (verse against distance) and `lens` (eye against
+optics) were the other two. Everything else that collides — `cricket`, `music`, `ethics`,
+`calendar` — is the *same* concept in two files and merges correctly.
+
+**How she is examined.** `nyxara.njp.general` is seven papers, each defined by what it holds out:
+
+| paper | what is held out |
+|---|---|
+| `recall` | nothing — the control, so a low score reads as "the grammar failed", not "she forgot" |
+| `membership` | nothing, but asked as `is X a Y` — the other form English has, through different code |
+| `taxonomy` | two `is_a` hops, where the one-hop version is not stated anywhere |
+| `inheritance` | a property of the kind, asked of a member that carries no such property |
+| `inverse` | `what causes X`, where the edge is stored pointing the other way |
+| `abstention` | subjects the corpus never heard of — **silence is the pass** |
+| `soundness` | the relations that cannot cross from kind to member — **silence is the pass** |
+
+Measured on the corpus as shipped, 400 items a paper, ~53 s:
+
+```
+paper          asked  right  wrong  declined  silent   score
+recall           400    334      0        66       0   0.835
+membership       400    398      2         0       0   0.995
+taxonomy         400    397      3         0       0   0.993
+inheritance      400    400      0         0       0   1.000
+inverse          304    295      0         9       0   0.970
+abstention       400    400      0         0       0   1.000   (silence is the pass)
+soundness        328    328      0         0       0   1.000   (silence is the pass)
+
+2552/2632 = 0.970 overall
+of what she answered: 1424 through English, 400 only through the derivation ladder
+```
+
+Four rows carry the argument.
+
+**`membership` and `taxonomy` scored 0.000 before this change set** — 0 of 300 and 0 of 300,
+re-measured by putting the table back. `answer("is the sun a star?")` returned UNKNOWN, with
+`why="no claim either way about this pair"` and `sun is_a star` in the store, because `is_a`
+appeared in no row of `grounding._POLAR_PREFERENCE` nor in its default: the only relations an
+`is X ...` question ever scanned were `has_property` and `capable_of`. "Is a whale a mammal", "is
+copper a metal", "is Peru a country" — the commonest question form in general knowledge, and none
+of them could ever have been answered. One relation name added to one table moved both papers to
+0.99, and the same change made the *two-hop* question answerable as a side effect, because the
+polar scan already searched the subject's neighbours.
+
+The three items still wrong are one subject and one cause: `_read_polar_surface` searches at most
+four words for where the subject ends, and five of the corpus's 1,565 subjects are longer —
+*One Hundred Years of Solitude* is the one that was sampled. A real ceiling over 0.3% of the
+corpus, named here rather than tuned away.
+
+**`soundness` swings 328/328 to 0/328** when `core._NOT_INHERITABLE` is emptied. Inheritance —
+"a bird needs water, so a sparrow probably does" — was being applied to every relation alike, and
+over the corpus that is wrong 89 times in 247: `has_kind` points *down* the taxonomy, so
+inheriting it inverts the hierarchy ("the types of aircraft: car", "the types of an ammeter: a
+ruler", "the types of the Amazon rainforest: the Amazon rainforest"); `means`, `symbol` and
+`also_known_as` identify their subject, so the kind's answer is the wrong size ("combustion means
+a rearrangement of atoms into new substances" — the definition of *chemical reaction*; "the cpu is
+also known as the cpu"); `capital`, `currency`, `author`, `inventor`, `discoverer` and `birthplace`
+name one particular thing about one particular subject. The table refuses rather than discounts,
+because there is no confidence at which "the sun is a red giant" becomes a thing to say.
+
+**`inheritance` is 400/400, and every one came through the derivation ladder — none through
+English.** That is the most useful number in the table and the one that is not a success: she can
+derive a property she was never told, and there is no English sentence that asks her to. The
+1,426-to-400 split at the foot of the report is the exact size of what she knows and cannot be
+asked for.
+
+**`recall`'s 66 declined are not misses.** They are relations holding several objects at equal
+confidence, where `Grounder.answer` refuses to pick one — the outcome
+`prepare_knowledge_corpus` documents over the same corpus and counts separately for the same
+reason. Reading them as gaps is how the first version of this exam reported **4,572 of 4,572 with
+no abstentions at all** on a corpus that abstains on 19% of the shipped QA file: the derivation
+ladder was being asked next, and `_direct` takes `max` over the tied triples and answers happily.
+A refusal the next rung overrules is not a refusal.
+
+Two more of the exam's own numbers were wrong before they were right, and both were one-value
+golds on many-valued relations: `inverse` graded "what causes fever" against `infection` and
+marked `influenza` wrong; `inheritance` graded "what does muscle consist of" against `tissue` and
+marked `cells` wrong, which she had inherited correctly through the subject's *other* stated kind.
+
+Run it: `python -m nyxara.njp.general`, or `NJPBrain.sit_general_exam()`. Nothing in it writes to
+the brain, so it may be run twice around something that does.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,

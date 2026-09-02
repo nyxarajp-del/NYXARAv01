@@ -1,0 +1,123 @@
+# philosophy.kb — the branches of philosophy, the schools, the arguments, and the world religions.
+#
+# society.kb names `philosophy`, `ethics`, `epistemology`, `metaphysics` and six religions in one
+# line each. This file is the structure behind them, and it is written with one restraint that
+# matters more here than in physics: **a claim about what a tradition holds is not a claim that
+# the tradition is right.** Every religious line below is written as "this is what is taught",
+# which a fact store can hold honestly; nothing here asserts a contested metaphysical claim as
+# fact, because the store has no way to mark one as disputed and she would state it flatly.
+#
+# The same restraint is why the ethical theories carry `means` (what the theory says) and never
+# `causes` (what following it produces).
+
+# --- the branches ------------------------------------------------------------------------------ #
+philosophy | means=the study of the most general questions about knowledge, being, value and reason | has_kind=aesthetics | has_kind=political philosophy
+metaphysics | means=the study of what there is and what it is to be | involves=identity | involves=time
+epistemology | means=the study of knowledge and how it is justified | involves=belief | involves=truth | involves=doubt
+ethics | means=the study of what one ought to do | has_kind=normative ethics | has_kind=metaethics | has_kind=applied ethics
+logic | is_a=branch of philosophy | means=the study of what follows from what | has_kind=deductive logic | has_kind=inductive logic | purpose=telling a valid argument from an invalid one
+political philosophy | is_a=branch of philosophy | means=the study of authority, justice and the state | involves=legitimacy | involves=liberty | involves=justice
+philosophy of mind | is_a=branch of philosophy | means=the study of what the mind is and how it relates to the body | involves=consciousness | involves=intention
+philosophy of science | is_a=branch of philosophy | means=the study of what makes an inquiry scientific | involves=explanation | involves=evidence | involves=falsifiability
+
+# --- the vocabulary of argument -------------------------------------------------------------- #
+argument | is_a=structure of reasoning | has_part=premise | has_part=conclusion | purpose=giving a reason to accept a claim
+premise | is_a=part of an argument | means=a statement offered in support of the conclusion
+conclusion | is_a=part of an argument | means=the statement an argument is offered in support of
+validity | is_a=property of an argument | means=that the conclusion cannot be false while the premises are true | has_property=about form rather than content
+soundness | is_a=property of an argument | means=valid and with true premises | requires=validity
+deduction | is_a=form of inference | means=reasoning in which the conclusion follows necessarily from the premises | has_property=truth preserving
+induction | is_a=form of inference | means=reasoning from observed cases to a general claim | has_property=defeasible@0.9
+abduction | is_a=form of inference | means=reasoning to the explanation that would best account for what is observed | also_known_as=inference to the best explanation
+syllogism | is_a=deductive argument | has_property=two premises and a conclusion | discoverer=Aristotle
+fallacy | is_a=defect in reasoning | means=a pattern of argument that looks to support its conclusion and does not | has_kind=circular reasoning | has_kind=false dilemma | has_kind=ad hominem | has_kind=straw man
+circular reasoning | is_a=fallacy | means=assuming in the premises what the conclusion is supposed to establish
+false dilemma | is_a=fallacy | means=presenting two options as exhaustive when they are not
+ad hominem | is_a=fallacy | means=attacking the person rather than the argument
+straw man | is_a=fallacy | means=refuting a weakened version of the opposing view
+thought experiment | is_a=method | purpose=testing a theory by imagining a case rather than running one | involves=imagination
+Occam's razor | is_a=principle | means=that of two explanations that fit the evidence the simpler is to be preferred | has_property=a guide rather than a proof
+burden of proof | is_a=principle | means=that whoever asserts a claim owes the reason for it
+paradox | is_a=argument | means=an apparently sound argument reaching an unacceptable conclusion | has_kind=Ship of Theseus | has_kind=liar paradox
+liar paradox | is_a=paradox | involves=a sentence that says of itself that it is false
+Ship of Theseus | is_a=paradox | involves=whether a thing whose parts are all replaced is the same thing
+
+# --- epistemology and ethics in detail ------------------------------------------------------------- #
+knowledge | is_a=mental state | means=a belief that is both true and held for a good reason | requires=belief | requires=truth | requires=justification
+belief | is_a=mental state | means=taking a claim to be true | has_property=can be false
+justification | is_a=property of a belief | means=the reason there is to hold it
+scepticism | is_a=philosophical position | means=the view that we know less than we suppose | involves=doubt
+empiricism | is_a=philosophical position | means=the view that knowledge comes from experience | involves=observation
+rationalism | is_a=philosophical position | means=the view that reason can reach truths experience cannot
+a priori | is_a=kind of knowledge | means=knowable without appeal to experience
+a posteriori | is_a=kind of knowledge | means=knowable only through experience
+consequentialism | is_a=ethical theory | means=the view that an act is right in virtue of its consequences | has_kind=utilitarianism
+utilitarianism | is_a=consequentialism | means=the view that the right act is the one producing the most well-being overall
+deontology | is_a=ethical theory | means=the view that some acts are right or wrong in themselves, whatever they produce | involves=duty
+virtue ethics | is_a=ethical theory | means=the view that ethics is about what kind of person to be rather than which act to do | involves=character | discoverer=Aristotle
+moral relativism | is_a=ethical position | means=the view that moral claims hold only relative to a culture or a person
+golden rule | is_a=moral principle | means=treat others as you would have them treat you | has_property=stated in many traditions independently
+justice | is_a=value | means=each being given what is due to them | has_kind=distributive justice | has_kind=retributive justice
+free will | is_a=philosophical problem | involves=whether a choice could have been made otherwise | involves=determinism
+determinism | is_a=philosophical position | means=the view that every event is fixed by what came before it
+consciousness | is_a=philosophical problem | means=there being something it is like to be a thing | involves=experience | involves=the mind
+dualism | is_a=philosophical position | means=the view that mind and body are two kinds of thing
+materialism | is_a=philosophical position | means=the view that everything that exists is physical
+
+# --- philosophers ----------------------------------------------------------------------------------- #
+Socrates | birthplace=Athens | is_a=teacher of Plato | involves=questioning as a method
+Plato | is_a=philosopher | birthplace=Athens | author=Republic of Plato | is_a=student of Socrates
+Aristotle | birthplace=Stagira | is_a=student of Plato | is_a=founder of formal logic
+Confucius | birthplace=China | involves=duty within relationships | involves=ritual propriety
+Immanuel Kant | is_a=philosopher | birthplace=Konigsberg | involves=duty | involves=the limits of reason
+Rene Descartes | is_a=philosopher | birthplace=France | involves=methodical doubt | involves=dualism
+David Hume | is_a=philosopher | birthplace=Edinburgh | involves=empiricism | involves=the problem of induction
+John Stuart Mill | is_a=philosopher | birthplace=London | involves=utilitarianism | involves=liberty
+Adi Shankara | is_a=philosopher | birthplace=India | involves=Advaita Vedanta
+Republic of Plato | is_a=philosophical work | author=Plato | involves=justice | involves=the ideal state
+
+# --- religion, described rather than asserted -------------------------------------------------------- #
+religion | is_a=cultural institution | involves=belief about the sacred | involves=a community | involves=a moral teaching
+scripture | is_a=text | means=a text a religious tradition treats as authoritative
+ritual | is_a=practice | means=an act performed in a set form for its meaning rather than its effect
+prayer | is_a=religious practice | purpose=addressing the divine
+pilgrimage | is_a=religious practice | means=a journey undertaken to a place held sacred
+place of worship | is_a=building | purpose=gathering a religious community | has_kind=temple | has_kind=church | has_kind=mosque | has_kind=synagogue | has_kind=gurdwara
+monotheism | is_a=religious position | means=the belief that there is one God
+polytheism | is_a=religious position | means=the belief that there are many gods
+atheism | is_a=position on religion | means=the absence of belief that any god exists
+agnosticism | is_a=position on religion | means=the view that whether a god exists is not known
+secularism | is_a=political principle | means=that the state does not favour a religion
+theology | is_a=discipline | means=the systematic study of a religion's own doctrine
+Christianity | involves=the teachings of Jesus | has_kind=Catholicism | has_kind=Protestantism | has_kind=Orthodox Christianity
+Bible | is_a=scripture | has_part=Old Testament | has_part=New Testament
+church | is_a=place of worship | purpose=Christian worship
+Islam | involves=the teachings of Muhammad | involves=the five pillars | has_kind=Sunni Islam | has_kind=Shia Islam
+Quran | is_a=scripture | purpose=the scripture of Islam
+mosque | is_a=place of worship | purpose=Islamic worship
+Hinduism | birthplace=India | involves=dharma | involves=karma | has_property=many traditions rather than one founder
+Vedas | is_a=scripture | located_in=India | has_property=among the oldest religious texts
+Bhagavad Gita | is_a=scripture | part_of=Mahabharata | involves=duty | involves=action without attachment
+temple | is_a=place of worship | purpose=worship in Hindu, Buddhist, Jain and other traditions
+dharma | is_a=religious concept | means=the duty or right way of living a tradition sets out
+karma | is_a=religious concept | means=the teaching that an act has consequences for the one who does it
+Buddhism | birthplace=India | involves=the four noble truths | involves=the eightfold path | involves=the teachings of the Buddha
+Buddha | is_a=religious teacher | also_known_as=Siddhartha Gautama | birthplace=Lumbini
+four noble truths | is_a=religious teaching | part_of=Buddhism | involves=suffering | involves=the end of suffering
+Judaism | involves=a covenant | has_property=among the oldest monotheistic religions
+Torah | is_a=scripture | purpose=the first section of the Hebrew Bible
+synagogue | is_a=place of worship | purpose=Jewish worship
+Sikhism | birthplace=Punjab | has_part=Guru Granth Sahib | involves=the teachings of Guru Nanak | involves=one God
+Guru Granth Sahib | is_a=scripture | purpose=the scripture of Sikhism
+gurdwara | is_a=place of worship | purpose=Sikh worship | has_part=langar
+Jainism | is_a=religion | birthplace=India | involves=non-violence | involves=asceticism
+Taoism | is_a=religion | birthplace=China | involves=living in accordance with the Tao
+Shinto | is_a=religion | birthplace=Japan | involves=kami
+meditation | is_a=practice | purpose=training attention | causes=calm@0.8 | involves=sustained attention
+fasting | is_a=practice | means=abstaining from food for a set period | purpose=religious observance or health
+festival | purpose=marking a date a community holds significant | has_kind=Diwali | has_kind=Eid | has_kind=Christmas | has_kind=Holi | has_kind=Hanukkah | has_kind=Vaisakhi
+Diwali | is_a=festival | located_in=India | involves=lamps | means=the festival of lights
+Eid al-Fitr | is_a=festival | occurs_when=the month of Ramadan ends | involves=a communal prayer
+Christmas | is_a=festival | involves=the birth of Jesus | has_property=celebrated on the twenty-fifth of December
+Holi | is_a=festival | located_in=India | involves=coloured powder | occurs_when=spring arrives
+Ramadan | is_a=month | part_of=the Islamic calendar | involves=fasting from dawn to sunset

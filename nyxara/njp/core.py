@@ -65,7 +65,7 @@ import hashlib
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Collection, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 from nyxara.njp.canon import canonical_entity
 
@@ -105,6 +105,42 @@ _COMPOSED_CEILING = 0.70
 #: How much a link costs. Each additional hop multiplies confidence by the relation's own
 #: transitivity, so depth is priced rather than merely capped.
 _MIN_LINK_CONFIDENCE = 0.05
+
+#: Relations that do **not** survive the walk from a kind down to one of its members, however
+#: certain the membership is.
+#:
+#: :meth:`CognitiveLearningCore._inherit` was written around the defeasible case — a bird needs
+#: water, so a sparrow probably does — and applied it to every relation alike. Over the shipped
+#: world corpus that is wrong 89 times in 247, and wrong in a way that reads as fluent:
+#:
+#:   * ``has_kind`` points **down** the taxonomy, so inheriting it inverts the hierarchy. The sun
+#:     is a star and a star has the kind *red giant*; the sun is not a red giant. Sixty-nine of
+#:     the eighty-nine were this one relation.
+#:   * ``means``, ``symbol``, ``formula`` and ``also_known_as`` **identify** their subject. A
+#:     definition that fits the kind is by construction too wide for the member — measured,
+#:     "combustion means a rearrangement of atoms into new substances" (the definition of
+#:     *chemical reaction*), and "cpu is also known as cpu".
+#:   * ``capital``, ``currency``, ``author``, ``inventor``, ``discoverer`` and ``birthplace`` name
+#:     **one particular** thing about **one particular** subject. Sharing a kind is no reason at
+#:     all to share the answer.
+#:
+#: The rest stay inheritable, including the ones that are only *usually* right: ``requires``,
+#: ``causes``, ``has_property``, ``capable_of``, ``purpose``, ``has_part``, ``consists_of``,
+#: ``occurs_when``, ``involves``, ``located_in``, ``part_of``, ``unit``. Those are the defeasible
+#: generalisations inheritance exists for, they arrive capped at :data:`_COMPOSED_CEILING`, and
+#: being sometimes wrong is a different thing from being wrong by construction.
+#:
+#: The distinction this table draws is not "how often does it hold" — it is **whether the
+#: inference has a direction at all**. Nothing here can be rescued by more evidence.
+_NOT_INHERITABLE: FrozenSet[str] = frozenset({
+    # points down the taxonomy rather than up
+    "has_kind",
+    # identifies its subject, so the kind's answer is the wrong size
+    "means", "symbol", "formula", "also_known_as", "has_name", "abbreviation",
+    # a fact about one particular subject, not about the kind
+    "capital", "capital_of", "currency", "author", "inventor", "discoverer",
+    "birthplace", "born_in", "population", "age", "birthday", "married_to", "works_at",
+})
 
 
 def _norm(text: Any) -> str:
@@ -690,9 +726,18 @@ class CognitiveLearningCore:
         animal needs water. Each level costs a factor of the relation's transitivity, so a
         property inherited from four levels up arrives visibly weaker than one from immediately
         above — which is right, since the further up it comes from the more exceptions it has.
+
+        **Not every relation makes the walk.** :data:`_NOT_INHERITABLE` names the ones that carry
+        no downward inference at all — ``has_kind`` points the other way, ``means`` identifies its
+        subject, ``capital`` is about one country — and the guard below is the difference between
+        an answer that is *usually* right and one that is wrong by construction. It refuses rather
+        than discounts, because there is no confidence at which "the sun is a red giant" becomes a
+        thing to say.
         """
         out = Derivation()
         try:
+            if predicate in _NOT_INHERITABLE:
+                return out
             trans = self._transitivity("is_a").value
             seen: Set[str] = {subject}
             # (kind, confidence, path)

@@ -1,0 +1,124 @@
+# sport.kb — sports, games, their rules, equipment and competitions.
+#
+# society.kb has three lines: `sport`, `football`, `cricket`, `Olympic Games`. That places the
+# subject and answers nothing about it. General knowledge about sport is mostly *structural* —
+# how many players, what the equipment is, what counts as scoring, what the competition is called
+# — and structure is exactly what a fact store can hold, so this domain repays the space.
+#
+# Counts of players and scoring rules are written as `has_property` and `means` rather than
+# invented numeric predicates, because those are the two the question grammar can reach.
+
+# --- what a sport is --------------------------------------------------------------------------- #
+sport | is_a=organised activity | involves=physical exertion | involves=competition | involves=rules | has_kind=team sport | has_kind=individual sport | has_kind=motor sport
+team sport | is_a=sport | requires=two opposing teams | has_kind=football | has_kind=cricket | has_kind=hockey | has_kind=basketball | has_kind=volleyball
+individual sport | is_a=sport | has_kind=athletics | has_kind=swimming | has_kind=boxing | has_kind=tennis | has_kind=gymnastics
+game | is_a=activity | involves=rules | involves=a goal | involves=players | has_kind=board game | has_kind=card game | has_kind=video game
+rule | is_a=convention | purpose=saying what a player may and may not do | causes=a contest that can be judged
+referee | is_a=official | purpose=applying the rules during play | capable_of=stopping play | capable_of=awarding a penalty
+umpire | is_a=official | purpose=judging play in cricket, tennis and baseball
+foul | is_a=infringement | means=an act the rules forbid | causes=a penalty
+penalty | is_a=sanction | occurs_when=a player breaks a rule | purpose=undoing the advantage a foul gained
+score | is_a=record | means=the count of points each side has | purpose=deciding who has won
+draw | is_a=result | occurs_when=both sides finish with the same score
+league | is_a=competition | means=a competition in which every team plays the others over a season
+tournament | is_a=competition | means=a competition decided by rounds of elimination or group play
+championship | is_a=competition | purpose=deciding who is best over a season or tournament
+athlete | is_a=person | purpose=competing in a sport | requires=athletic training
+coach | is_a=person | purpose=preparing a player or team to compete
+athletic training | is_a=activity | purpose=improving fitness and skill | causes=better performance | requires=repetition
+fitness | is_a=property of a body | means=the capacity to sustain physical effort | requires=athletic training
+stamina | is_a=property of a body | means=the capacity to keep going without tiring
+stadium | is_a=building | purpose=holding a sporting event in front of spectators | has_part=pitch | has_part=stand
+amateur | is_a=competitor | means=someone who competes without being paid for it
+professional | is_a=competitor | means=someone whose sport is their paid occupation
+doping | is_a=cheating | means=using a banned substance to improve performance | causes=disqualification | causes=a ban
+
+# --- football ------------------------------------------------------------------------------------ #
+football | is_a=team sport | requires=a ball | requires=a pitch | involves=scoring in the opponents' goal
+goal | is_a=part of a pitch | purpose=marking where a point is scored | has_part=goalpost | has_part=crossbar | has_part=net
+goalkeeper | is_a=football position | purpose=stopping the ball entering the goal | capable_of=handling the ball inside the penalty area
+defender | is_a=football position | purpose=preventing the opposing team from scoring
+midfielder | is_a=football position | purpose=linking defence and attack
+striker | is_a=football position | purpose=scoring goals
+offside | is_a=football rule | purpose=stopping an attacker waiting behind the defence
+free kick | is_a=restart | occurs_when=a foul is committed | means=a kick taken without interference from the defence
+penalty kick | is_a=restart | occurs_when=a foul is committed inside the penalty area | involves=a kick from the penalty spot
+yellow card | is_a=caution | occurs_when=a player commits a serious foul | purpose=warning a player formally
+red card | is_a=sanction | causes=a player leaving the field | occurs_when=a player commits a very serious foul
+FIFA World Cup | is_a=tournament | involves=national football teams | has_property=held every four years
+UEFA Champions League | is_a=tournament | involves=European club football teams
+
+# --- cricket -------------------------------------------------------------------------------------- #
+cricket | is_a=team sport | has_property=eleven players a side | requires=a bat | requires=a ball | requires=a pitch | involves=scoring runs | birthplace=England
+bat | is_a=sports equipment | purpose=striking the ball | consists_of=wood
+wicket | is_a=part of a cricket pitch | has_part=stump | has_part=bail | purpose=giving the bowler a target to hit
+stump | is_a=part of a wicket | consists_of=wood | has_property=three to a wicket
+over | is_a=unit of a cricket innings | means=a set of six deliveries bowled from one end
+run | is_a=unit of score in cricket | occurs_when=the batters exchange ends after a hit
+boundary | is_a=scoring stroke | means=a hit that reaches the edge of the field | causes=four runs or six runs
+bowler | is_a=cricket position | purpose=delivering the ball at the wicket
+batter | is_a=cricket position | purpose=scoring runs and defending the wicket
+fielder | is_a=cricket position | purpose=stopping runs and taking catches
+wicketkeeper | is_a=cricket position | purpose=catching what passes the batter | has_property=stationed behind the wicket
+innings | is_a=part of a cricket match | means=the period in which one side bats
+Test match | is_a=cricket match | has_property=played over five days | has_property=two innings a side
+One Day International | is_a=cricket match | has_property=fifty overs a side
+Twenty20 | is_a=cricket match | has_property=twenty overs a side | has_property=the shortest international form
+Cricket World Cup | is_a=tournament | involves=national cricket teams | has_property=held every four years
+
+# --- other major sports ------------------------------------------------------------------------------ #
+hockey | is_a=team sport | requires=a stick | requires=a ball | has_property=eleven players a side in the field game
+field hockey | is_a=hockey | has_property=played on grass or artificial turf
+ice hockey | is_a=hockey | requires=a puck | requires=ice | requires=skates
+basketball | is_a=team sport | has_property=five players a side | requires=a ball | requires=a hoop | involves=scoring through the opponents' hoop | inventor=James Naismith
+volleyball | is_a=team sport | has_property=six players a side | requires=a net | involves=keeping the ball off one's own court
+tennis | is_a=individual sport | requires=a racket | requires=a net | requires=a court | involves=hitting the ball into the opponent's court
+racket | is_a=sports equipment | purpose=striking a ball or shuttlecock | has_part=frame | has_part=strings
+badminton | is_a=individual sport | requires=a shuttlecock | requires=a racket | requires=a net
+table tennis | is_a=individual sport | requires=a small paddle | requires=a table | requires=a net
+golf | is_a=individual sport | purpose=hitting a ball into a hole in as few strokes as possible | requires=a club | birthplace=Scotland
+athletics | is_a=sport | also_known_as=track and field | has_kind=sprint | has_kind=marathon | has_kind=long jump | has_kind=high jump | has_kind=shot put
+sprint | is_a=running race | has_property=short and run at full speed
+marathon | is_a=running race | has_property=42.195 kilometres long | has_property=named after a Greek battlefield
+swimming | is_a=individual sport | has_kind=freestyle | has_kind=backstroke | has_kind=breaststroke | has_kind=butterfly | requires=water
+boxing | is_a=combat sport | requires=gloves | requires=a ring | involves=landing punches
+wrestling | is_a=combat sport | involves=grappling | purpose=pinning or throwing an opponent
+judo | is_a=martial art | birthplace=Japan | involves=throws | involves=holds
+karate | is_a=martial art | birthplace=Japan | involves=strikes with the hand and foot
+kabaddi | is_a=team sport | birthplace=South Asia | involves=raiding the opponents' half | involves=holding one's breath during a raid
+gymnastics | is_a=individual sport | involves=strength | involves=balance | involves=flexibility | has_kind=artistic gymnastics
+cycling | is_a=sport | requires=a bicycle | has_kind=road racing | has_kind=track cycling
+motor racing | is_a=motor sport | requires=a racing car | requires=a circuit
+chess boxing | is_a=hybrid sport | involves=chess | involves=boxing
+
+# --- the Olympic Games -------------------------------------------------------------------------------- #
+Olympic Games | is_a=tournament | has_property=held every four years | has_property=held in a different host city each time | has_kind=Summer Olympics | has_kind=Winter Olympics | purpose=bringing the world's best athletes together
+Summer Olympics | is_a=Olympic Games | involves=athletics | involves=swimming | involves=gymnastics
+Winter Olympics | is_a=Olympic Games | involves=skiing | involves=ice skating | requires=snow or ice
+Paralympic Games | is_a=tournament | purpose=competition among athletes with disabilities | has_property=held after the Olympic Games
+Olympic medal | is_a=award | has_kind=gold medal | has_kind=silver medal | has_kind=bronze medal
+gold medal | is_a=Olympic medal | means=the award for finishing first
+Olympic flame | is_a=symbol | purpose=marking that the Games are being held | has_property=burns for the length of the Games
+Olympic rings | is_a=symbol | has_property=five interlocking rings | means=the union of the competing continents
+
+# --- games of skill and chance ----------------------------------------------------------------------------- #
+board game | is_a=game | requires=a board | requires=pieces | has_kind=chess | has_kind=draughts | has_kind=go | has_kind=backgammon
+chess | is_a=board game | has_property=sixty-four squares | has_property=two players | involves=capturing the opponent's king | birthplace=India
+chessboard | is_a=board | has_property=eight rows and eight columns | has_property=alternating light and dark squares
+pawn | is_a=chess piece | has_property=moves forward one square | has_property=captures diagonally
+knight | is_a=chess piece | has_property=moves in an L shape | capable_of=jumping over other pieces
+bishop | is_a=chess piece | has_property=moves diagonally
+rook | is_a=chess piece | has_property=moves in straight lines along ranks and files
+queen | is_a=chess piece | has_property=moves in any straight or diagonal line | has_property=the most powerful piece
+king | is_a=chess piece | has_property=moves one square in any direction | causes=the end of the game when it cannot escape capture
+checkmate | is_a=chess position | means=the king is attacked and cannot escape | causes=the end of the game
+stalemate | is_a=chess position | means=a player has no legal move and is not in check | causes=a draw
+go | is_a=board game | birthplace=China | involves=surrounding territory with stones
+card game | is_a=game | requires=a deck of cards | has_kind=bridge | has_kind=rummy | has_kind=poker
+deck of cards | is_a=set of objects | has_property=fifty-two cards in the standard pack | has_part=suit | has_kind=standard deck
+suit | is_a=part of a deck of cards | has_kind=hearts | has_kind=diamonds | has_kind=clubs | has_kind=spades
+dice | is_a=game equipment | purpose=producing a random number | has_property=six faces on the common form
+puzzle | is_a=game | purpose=testing ingenuity | has_kind=crossword | has_kind=jigsaw puzzle | has_kind=sudoku
+crossword | is_a=puzzle | involves=filling a grid from clues | requires=vocabulary
+sudoku | is_a=puzzle | involves=filling a grid so no digit repeats in a row, column or box | requires=logic
+video game | is_a=game | requires=a computer or console | involves=a player controlling something on a screen
