@@ -221,6 +221,11 @@ class NJPThought:
     #: ``router.DisagreementKind``. ``None`` means they agreed, or only one of them spoke, and
     #: those are deliberately the same thing here: neither is a clash.
     substrate: Any = None
+    #: The worked solution when this turn was a mathematics task — a ``mathematics.Solution``,
+    #: carrying the topic, the method and the steps. Kept beside the answer rather than folded
+    #: into it for the reason `derivation` is: a computed answer and a recalled one read the same
+    #: in a string and are entirely different epistemic objects.
+    mathematics: Any = None
     #: The retirement trial run this turn, where the gate is on — a ``field.Trial``. ``None``
     #: means the gate is off or the slow count was not due, and those are both "nothing was
     #: proposed" rather than "a proposal was refused".
@@ -297,6 +302,12 @@ class NJPThought:
                 "experiment": self.experiment.to_dict() if self.experiment is not None else None,
                 "field": self.field.to_dict() if self.field is not None else None,
                 "trial": self.trial.to_dict() if self.trial is not None else None,
+                # The working, when this turn was worked out. Carried over the wire for the same
+                # reason it is carried on the thought: "6" and "6, because hcf(48,18) is 6" are
+                # the same answer and very different evidence, and a caller that cannot see the
+                # second cannot tell a computation from a recollection.
+                "mathematics": (self.mathematics.to_dict()
+                                if self.mathematics is not None else None),
                 "focus": self.focus.to_dict() if self.focus is not None else None}
 
 
@@ -348,6 +359,10 @@ class NJPBrain:
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
+        # After the calculator and before anything that reads a turn: the mathematician borrows
+        # the calculator rather than holding a second one, and `perceive` asks it *first* — before
+        # the grounder — so a maths instruction is never filed as a fact about the world.
+        self.mathematician = self._build_mathematician(c)
         self.meta = self._build_meta(c)
         self.goals = self._build_goals(c)
         self.curiosity = self._build_curiosity(c)
@@ -1428,6 +1443,23 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_mathematician(self, c: Any) -> Any:
+        """Mathematics beyond a closed expression. Absent before this: there was none.
+
+        :meth:`_build_calculator` closed the arithmetic gap and said in its own docstring that it
+        was *only* a calculator. Measured on twenty-five ordinary school questions through
+        :meth:`think`, with every organ built: **3 right, 17 silent, and 5 filed as facts about
+        the world** — reproducible by setting ``mathematics_enabled = False``. See :mod:`nyxara.njp.mathematics`, which owns both halves of that number.
+        """
+        if not self._gate("mathematics", True):
+            return None
+        try:
+            from nyxara.njp.mathematics import Mathematician
+            return Mathematician(calculator=self.calculator,
+                                 prefer_exact=self._cfg("calculate_prefer_exact", True))
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_cortex(self, c: Any) -> Any:
         """Her cortex, as a proposer. Absent weights make it honestly unavailable, not absent."""
         if not self._gate("cortex", True):
@@ -1891,6 +1923,58 @@ class NJPBrain:
         try:
             from nyxara.njp.puzzle import PuzzleSolver
             return PuzzleSolver(self).solve(question)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def do_maths(self, question: str) -> Any:
+        """Work out a mathematics question and show the working.
+
+        The in-process entry point to :mod:`nyxara.njp.mathematics`, and the counterpart to
+        :meth:`puzzle` in the same way :meth:`puzzle` is the counterpart to ``Grounder.answer``:
+        that one *retrieves*, this one *computes*. Returns a
+        :class:`~nyxara.njp.mathematics.Solution` carrying the topic, the method, the steps and
+        whether the value is exact — ``ok`` is False and ``error`` says why for anything it
+        declines, which is most sentences and is the point.
+
+        Nothing is written. A computed value is not a fact somebody stated, and filing it would
+        let the next turn read it back as though it were — the same rule :meth:`puzzle` keeps for
+        a constructed answer, for the same reason.
+        """
+        try:
+            if self.mathematician is None:
+                from nyxara.njp.mathematics import Solution
+                return Solution(question=str(question or ""),
+                                error="the mathematics organ is switched off")
+            return self.mathematician.solve(question)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_maths_school(self, *, rounds: int = 1, seed: int = 11,
+                           subjects: Any = None) -> Any:
+        """Sit the mathematics syllabus — pre-tested, taught, then examined on unseen items.
+
+        The counterpart to :meth:`go_to_school`, and it teaches for the same reason that one
+        does: what a lesson can move here is not the arithmetic — that is a decision procedure and
+        was right before the lesson — but *what she can be asked*, and the formulas she can state
+        back when nobody is asking her to compute anything.
+        """
+        try:
+            from nyxara.njp.mathschool import MathSchool
+            return MathSchool(seed=seed, rounds=rounds, subjects=subjects).attend(self)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def sit_maths_exam(self, *, limit: int = 40, seed: int = 20260902,
+                       papers: Any = None) -> Any:
+        """Sit the mathematics examination: every topic, generated items, nothing taught.
+
+        Writes nothing and teaches nothing, so it may be run twice around something that mutates
+        her and the two numbers are comparable — the discipline :meth:`sit_general_exam` keeps,
+        for the same reason.
+        """
+        try:
+            from nyxara.njp.mathschool import MathExam
+            return MathExam(self, limit=limit, seed=seed).sit(papers)
         except Exception:  # noqa: BLE001
             return None
 
@@ -2478,6 +2562,46 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return False
 
+    def _mathematical(self, problem: str) -> Any:
+        """The mathematician's reading of this turn — a ``Solution`` when a skill claimed it.
+
+        **Claimed, not solved, and the difference is a defect the exam found.** "convert 5 km to
+        kilograms" is recognised by the conversion skill, which refuses it because length and mass
+        are different quantities — the refusal that skill exists to make. Gating on *solved*, the
+        turn then fell through to the grounder as an ordinary statement and was filed:
+        ``('convert', '5') → 'km kilograms'``. That is the original defect surviving inside its
+        own fix, on the one input where the fix declines. A recognised task is a task whether or
+        not it has an answer, and neither kind is a claim about the world.
+
+        Two callers, and they are the two halves of :mod:`nyxara.njp.mathematics`'s reason for
+        existing. :meth:`perceive` reads a non-``None`` as *do not file this as a fact*;
+        :meth:`_compose` answers from it when it is also ``ok``, which is the rule
+        :meth:`_closed_arithmetic` already states for a closed expression applied to everything
+        else that has a decision procedure.
+
+        **Bare arithmetic is deliberately excluded.** A closed expression already has a route:
+        the calculator is registered as a strategy, the classifier is fed a parsed-expression flag
+        so the critic does not discard the value as an untested empirical claim, and
+        :meth:`_closed_arithmetic` stops the ladder guessing over it. That machinery was built
+        against a measured failure and it works. Answering ``2+2`` here instead would leave every
+        piece of it in the source and unreachable — dead wiring created on purpose. So the
+        mathematician owns what nothing owned, and arithmetic stays where it already worked.
+
+        The memo inside :meth:`Mathematician.solve` makes asking twice cost once.
+        """
+        try:
+            if self.mathematician is None:
+                return None
+            worked = self.mathematician.solve(problem)
+            if worked.ok:
+                return None if worked.topic == "arithmetic" else worked
+            # A refusal *with a topic* is a skill declining a question it understood. A refusal
+            # without one is the dispatcher saying no skill recognised the sentence at all, and
+            # that sentence may well be an ordinary statement the grounder should learn from.
+            return worked if worked.topic else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def _strategy_ladder(self, problem: str, ctx: Dict[str, Any]) -> Any:
         try:
             if self.reasoner is None:
@@ -2684,7 +2808,17 @@ class NJPBrain:
                 # because that call is seconds, and seconds do not belong in a perceive.
                 if self.grounder is not None:
                     try:
-                        out.grounding = self.grounder.ground(out.stimulus, intent=intent)
+                        # **A sum is not a sentence about the world.** The grounder reads a
+                        # non-question as a statement and files what it extracts, and a maths
+                        # imperative parses as one: "simplify the fraction 18/24" was asserted as
+                        # ('simplify fraction', '18') → '24' at confidence 0.75, in the same store
+                        # inheritance and the puzzle solver walk. Asking her to do arithmetic was
+                        # writing nonsense into what she reasons from. `store` is False exactly
+                        # when the mathematician can close the turn, so nothing is extracted from
+                        # a task — see `Grounder.ground`.
+                        out.grounding = self.grounder.ground(
+                            out.stimulus, intent=intent,
+                            store=self._mathematical(out.stimulus) is None)
                     except Exception:  # noqa: BLE001
                         out.grounding = None
 
@@ -2815,7 +2949,21 @@ class NJPBrain:
             # states, the rejected-hypothesis memory and the debate were all reachable only from
             # tests. Curiosity's known-unknown gap reads `reasoner.problems`, so an unwired
             # reasoner also meant she could never notice a question she had failed to answer.
-            if not out.answer:
+            # **A procedure that says "there is no answer" is an answer.** The restraint paper in
+            # `mathschool` measured what happens without this line: after a lesson stated "a mode
+            # is the value that appears most often in a list", the control *"what is the mode of
+            # 1, 2, 3, 4, 5?"* — a list with no mode, which the statistics skill correctly
+            # declines — was answered with that definition. `_compose` had already returned
+            # silence; deliberation and recall ran anyway, because they run whenever the answer is
+            # empty, and recall offered the nearest thing in the store.
+            #
+            # This is `_closed_arithmetic`'s rule at its limit: a question with a decision
+            # procedure does not get a guess offered against it, and that has to hold when the
+            # procedure's output is "none" as much as when it is a number. Otherwise every honest
+            # refusal in `mathematics` becomes an invitation for a plausible substitute.
+            refused = (out.mathematics is not None
+                       and not getattr(out.mathematics, "ok", False))
+            if not out.answer and not refused:
                 # A prediction that resolves **inside this turn**, which is the whole test the
                 # raw-stimulus key failed: she commits to whether the ladder will find an answer,
                 # and microseconds later it either did or did not. Nothing has to arrive later and
@@ -3445,6 +3593,28 @@ class NJPBrain:
                 if self._policy.forbids_world_knowledge(act):
                     return self._answer_socially(thought, act)
 
+            # 0.5. WORKED OUT, not looked up and not deliberated.
+            #
+            # Ahead of every retrieval below and ahead of the ladder, for the reason
+            # `_closed_arithmetic` gives for arithmetic and which is not special to arithmetic: a
+            # turn with a decision procedure has an arm that cannot be wrong, and every other arm
+            # abstaining costs nothing. It is also the only stage an *imperative* reaches — "expand
+            # (x+2)(x+3)" is not a question, so `_deliberate` never sees it and the strategy table
+            # is unreachable from it. Putting the mathematician here rather than in that table is
+            # what makes one path serve both the question form and the task form.
+            #
+            # After the social gate above, never before it: "how are you" is not improved by being
+            # checked for arithmetic first, and the policy that owns that decision is the policy.
+            worked = self._mathematical(thought.stimulus)
+            if worked is not None:
+                thought.mathematics = worked
+                if worked.ok:
+                    return str(worked.answer)[:1000]
+                # Recognised and declined. There is no answer to give and no fact to file, and
+                # falling through to recall would offer the nearest thing in the store to a
+                # question that has none — which is how "what is 7 divided by 0" came back 0.7.
+                return ""
+
             # 1. She was asked something and the structure knows the answer.
             #
             # The bare claim is returned, with no hedge attached. The epistemic state travels
@@ -3545,6 +3715,19 @@ class NJPBrain:
             grounding = getattr(thought.percept, "grounding", None)
             if getattr(grounding, "triples", None):
                 return False        # she recorded something; saying so is not an echo
+            # A worked answer is made of the question's own symbols, and that is what being
+            # correct looks like here rather than what echoing looks like. `is_meta_commentary`
+            # scores word overlap, so it cannot tell the two apart and it blanked both of these:
+            #
+            #     "is 91 a prime number?"      → "no, 91 is not a prime number"   overlap 0.83
+            #     "factorise x^2 + 5x + 6"     → "(x + 3)(x + 2)"                 overlap 0.67
+            #
+            # Each was the right answer, each was deleted, and the turn went out silent. The
+            # exemption is evidence-based exactly as the `triples` one above it is: a solution
+            # with working attached is proof she did something to the question rather than
+            # repeating it.
+            if getattr(getattr(thought, "mathematics", None), "ok", False):
+                return False
             return is_meta_commentary(thought.answer, thought.stimulus)
         except Exception:  # noqa: BLE001
             return False
@@ -4275,6 +4458,7 @@ class NJPBrain:
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
+                            ("maths", self.mathematician),
                             ("field", self.field), ("learner", self.learner),
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),

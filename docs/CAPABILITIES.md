@@ -48,7 +48,7 @@ applied to the documentation itself).
 | 26 | Physics Reasoning | `nyxara.mind.first_principles` | REAL |
 | 27 | Chemistry Reasoning (stoichiometry) | `nyxara.mind.first_principles` | REAL |
 | 28 | Biology Reasoning | `nyxara.mind.first_principles` | REAL |
-| 29 | Mathematics (proof) | `nyxara.growth.prover` | REAL+WIRED |
+| 29 | Mathematics (proof, and now the school syllabus she can be *asked* — fifty skills from primes to elementary calculus, read in English or Hinglish, each reporting its working; `nyxara.mind.math` was a real symbolic engine nothing in `njp/` had ever imported) | `nyxara.growth.prover` + `nyxara.njp.mathematics` + `nyxara.njp.mathschool` | UPGRADED |
 | 30 | Symbolic Reasoning (Language of Thought) | `nyxara.mind.lot` | REAL |
 | 31 | Probabilistic Reasoning | `nyxara.sim.montecarlo` | REAL+WIRED |
 | 32 | Bayesian Updating | `nyxara.quantum.superposition_states` | REAL |
@@ -2123,10 +2123,171 @@ and `general.ASKABLE` still reading back as itself, and 23 tests in `tests/njp/t
 pinning each form.
 
 
+### NJP V.23 — mathematics: the syllabus, and the store it was quietly corrupting
+
+Twenty-five ordinary school questions, asked through `NJPBrain.think` on a brain with every organ
+built, before a line of this was written — reproducible now that the organ has a gate, by
+building `NJPBrain` with `mathematics_enabled = False`:
+
+```
+right                              3 / 25
+silent                            17 / 25
+filed as a fact about the world    5 / 25
+```
+
+The three right are the same question in three costumes — `24 + 18`, `1/2 + 1/3`, `20% of 250` —
+and they are the three `nyxara.njp.calculate` was written for. That module says of itself, in its
+own second paragraph, that it "does not do algebra, does not solve for unknowns", and it was
+telling the truth: **a closed expression was the whole of her mathematics.** Every gcd, every
+prime, every mean, every area, every derivative, every `solve for x` came back as the empty
+string. `nyxara.mind.math` — a real symbolic engine with sympy and z3 behind it — has existed the
+whole time and takes structured calls; nothing in `nyxara/njp/` has ever imported it, so no
+sentence anybody could type reached it.
+
+**The five that were not silent are why this is a defect rather than a gap.** All five were
+filed at confidence 0.75, source `semantics`:
+
+```
+"simplify the fraction 18/24"  →  ('simplify fraction', '18') → '24'
+"expand (x+2)(x+3)"            →  ('expand', 'x')             → '2 x 3'
+"factorise x^2 + 5x + 6"       →  ('factorise', 'x')          → '2 5x 6'
+"convert 5 km to metres"       →  ('convert', '5')            → 'km metres'
+"solve x^2 - 5x + 6 = 0"       →  ('solve', 'x')              → '2 5x 6 0'
+```
+
+They are imperatives. Nothing in the package read them as **tasks**, so the semantic compiler read
+them as **assertions** and filed them — into the store `general.py` walks for inheritance, that
+`puzzle.py` searches for commonalities, and that a later contradiction would be *revised into*.
+Asking her to do arithmetic wrote nonsense into what she reasons from. A silent failure costs a
+turn; that one costs the store. It is the read/write asymmetry this package keeps
+finding, pointed the other way for the first time: not knowledge that cannot be reached, but a
+question that reaches the wrong organ and is written down.
+
+`nyxara.njp.mathematics` is a mathematician in the sense that `calculate` is a calculator. Fifty
+skills across the school syllabus — number theory, fractions, percentage and commerce, ratio,
+algebra, sequences, geometry and mensuration, units, statistics, probability, powers and
+logarithms, elementary calculus, and the word problems that dress any of them in a sentence — read
+in English or Hinglish, each reporting its working and its exactness. After it: **25 of 25, and
+nothing written.**
+
+**Every value inside is a `Fraction`,** so a third is a third until something asks for it in
+decimal. Where exactness genuinely ends — a root, a π — both halves are reported (`49π ≈
+153.938`), because rounding π silently and calling it an area is the dishonesty `calculate`
+already refuses when it says whether a value is exact.
+
+**Nothing is `eval`ed, and this time the whitelist is the type.** Algebra is parsed by `Poly`'s own
+tokeniser into a polynomial over `Fraction` — a `Dict[int, Fraction]`, which cannot represent a
+call, a name, an attribute or a subscript. There is no arrangement of that dict that is a
+`__import__`, so unlike a node whitelist there is nothing a Python release can widen. **sympy is
+never called from the module at all** — exactness comes from `Fraction` and roots from integer
+arithmetic — so all fifty skills run identically with it absent; the shared calculator is the one
+place it is reached.
+
+#### What the exam found, and most of it was mine
+
+`nyxara.njp.mathschool` sits eighteen subjects — sixteen doing, one knowing, one entirely
+controls — and every defect below was found by running it rather than by reading the code.
+
+| defect | what it did |
+|---|---|
+| **a word parsed as an unknown** | "a factor is a divisor of a number" reached the factoriser and came back *"two different unknowns, is and a"*. The sentence was then a **recognised task**, so the brain refused to learn the definition it was being taught — a lesson silently discarded by the reader meant to be helping it. An unknown is one letter, which is what an unknown is. |
+| **claimed ≠ solved** | "convert 5 km to kilograms" is recognised by the conversion skill and *refused*, because length and mass are different quantities. Gating the store on **solved** let it fall through to the grounder and be filed as `('convert', '5') → 'km kilograms'` — the original defect surviving inside its own fix, on the one input where the fix declines. |
+| **a refusal read as an invitation** | After a lesson stating "a mode is the value that appears most often in a list", the control *"what is the mode of 1, 2, 3, 4, 5?"* — a list with **no** mode — was answered with that definition. `_compose` had already returned silence; deliberation and recall run whenever the answer is empty, and recall offered the nearest thing in the store. |
+| **the exam answering its own questions** | `restraint` scored 8/10 inside a full exam and 10/10 asked on its own: *"what is 7 divided by 0?"* came back **0.7**. Sixteen papers of arithmetic had gone into episodic memory ahead of it. An examination whose earlier items answer its later ones measures its own ordering. |
+| **an ordinal deleted a term** | "the 15th term of 12, 15, 18" excluded the ordinal *by value* and so deleted the 15 that was a term, leaving two, and came back silent. |
+| **a floored gold** | The percentage generator computed its own answer with `//`, graded "12% of 60" against 7 where the answer is 7.2, and marked her wrong four times in twenty for being right. Another gold that was wrong before she was — the defect the general exam kept finding in the knowledge corpus, met for the first time outside it. |
+| **a degenerate floor** | `vocabulary` chose its taught/withheld split inside `teach`, so the pre-test had no split to grade against: every term was a control, she was silent on all twenty, and **the floor read 1.00 for knowing nothing at all** — with the post-test at 0.85 reported as a lesson that lost fifteen points. |
+
+Two more were in organs this change set only *reached*. **A worked answer is made of the
+question's own symbols, and `is_meta_commentary` scores word overlap** — so "is 91 a prime
+number?" → "no, 91 is not a prime number" (0.83) and "factorise x^2 + 5x + 6" → "(x + 3)(x + 2)"
+(0.67) were each correct, each deleted as an echo, and each went out silent. And **a number word
+is also an ordinary word**: "ek" is Hindi's indefinite article, "do" is an English verb, "one" is
+an English pronoun, so *"91 ek prime number hai?"* became "91 **1** prime number hai" and was
+answered about 1. Number words are now read only in a sentence with no digits in it, which is
+exactly the case they exist for.
+
+#### What one run reports
+
+`python -m nyxara.njp.mathschool` (seed 11) and `--exam` (25 items a paper), reproducible:
+
+```
+school                                    examination
+mastered            18 / 18               17 / 17
+right/wrong/absent  158 / 0 / 0           410 / 0 / 0
+accuracy            1.0000                1.0000
+facts written       10 (the lesson)       0
+```
+
+**Sixteen subjects read 1.00 cold and are printed with `already` beside them.** That is not a
+result being dressed up: a decision procedure cannot be taught, and the report says so in each of
+their notes. What they are worth is what `school.Arithmetic` says of itself — a subject that reads
+1.00 cold is evidence **about the organ**, and an organ that quietly stopped working shows up here
+on the first run rather than three subjects later as an unexplained dip. Their floor is not zero
+because they are easy; every one of them scored 0.00 before the faculty existed.
+
+**One subject moves, and it moves because doing and saying are different capabilities.**
+
+```
+vocabulary          0.50 → 1.00     +0.50
+```
+
+She can work out that 91 is not prime and, before the lesson, cannot say what a prime number *is*.
+Twenty definitions, of which a seeded **half are taught and half deliberately withheld**; on the
+taught half a right answer scores, on the withheld half **silence** scores and any assertion is a
+miss. A brain that answered all twenty would read as mastery and be guessing, and the split is the
+only thing that can tell those apart.
+
+Two of the twenty phrasings had to be found by measurement, and each is a fact about the reader
+rather than about mathematics. *"The median is the middle value **when** the values are in order"*
+is filed as a **condition**, not a definition, and the term comes back unaskable. And the definite
+article decides it: *"the mean is …"* does not read back where *"a mean is …"* does. A test asserts
+that all twenty round-trip through `think`, because a lesson that does not land reports a gain it
+did not produce.
+
+The same measurement found the boundary this module then respects rather than widens. Written the
+obvious way, *"the area of a circle is pi r squared"* grounds perfectly well — as
+`('area of a circle', 'has_property', 'pi r squared')` — and is then **unaskable**, because "what
+is the area of a circle" reads as `is_a` and a held `has_property` does not answer it.
+`_GENERAL_ANSWER` exists to stop "what is a sparrow" being answered "brown", and a mathematics
+lesson is not a reason to take that guard down. So the lessons are written in the shape that can
+be read.
+
+**One subject is entirely controls.** Ten questions that must come back empty, in two kinds: three
+with no mathematics in them at all, and seven that are mathematics-shaped and **have no answer** —
+a division by zero, a conversion between two quantities, a sequence with no rule, a shape whose
+measurement was never given, a list with no mode. The second kind is the harder half: every one of
+them reaches a skill, is recognised, and has to be declined *by that skill*. This subject exists
+because the failure the module was written for was not silence — the five filed triples were
+confident, and only a control can see that difference.
+
+#### Where it sits in the turn
+
+The mathematician is consulted in `_compose`, after the social-act gate and **before every
+retrieval**, which is `_closed_arithmetic`'s rule generalised: a turn with a decision procedure has
+an arm that cannot be wrong, so every other arm abstaining costs nothing. It is also the only stage
+an *imperative* reaches — "expand (x+2)(x+3)" is not a question, `_deliberate` never sees it, and
+the strategy table is unreachable from it. One path serves both the question form and the task
+form, and that is why it is not a strategy.
+
+**Bare arithmetic is deliberately excluded from it.** A closed expression already has a route: the
+calculator is a registered strategy, the classifier is fed a parsed-expression flag so the critic
+does not discard the value as an untested empirical claim, and `_closed_arithmetic` stops the
+ladder guessing over it. That machinery was built against a measured failure and it works.
+Answering `2+2` in the new organ would leave every piece of it in the source and unreachable —
+dead wiring created on purpose. A test pins it from the other side: `5 ka square kitna hai?` is
+answered 25, `thought.mathematics` is `None`, and the problem still classifies symbolic.
+
+Run it: `NJPBrain.do_maths("...")` for one question with its working,
+`NJPBrain.go_to_maths_school()` to be taught and examined, `NJPBrain.sit_maths_exam()` to be
+examined only. The exam writes nothing and teaches nothing, so it may be run twice around
+something that does.
+
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
-`/pulse`, `/learner`, `/calculate`, and `/{organ}` — so growth and self-rewriting are observable
+`/pulse`, `/learner`, `/calculate`, `/maths`, and `/{organ}` — so growth and self-rewriting are observable
 from outside the process,
 not merely asserted in a docstring. On the console: `/njp`, and `/njp think` prints the synapse
 count before and after the turn, which is the claim this whole package has to earn.

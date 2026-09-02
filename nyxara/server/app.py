@@ -1353,9 +1353,9 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
 
     # Organs readable over the wire, by URL segment. Read-only: this route never acts.
     _NJP_ORGANS = ("fabric", "truth", "soulsync", "evolver", "pulse", "ledger",
-                   "learner", "calculate", "language")
+                   "learner", "calculate", "maths", "language")
     # Where the URL segment does not match the attribute on the brain.
-    _ORGAN_ATTR = {"calculate": "calculator"}
+    _ORGAN_ATTR = {"calculate": "calculator", "maths": "mathematician"}
 
     def _off(flag: str = "ENABLED") -> dict:
         return {"available": False,
@@ -1387,6 +1387,23 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
             return _off()
         thought = brain.think(req.stimulus)
         return thought.to_dict() if thought is not None else {}
+
+    @app.post("/v1/njp/maths", dependencies=auth)
+    def njp_maths(req: NyxThinkRequest) -> dict:
+        """Work out a mathematics question and return the working.
+
+        Read-only in the sense that matters: a computed value is not a fact somebody stated, so
+        nothing is written to the store — the same rule `/v1/njp/think` cannot keep, because a
+        statement *should* teach her something.
+
+        A sentence with no mathematics in it comes back ``ok=false`` with a reason rather than
+        with a number, which is the contract the organ exists to keep.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "mathematician", None) is None:
+            return _off("MATHEMATICS_ENABLED")
+        got = brain.do_maths(req.stimulus)
+        return got.to_dict() if hasattr(got, "to_dict") else {"ok": False}
 
     @app.post("/v1/njp/recall", dependencies=auth)
     def njp_recall(req: NyxThinkRequest) -> dict:
