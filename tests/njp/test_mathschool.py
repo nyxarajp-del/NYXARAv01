@@ -13,6 +13,10 @@ import pytest
 
 from nyxara.njp.brain import NJPBrain
 from nyxara.njp.mathschool import (
+    EASY_SUBJECTS,
+    HARD_SUBJECTS,
+    TIER_THREE_SUBJECTS,
+    TIER_TWO_SUBJECTS,
     MATHS_SUBJECTS,
     MathExam,
     MathSchool,
@@ -129,3 +133,105 @@ def test_the_brain_entry_points_reach_both():
     brain = NJPBrain(ExamConditions())
     assert brain.sit_maths_exam(limit=3, papers=(Restraint,)) is not None
     assert brain.go_to_maths_school(rounds=1, subjects=(Restraint,)) is not None
+
+
+# --------------------------------------------------------------------------- #
+# The hard half — generated fresh, and graded by a route the solver does not take
+# --------------------------------------------------------------------------- #
+
+def test_the_two_halves_are_kept_apart():
+    """A single total cannot be told apart from a run that only sat the easy half."""
+    assert set(EASY_SUBJECTS) | set(HARD_SUBJECTS) <= set(MATHS_SUBJECTS)
+    assert not set(EASY_SUBJECTS) & set(HARD_SUBJECTS)
+
+
+@pytest.mark.parametrize("seed", [20260902, 7, 99])
+def test_she_solves_freshly_generated_hard_problems(seed):
+    """The anti-overfit measurement, and the reason it is worth anything.
+
+    Every generator computes its own expected answer by plain arithmetic on the numbers it just
+    chose — a route through no part of `mathsolver`. An exam whose gold comes from the thing under
+    test measures nothing, and the two living in one package makes that the easiest mistake here.
+
+    First measurement, before the defects below were fixed: **0.9710**.
+    """
+    brain = NJPBrain(ExamConditions())
+    right = wrong = abstained = 0
+    misses = []
+    for index, factory in enumerate(HARD_SUBJECTS):
+        subject = factory()
+        if subject.id != "hard-restraint":
+            subject.items = 12
+        score, detail = subject.exam(brain, Mint(__import__("random").Random(seed + index * 1009)))
+        right, wrong = right + score.right, wrong + score.wrong
+        abstained += score.abstained
+        misses.extend(f"{subject.id}: {d}" for d in detail[:2])
+    assert wrong == 0 and abstained == 0, misses[:6]
+    assert right > 100
+
+
+def test_the_hard_restraint_paper_is_all_controls():
+    """Each of its items reaches a reading, is recognised, and has to be declined by the solver."""
+    from nyxara.njp.mathschool import HardRestraint
+
+    brain = NJPBrain(ExamConditions())
+    score, misses = HardRestraint().exam(brain, Mint(__import__("random").Random(3)))
+    assert score.wrong == 0, misses
+    assert score.right == score.total
+
+
+def test_the_full_exam_sits_both_halves():
+    brain = NJPBrain(ExamConditions())
+    transcript = MathExam(brain, limit=6).sit()
+    ids = {r.subject for r in transcript.results}
+    assert {"chain-commerce", "modular", "hard-restraint"} <= ids
+    assert [r.subject for r in transcript.results if not r.mastered] == []
+
+
+@pytest.mark.parametrize("seed", [20260902, 7, 99])
+def test_the_second_tier_of_generated_papers(seed):
+    """Nine papers added after a third hand-written bank measured 2 right of 25.
+
+    Each generator computes its gold by plain arithmetic on the numbers it just chose — a route
+    through no part of the solver. First measurement across three seeds: **0.9974**, and the one
+    miss was real: `3^(x+3) = 9` has x = -1, and the search started at zero.
+    """
+    brain = NJPBrain(ExamConditions())
+    right = wrong = abstained = 0
+    misses = []
+    for index, factory in enumerate(TIER_TWO_SUBJECTS):
+        subject = factory()
+        subject.items = 10
+        score, detail = subject.exam(brain, Mint(__import__("random").Random(seed + index * 1009)))
+        right, wrong = right + score.right, wrong + score.wrong
+        abstained += score.abstained
+        misses.extend(f"{subject.id}: {d}" for d in detail[:2])
+    assert wrong == 0 and abstained == 0, misses[:6]
+    assert right > 70
+
+
+def test_the_second_tier_is_part_of_the_hard_half():
+    assert set(TIER_TWO_SUBJECTS) <= set(HARD_SUBJECTS)
+
+
+@pytest.mark.parametrize("seed", [20260902, 7, 99, 2024])
+def test_the_third_tier_of_generated_papers(seed):
+    """Ten more papers, added after a fourth hand-written bank measured 2 right of 20.
+
+    First measurement across three seeds: **0.9839**, and every miss was real — an equation
+    answered in a different spelling than the paper accepted, a gap read by exclusion when its
+    value happened to equal the rate, and a generator that produced an empty paper.
+    """
+    brain = NJPBrain(ExamConditions())
+    right = wrong = abstained = 0
+    misses = []
+    for index, factory in enumerate(TIER_THREE_SUBJECTS):
+        subject = factory()
+        subject.items = 8
+        score, detail = subject.exam(brain, Mint(__import__("random").Random(seed + index * 1009)))
+        right, wrong = right + score.right, wrong + score.wrong
+        abstained += score.abstained
+        assert score.total > 0, f"{subject.id} generated an empty paper"
+        misses.extend(f"{subject.id}: {d}" for d in detail[:2])
+    assert wrong == 0 and abstained == 0, misses[:6]
+    assert right > 60

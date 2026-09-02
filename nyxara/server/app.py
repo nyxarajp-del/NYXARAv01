@@ -1353,9 +1353,10 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
 
     # Organs readable over the wire, by URL segment. Read-only: this route never acts.
     _NJP_ORGANS = ("fabric", "truth", "soulsync", "evolver", "pulse", "ledger",
-                   "learner", "calculate", "maths", "language")
+                   "learner", "calculate", "maths", "mathsolver", "language")
     # Where the URL segment does not match the attribute on the brain.
-    _ORGAN_ATTR = {"calculate": "calculator", "maths": "mathematician"}
+    _ORGAN_ATTR = {"calculate": "calculator", "maths": "mathematician",
+                   "mathsolver": "solver"}
 
     def _off(flag: str = "ENABLED") -> dict:
         return {"available": False,

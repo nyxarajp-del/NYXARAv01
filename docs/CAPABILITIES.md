@@ -48,7 +48,7 @@ applied to the documentation itself).
 | 26 | Physics Reasoning | `nyxara.mind.first_principles` | REAL |
 | 27 | Chemistry Reasoning (stoichiometry) | `nyxara.mind.first_principles` | REAL |
 | 28 | Biology Reasoning | `nyxara.mind.first_principles` | REAL |
-| 29 | Mathematics (proof, and now the school syllabus she can be *asked* — fifty skills from primes to elementary calculus, read in English or Hinglish, each reporting its working; `nyxara.mind.math` was a real symbolic engine nothing in `njp/` had ever imported) | `nyxara.growth.prover` + `nyxara.njp.mathematics` + `nyxara.njp.mathschool` | UPGRADED |
+| 29 | Mathematics (proof, and now the school syllabus she can be *asked* — fifty skills from primes to elementary calculus, read in English or Hinglish, each reporting its working, and a **solver** for the problems no skill matches: constraints read from the sentence, solved by algebra, search or a closed form, and verified before she speaks; `nyxara.mind.math` was a real symbolic engine nothing in `njp/` had ever imported) | `nyxara.growth.prover` + `nyxara.njp.mathematics` + `nyxara.njp.mathsolver` + `nyxara.njp.mathschool` | UPGRADED |
 | 30 | Symbolic Reasoning (Language of Thought) | `nyxara.mind.lot` | REAL |
 | 31 | Probabilistic Reasoning | `nyxara.sim.montecarlo` | REAL+WIRED |
 | 32 | Bayesian Updating | `nyxara.quantum.superposition_states` | REAL |
@@ -2284,10 +2284,178 @@ examined only. The exam writes nothing and teaches nothing, so it may be run twi
 something that does.
 
 
+### NJP V.24 — solving a problem she has never seen
+
+V.23 ends with the mathematician at 410/410 on its own examination, and **that number says almost
+nothing.** Every item on it is a shape the module already knows: fifty skills, fifty triggers, and
+a question that matches a trigger is answered by the procedure behind it. That is dispatch. The
+difference shows the moment a problem needs two steps.
+
+Thirty problems, written to match no skill — multi-step commerce, a set-up-and-solve, a modular
+exponent, a Diophantine count, an age ratio, an infinite series, a draw without replacement:
+
+```
+right                    1 / 30
+confidently wrong        9 / 30
+silent                  18 / 30
+```
+
+The nine wrong are the interesting half, exactly as the five filed triples were in V.23:
+
+| problem | answered | why |
+|---|---|---|
+| marks up 40%, then discounts 25% — profit percent? | **30** | the discount skill firing on a percentage it recognised, inside a problem it did not |
+| the remainder when 2^100 is divided by 7 | **2^100 in full** | the power skill matched; the word *remainder* was never read |
+| two drawn **without replacement**, both red | **2/5** | the with-replacement answer, stated confidently |
+| the hcf of 2⁴×3² and 2²×3³ | **1** | the exponents were handed to gcd as if they were the numbers |
+| average speed 30 out and 60 back | **50** | the arithmetic mean of two speeds, which is never the answer |
+| trailing zeros of 100! | **a 158-digit number** | 100! was computed; the question was not about 100! |
+
+A trigger that matches half a problem answers half a problem, and there is nothing in a regex that
+can notice the other half.
+
+#### Nothing in `nyxara.njp.mathsolver` answers anything
+
+A **reading** contributes *constraints*. The solver solves whatever set came out. The verifier
+substitutes the solution back into every one of them, and only then may she speak. Two readings
+that both match one sentence contribute both sets, and a two-step problem is solved by algebra
+rather than by a skill someone wrote for two steps. **The chain is discovered, not enumerated.**
+
+Three engines, tried in order:
+
+* **algebra** — a system of polynomial equations in several unknowns over `Fraction`, solved
+  exactly: Gaussian elimination when it is linear, substitution down to a univariate polynomial
+  when it is not. An underdetermined system returns *nothing*, never a partial answer.
+* **search** — a bounded integer search when the constraints are Diophantine or the problem asks
+  for *the smallest number such that*. Exhaustive within a stated bound, so a value it returns is
+  a solution and a range it walks is a proof there is none there.
+* **counting** — the discrete closed forms that are not equations: modular exponentiation,
+  Legendre's valuation, arrangements and selections, the shoelace area, the harmonic mean.
+
+**"Verified" means two different things and the difference is stated rather than blurred.** An
+algebraic answer is checked by substitution into the constraints that produced it. A closed form
+has none to substitute into, so where a slower independent computation exists it is run and
+compared — 100! really is computed and its zeros counted, the modular power really is checked
+against the full power — and where none exists the answer is arithmetic on numbers already read.
+
+#### Measured twice, because measuring once proves nothing
+
+Thirty problems were written **first** and the solver built until they passed: 30/30. That is not
+evidence. So thirty more were written *after it was finished*, three of them deliberately in shapes
+nothing had been built for. First measurement: **23 right, 1 wrong, 6 silent.** After the seven
+defects below: 30/30 on both.
+
+And then, because two hand-written banks can both be overfitted: **eleven generated papers**, fresh
+numbers on every seed, each computing its own expected answer by plain arithmetic on the numbers it
+just chose — a route through no part of the solver. First measurement **0.9710**; after the
+defects, **623/623 across three seeds**, controls included.
+
+| defect | what it did |
+|---|---|
+| **a number at the end of a sentence was not a number** | written `(?![\w.])`, the reader saw *no number at all* in "the sum is 78." — the full stop failed the lookahead. Every multi-sentence problem lost its last quantity, silently, in the module V.23 shipped |
+| **a recognised refusal fell through** | "the sum to infinity of 2, 4, 8, …" is read as a geometric series and refused, because that series has no sum — and the turn then reached the skill table, which added the three terms it could see and answered **14** |
+| **"whose" is not an interrogative** | a guard written for "what colour" refused "find two numbers **whose** sum is 7" — twenty problems in a hundred, silently |
+| **a question asking for no quantity was answered** | "the sum of three consecutive numbers is 78 — what is the **colour** of the largest?" was read perfectly and answered 27 |
+| **an ordinal was excluded by value** | "the 15th term of 12, 15, 18" deleted the 15 that was a term |
+| **a run was read non-greedily** | "… + 99 + 100" captured **99**, and the series summed was the wrong one |
+| **a factor without an exponent was dropped** | "2^5 times 5" was read as 32, and the hcf of 200 and 160 came out 8 |
+
+Two more were the *exam's* own, which is worth as much: a generator that wrote "the difference of
+the digits is **-3**", a sentence nobody would write; and a phrasing fix for one shopkeeper problem
+that stopped another from parsing — "marks up the price by 40%" and "marks his goods up by 20%" are
+the same sentence with the noun moved.
+
+#### A third bank, and the ceiling it found
+
+Two banks passing is two banks. So a third was written after the first tier was finished, harder
+still — a predicate search, a modular series of factorials, symmetric functions of roots, counting
+over a range, stars and bars, a telescoping product, an inscribed circle:
+
+```
+right                    2 / 25
+confidently wrong       12 / 25
+silent                  11 / 25
+```
+
+And **three of the twelve came back as `noted:`** — filed into the knowledge store as facts, the
+V.23 defect surfacing again on the problems that beat her. `('find', 'the') → 'smallest positive
+integer n'` at confidence 0.75. The store protection covered problems she *recognised*; a problem
+she could not read at all fell straight through it.
+
+Sixteen readings and five engines later, the third bank is 25/25 and nine more generated papers
+sit beside the eleven — **694/694 across three seeds** over the whole hard half. The most general
+of the new readings is worth naming, because it is the closest thing here to what "solving"
+means: **an arbitrary polynomial in one unknown, against a stated property, over an exhaustive
+bounded range.** Nothing about the pair is enumerated in advance — the polynomial is parsed and
+the property is compiled — so "the smallest n such that n² + n + 41 is not prime" (40) and "the
+smallest n such that 2n + 1 is prime" (1) are answered by the same code, and a property it cannot
+read is refused rather than approximated.
+
+Four more defects, each found by a problem written after the code:
+
+| defect | what it did |
+|---|---|
+| **an unsolved task was filed as a fact** | the store guard only covered problems a reading *claimed*; three the solver could not read at all were written into the knowledge store as triples |
+| **the task flag then blocked a working skill** | its first version blocked the way a refusal does — and "expand (x+2)(x+3)" is a task the solver has no reading for and the skill table expands correctly, so a right answer became silence. Protecting the store and deciding who answers are two different questions and now two different flags |
+| **an exponent's unknown could not be negative** | `3^(x+3) = 9` has x = -1; the search started at zero and reported that there was none |
+| **`(a)(b)` is a function call** | to `ast.parse` it is, so a product written the way every textbook writes it could not be evaluated at all. The implied multiplication is inserted by the reading, rather than by widening what the calculator accepts |
+
+And one in the exam itself: a generated predicate with no solution (`2n² + 3` is never divisible
+by 9) threw `StopIteration` out of the examination rather than being skipped as the non-item it is.
+
+#### A fourth bank, and where it stands now
+
+The pattern repeated once more. A fourth bank, written after the second tier and harder in a
+different direction — a boat against a stream, a sum that doubles, "at least one head", a
+percentage carried to another percentage, an LCM and an HCF fixing a missing number, a function
+defined and then used:
+
+```
+right                    2 / 20
+confidently wrong        5 / 20
+silent                  13 / 20
+```
+
+Seventeen more readings later it is 20/20, and ten more generated papers sit beside the twenty.
+**All four hand-written banks — 105 problems — now pass through `think()`, and the thirty
+generated hard papers score 927/927 across four seeds**, controls included, with nothing written
+to the store.
+
+Three of the defects that measurement found are worth keeping:
+
+| defect | what it did |
+|---|---|
+| **an evaluation frame read as an equation** | "the value of 2x² + 9 **when** x = 5" contains an `=`; read as an equation it says x = 5 and answers **5** — the number in the question rather than the answer to it. And because a recognised refusal blocks, it took a paper that had been passing down with it |
+| **one root named out of two** | the general equation reader refused a quadratic as having "more than one answer"; naming one is choosing rather than solving, and reporting both is neither |
+| **a quantity read by exclusion** | the gap between simple and compound interest was found by removing the rate and the term from the numbers in the sentence — so on "at 10 percent is 10" it removed the gap itself |
+
+And one about the exam again: a generator that `continue`d past every draw produced an **empty
+paper**, which scores 0.00 and measures nothing. It now draws until the paper is full, and a test
+asserts no paper is ever empty.
+
+#### Where it sits, and what it must not shadow
+
+**The solver is asked before the skill table**, and the order is the whole of its value: a reading
+that carries several constraints is checked against all of them before she may speak; a skill that
+matches one phrase is checked against nothing. Asked the other way round, "marks up 40% then
+discounts 25%" is answered 30 and the solver never gets a turn. *Verified beats matched*, which is
+the repo's *verifiable beats probabilistic* one layer further in.
+
+A **recognised refusal blocks as firmly as an answer**. A problem the solver understood and
+declined is never handed down to something that understands it less — that flag is the whole
+reason the 14 and the 1/6 above are now silence.
+
+And it must not shadow what already worked: a test pins `gcd of 48 and 18`, `expand (x+2)(x+3)`,
+the triangle area and `24 + 18` as unchanged, and the twenty-eight-paper examination reports
+**667/667**.
+
+Run it: `NJPBrain.do_maths("...")`, `python -m nyxara.njp.mathschool --exam`, or `/v1/njp/maths`. Thirty generated papers in the hard half, sixty readings, twenty-two engines.
+
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
-`/pulse`, `/learner`, `/calculate`, `/maths`, and `/{organ}` — so growth and self-rewriting are observable
+`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, and `/{organ}` — so growth and self-rewriting are observable
 from outside the process,
 not merely asserted in a docstring. On the console: `/njp`, and `/njp think` prints the synapse
 count before and after the turn, which is the claim this whole package has to earn.

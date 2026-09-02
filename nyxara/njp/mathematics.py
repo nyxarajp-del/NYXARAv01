@@ -747,7 +747,13 @@ _HINGLISH: Tuple[Tuple[str, str], ...] = (
 
 #: Digits, decimals and the fraction forms she is asked in. Ordered longest-first so ``3/4`` is one
 #: number rather than a 3 and a 4 — a mean over "1/2, 1/4" is otherwise an average of four numbers.
-_NUMBER = re.compile(r"(?<![\w.])(-?\d+\s*/\s*\d+|-?\d+\.\d+|-?\d+)(?![\w.])")
+#:
+#: The trailing lookahead is two assertions and not one, which matters more than it looks. Written
+#: ``(?![\w.])`` it rejected a number at the end of a sentence: **"the sum is 78." contained no
+#: number at all**, because the full stop failed the lookahead. Every multi-sentence problem lost
+#: its last quantity that way, silently. It has to reject a following *word* and a following
+#: *decimal point with a digit after it*, and permit the full stop that ends a sentence.
+_NUMBER = re.compile(r"(?<![\w.])(-?\d+\s*/\s*\d+|-?\d+\.\d+|-?\d+)(?![\w])(?!\.\d)")
 
 #: Number words, because "half of forty" is a question and "0.5 of 40" is the same question typed
 #: by somebody who already did the reading.

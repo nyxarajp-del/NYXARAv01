@@ -363,6 +363,8 @@ class NJPBrain:
         # the calculator rather than holding a second one, and `perceive` asks it *first* — before
         # the grounder — so a maths instruction is never filed as a fact about the world.
         self.mathematician = self._build_mathematician(c)
+        # After the mathematician and consulted *before* it: see `_mathematical`.
+        self.solver = self._build_solver(c)
         self.meta = self._build_meta(c)
         self.goals = self._build_goals(c)
         self.curiosity = self._build_curiosity(c)
@@ -1460,6 +1462,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_solver(self, c: Any) -> Any:
+        """Problems she has never seen. Absent before this: there was nothing that *solved*.
+
+        The mathematician scores 410/410 on its own examination and that number says almost
+        nothing — every item on it is a shape it already knows. On thirty problems written to match
+        no skill it scored **1 right, 9 confidently wrong, 18 silent**. See
+        :mod:`nyxara.njp.mathsolver`.
+        """
+        if not self._gate("mathsolver", True):
+            return None
+        try:
+            from nyxara.njp.mathsolver import Solver
+            return Solver()
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_cortex(self, c: Any) -> Any:
         """Her cortex, as a proposer. Absent weights make it honestly unavailable, not absent."""
         if not self._gate("cortex", True):
@@ -1929,6 +1947,9 @@ class NJPBrain:
     def do_maths(self, question: str) -> Any:
         """Work out a mathematics question and show the working.
 
+        Asks :mod:`nyxara.njp.mathsolver` first and :mod:`nyxara.njp.mathematics` second, which is
+        the order :meth:`_mathematical` uses and for the reason given there.
+
         The in-process entry point to :mod:`nyxara.njp.mathematics`, and the counterpart to
         :meth:`puzzle` in the same way :meth:`puzzle` is the counterpart to ``Grounder.answer``:
         that one *retrieves*, this one *computes*. Returns a
@@ -1941,6 +1962,10 @@ class NJPBrain:
         a constructed answer, for the same reason.
         """
         try:
+            if self.solver is not None:
+                solved = self.solver.solve(question)
+                if solved.ok or solved.recognised:
+                    return solved
             if self.mathematician is None:
                 from nyxara.njp.mathematics import Solution
                 return Solution(question=str(question or ""),
@@ -2590,6 +2615,22 @@ class NJPBrain:
         The memo inside :meth:`Mathematician.solve` makes asking twice cost once.
         """
         try:
+            # **The solver is asked first, and the order is the whole of its value.** A reading
+            # that carries several constraints is checked against all of them before she may
+            # speak; a skill that matches one phrase is not checked against anything. Asked the
+            # other way round, "marks up by 40% then discounts 25%" is answered **30** by the
+            # discount skill — a percentage it recognised, in a problem it did not — and the
+            # solver never gets a turn. Verified beats matched, exactly as verifiable beats
+            # probabilistic one layer up.
+            if self.solver is not None:
+                solved = self.solver.solve(problem)
+                # `recognised` blocks as firmly as `ok` answers, and that is the point of it:
+                # a problem the solver understood and declined must not be handed down to the
+                # skill table, which understands it less and answers anyway. Measured: "the sum to
+                # infinity of 2, 4, 8, …" — a series with no sum — came back **14**, the total of
+                # the three terms the skill table could see.
+                if solved.ok or solved.recognised:
+                    return solved
             if self.mathematician is None:
                 return None
             worked = self.mathematician.solve(problem)
@@ -2601,6 +2642,25 @@ class NJPBrain:
             return worked if worked.topic else None
         except Exception:  # noqa: BLE001
             return None
+
+    def _is_maths_task(self, problem: str) -> bool:
+        """Is this an instruction to work something out — *even though nothing could*?
+
+        A narrower question than :meth:`_mathematical` and used for one narrower purpose: the
+        store. A problem she cannot solve is still not a fact about the world, and without this the
+        grounder filed the ones that beat her — ``('find', 'the') → 'smallest positive integer n'``
+        among them, at the same confidence as a stated fact.
+
+        It never decides who answers. Conflating it with a refusal cost a working capability
+        once already: "expand (x+2)(x+3)" is a task the solver has no reading for and the skill
+        table expands correctly, and a task flag that blocked turned that into silence.
+        """
+        try:
+            if self.solver is None:
+                return False
+            return bool(self.solver.solve(problem).task)
+        except Exception:  # noqa: BLE001
+            return False
 
     def _strategy_ladder(self, problem: str, ctx: Dict[str, Any]) -> Any:
         try:
@@ -2818,7 +2878,8 @@ class NJPBrain:
                         # a task — see `Grounder.ground`.
                         out.grounding = self.grounder.ground(
                             out.stimulus, intent=intent,
-                            store=self._mathematical(out.stimulus) is None)
+                            store=self._mathematical(out.stimulus) is None
+                            and not self._is_maths_task(out.stimulus))
                     except Exception:  # noqa: BLE001
                         out.grounding = None
 
@@ -4459,6 +4520,7 @@ class NJPBrain:
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
                             ("maths", self.mathematician),
+                            ("mathsolver", self.solver),
                             ("field", self.field), ("learner", self.learner),
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),

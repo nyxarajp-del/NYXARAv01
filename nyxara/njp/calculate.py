@@ -305,12 +305,37 @@ class Calculator:
                     out.backend = "sympy"
                     out.value = exact_value
                     out.steps.append(f"exactly {exact_text}")
-                    out.text = exact_text
+                    # **A question asked in decimals is answered in decimals.** `0.1 + 0.02 +
+                    # 0.003` is exactly 123/1000, and 123/1000 is a strange thing to say back to
+                    # somebody who wrote three decimals — the fraction is the same claim in a
+                    # spelling nobody asked for. The exactness is unchanged; only the rendering
+                    # follows the question, and only where the decimal terminates.
+                    out.text = self._as_asked(expression, exact_text, exact_value)
             self.evaluated += 1
             return out
         except Exception as exc:  # noqa: BLE001
             out.error = f"calculation failed: {exc}"
             return out
+
+    @staticmethod
+    def _as_asked(expression: str, exact_text: str, exact_value: Any) -> str:
+        """The exact value written the way the question was written, where the two can agree."""
+        if "." not in expression or "/" not in exact_text:
+            return exact_text
+        try:
+            top, _, bottom = exact_text.partition("/")
+            numerator, denominator = int(top), int(bottom)
+            trimmed = denominator
+            for prime in (2, 5):
+                while trimmed % prime == 0:
+                    trimmed //= prime
+            if trimmed != 1:
+                return exact_text        # a repeating decimal is a worse claim than the fraction
+            digits = len(str(denominator)) + 4
+            rendered = f"{numerator / denominator:.{digits}f}".rstrip("0").rstrip(".")
+            return rendered or exact_text
+        except Exception:  # noqa: BLE001
+            return exact_text
 
     def _sharpen(self, expression: str) -> Optional[Tuple[str, Any]]:
         """The exact rational for this expression, when sympy is present and it has one."""

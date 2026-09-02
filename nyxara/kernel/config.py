@@ -2503,6 +2503,7 @@ class NJPConfig(BaseModel):
     curriculum_enabled: bool = True     # the nine-rung ladder and its gating
     calculate_enabled: bool = True      # arithmetic evaluation (njp/calculate.py)
     mathematics_enabled: bool = True    # the school syllabus (njp/mathematics.py)
+    mathsolver_enabled: bool = True     # problems she has not seen (njp/mathsolver.py)
     learner_enabled: bool = True        # the Cognitive Learning Core (njp/core.py)
 
     # --- NJP V.06: the cortex, and the two organs that keep it honest --- #

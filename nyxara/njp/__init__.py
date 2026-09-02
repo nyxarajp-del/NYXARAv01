@@ -339,6 +339,8 @@ from nyxara.njp.calculate import Calculator, Evaluation
 # and is kept out for the same reason `school`, `study`, `general` and `lessons` are —
 # `NJPBrain.go_to_maths_school` and `NJPBrain.sit_maths_exam` are its in-process entry points.
 from nyxara.njp.mathematics import Mathematician, Poly, Solution as MathSolution
+from nyxara.njp.mathsolver import Constraint, Expr, Problem, Solver
+from nyxara.njp.mathsolver import Solution as SolvedProblem
 from nyxara.njp.index import IntelligenceIndex, IntelligenceVector, Term
 from nyxara.njp.core import (
     CognitiveLearningCore,
@@ -461,6 +463,8 @@ __all__ = [
     # `Solution` is aliased for the same reason `Demonstration` and `Schema` are above: the word
     # is right in both places, and an export list does not get to rename a thing where it lives.
     "Mathematician", "MathSolution", "Poly",
+    # NJP V.24 — problems she has never seen
+    "Constraint", "Expr", "Problem", "SolvedProblem", "Solver",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions
