@@ -1403,6 +1403,21 @@ capped confidence and labelled `learned-grammar` so an audit can tell a lesson's
 shipped core's; and an unanchored learned reading of a sentence the core already read is
 discarded, because two positional guesses disagreeing is not evidence for either.
 
+**One more refusal, added after it was needed.** "Matched fixed material" was asked of the
+*construction* rather than of the *reading*, and those are different questions once she speaks
+more than one language. A three-slot minted-dialect shape whose paradigm happens to carry a tense
+marker has markers; the English sentence it matched contained none of them. So after the school
+taught her two dialects, the grounder took **82 English sentences** through a grammar for a
+language nobody was speaking, mangled the entity names, and `composition` and `depth` fell from
+1.00 to **0.33** — sixteen extra abstentions and no wrong answers.
+
+It is worth recording how it was caught, because nothing else would have. The taught run is clean:
+the reasoning subjects are examined *before* the language ones are taught, so at that point there
+is no rival grammar to intercept them. Only the **retention pass** — which re-examines every
+subject after every subject has been learned — puts an English reasoning question in front of a
+brain that has since become multilingual. The one measurement in this package designed to ask
+"what survived the lessons" was the only one in a position to see it.
+
 End to end, through every organ between the two — four sentences of a language nobody wrote code
 for, then a question in a language she shipped with:
 

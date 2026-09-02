@@ -579,3 +579,48 @@ def test_a_sidecar_cannot_give_her_a_shape_nobody_demonstrated():
     # the file asserted.
     assert woken.tongue(dialect.name).grammar.constructions == []
     assert not woken.read(sample(dialect, draw, 1)[0].surface, tongue=dialect.name).readable
+
+
+def test_a_grammar_for_another_language_does_not_claim_an_english_sentence():
+    """The defect that only appears once she is multilingual, and only in a retention run.
+
+    A learned construction outranks the shipped positional frame when it matched **fixed
+    material**, and the check for that asked the *construction* whether it had any rather than
+    asking the *reading* whether the sentence contained any. A three-slot minted-dialect shape
+    whose paradigm happens to carry a tense marker therefore answered yes to plain English: after
+    the school taught two dialects, the grounder took 82 English sentences through them, mangled
+    the entity names, and ``composition`` and ``depth`` fell from 1.00 to 0.33 with sixteen
+    extra abstentions and no wrong answers.
+
+    The taught run never showed it, because the reasoning subjects are examined before the
+    language ones are taught. Only the retention pass, which re-examines everything after
+    everything has been learned, was in a position to catch it.
+    """
+    from nyxara.njp.grounding import Grounder
+
+    faculty = LanguageFaculty()
+    # A bare three-slot dialect with a tense marker in its paradigm — no literals, no case.
+    for subject, verb, obj in (("zorb", "glim", "plag"), ("kesh", "glim", "dral"),
+                               ("vunt", "morp", "tesk")):
+        faculty.show(f"{subject} {verb} {obj}",
+                     Meaning(kind="assertion", subject=subject, relation=verb, object=obj),
+                     tongue="dialect-a")
+        faculty.show(f"{subject} {verb}ta {obj}",
+                     Meaning(kind="assertion", subject=subject, relation=verb, object=obj,
+                             temporal="past"), tongue="dialect-a")
+    assert faculty.learn(tongue="dialect-a").kept >= 1
+
+    grounder = Grounder(grammar=faculty)
+    plain = Grounder()
+    for english in ("bakoa padebs zolic", "the cat chases the dog", "my name is Jay",
+                    "zorka padebs zorkb", "all zorbs are shiny"):
+        assert [(t.subject, t.predicate, t.object, t.source)
+                for t in grounder.ground(english).triples] == \
+            [(t.subject, t.predicate, t.object, t.source)
+             for t in plain.ground(english).triples], english
+    assert grounder.learned_reads == 0
+
+    # And the sentence that really is in that dialect still goes through, because it carries the
+    # tense ending the shape was learned with.
+    assert faculty.read("horse glimta stone", tongue="dialect-a").temporal == "past"
+    assert Grounder(grammar=faculty)._extract_learned("horse glimta stone")

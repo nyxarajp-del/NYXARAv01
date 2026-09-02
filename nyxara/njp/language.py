@@ -1578,10 +1578,15 @@ class Reading:
     construction: Optional[Construction] = None
     score: float = 0.0
     anchor: float = 0.0
+    #: Characters of **fixed material this sentence actually contained** — case markers, tense
+    #: endings, the material of whichever markers matched. Distinct from anything the shape merely
+    #: has: a paradigm carrying a past-tense marker matched a present-tense sentence with no
+    #: material at all, and asking the *construction* whether it has markers said yes.
+    material: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {"meaning": self.meaning.to_dict(), "score": round(self.score, 4),
-                "anchor": round(self.anchor, 4),
+                "anchor": round(self.anchor, 4), "material": round(self.material, 4),
                 "construction": self.construction.to_dict() if self.construction else None}
 
 
@@ -2296,7 +2301,8 @@ class Grammar:
                          + 0.5 * familiar + 0.4 * fitted + construction.record)
                 out.append(Reading(
                     meaning=self._meaning(construction, fills, anchor, tokens, features),
-                    construction=construction, score=score, anchor=anchor))
+                    construction=construction, score=score, anchor=anchor,
+                    material=float(construction.bound_chars + material)))
         # **Material the sentence contains outranks everything else, always.** Anchor first and
         # the rest only as a tie-break, rather than all of it added into one number.
         #
@@ -2349,15 +2355,19 @@ class Grammar:
             return False
         if not readings or readings[0].construction is None:
             return False
-        # Fixed material of **any** kind: a literal token, a case marker, a tense ending. Not
-        # `Reading.anchor`, which counts literal tokens alone because that is what it needs to
-        # count when ranking two readings of one sentence. A case-marked language with no
-        # particles has an anchor of zero and is anchored in every sense that matters here — and
-        # reading it off the score is how a learned construction stopped outranking the shipped
-        # positional frame on exactly the sentences it was learned for.
-        won = readings[0].construction
-        return bool(won.literals or won.bound_chars
-                    or any(marker.material for marker in won.markers))
+        # Fixed material of **any** kind — a literal token, a case marker, a tense ending — but
+        # only material *this sentence actually contained*. Not `Reading.anchor`, which counts
+        # literal tokens alone because that is what ranking two readings of one sentence needs; and
+        # emphatically not "does the construction have any", which is what this asked first.
+        #
+        # A grammar for a minted dialect is a grammar for a language nobody is speaking, and the
+        # question a real turn asks is whether *this* sentence is in it. Asked about the shape
+        # rather than the match, a three-slot dialect shape whose paradigm happens to carry a
+        # tense marker answered yes to plain English — so after the school taught two dialects,
+        # the grounder took **82** English sentences through them, mangled the entity names, and
+        # `composition` and `depth` fell from 1.00 to 0.33 in the retention run. Sixteen
+        # abstentions, no wrong answers, and a defect that only appears once she is multilingual.
+        return bool(readings[0].anchor > 0.0 or readings[0].material > 0.0)
 
     def _meaning(self, construction: Construction, fills: Dict[str, str],
                  anchor: float, tokens: Sequence[str],
