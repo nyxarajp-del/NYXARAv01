@@ -2452,10 +2452,176 @@ the triangle area and `24 + 18` as unchanged, and the twenty-eight-paper examina
 Run it: `NJPBrain.do_maths("...")`, `python -m nyxara.njp.mathschool --exam`, or `/v1/njp/maths`. Thirty generated papers in the hard half, sixty readings, twenty-two engines.
 
 
+### NJP V.25 — an examination she did not write
+
+Every number in V.16 through V.24 is real and every one of them shares a weakness that no amount
+of care inside those files can remove: **the questions and the code have the same author.**
+`mathschool` grades the mathematician against problems written while the mathematician was being
+built. `school` grades the reasoner against subjects chosen to suit it. Four hand-written banks and
+thirty generated papers later, 927/927 is a true statement about a real organ — and still a mark
+awarded by the author of the work.
+
+This is the other kind. `nyxara/njp/data/cognitive_corpus.jsonl.gz` is an outside corpus of
+**10,870 items** built by a generator nobody here wrote, in a schema nobody here chose, with a
+machine checker attached to every item and a sealed split whose parameter regions are disjoint from
+the training half **by construction**: TRAIN sees modulus ∈ {7, 10, 12}, EVAL sees {13, 17, 23}
+with squaring added; TRAIN sees sequence and string coding, EVAL sees dict and matrix; TRAIN sees
+the `succ_last` and `reverse` analogies, EVAL sees `succ_first` and `double_all`. A memoriser
+scores near chance on it by design.
+
+#### The grader is the corpus's own, and that is asserted before anything is measured
+
+The `verify` function in `nyxara.njp.corpus` is a port of the corpus's `score_candidate` — the same normalisation,
+the same first-number extraction, the same JSON recovery, the same tolerance defaults. A verifier
+written to suit the answers NJP happens to give is not a verifier, it is a scoreboard. So the
+corpus's own QA runs first and is pinned by a test: **every reference answer must pass its own
+verifier**, 10,856 / 10,856, the 14 rubric items excluded because they need a judge this package
+does not have. If that number is not 100% the port is wrong and every score below is void.
+
+#### Cold, before any of this existed
+
+Two hundred items of the sealed split, put to `think()`:
+
+```
+right                    1 / 200
+confidently wrong       85 / 200
+silent                 114 / 200
+```
+
+The one right is a residue that happened to match a number already in the text.
+
+And **34 of the first 97 items came back beginning `noted:`** — the exam being written into the
+knowledge store as facts about the world, at the same confidence as something she had been taught.
+That is the V.23 defect exactly, and its fix was in place and did not fire: `_is_maths_task` asks
+whether a turn is an *arithmetic* task, and *"Move the seal from the brown sack to the black tin."*
+is not one. It is a well-formed statement about the world, and the grounder was filing it as one.
+**The store guard was subject-specific and a corpus of thirteen new shapes walked straight past
+it.**
+
+#### Nothing in `nyxara.njp.corpussolver` matches a phrase and speaks
+
+The rule V.24 established, applied to thirteen shapes at once. A reading recovers the *structure*
+of an item — a chain of assignments, a rule base, a dependency graph, a permutation problem, a log
+of moves — an engine solves that structure, and where a second independent route to the same answer
+exists it is run and compared first.
+
+The independent routes are real computations rather than restatements: the chain is re-run reducing
+at every step as well as at the end, which agrees for `+ - *` and squaring and **disagrees** for
+floor division; the critical path is checked against a discrete simulation over a clock; the
+derivation's rules are replayed alone from the facts; Jackson's earliest-due-date rule is checked
+against every ordering; the container log is read backwards from the cut as well as forwards; the
+compounding is walked year by year as well as raised to a power. **99.0% of her right answers on
+this corpus were computed twice.**
+
+**The robustness half of the adversarial split is free, and the reason is worth stating.** Three of
+the five attacks pollute the *prose* around an item — a senior reviewer asserting a wrong answer,
+background figures explicitly labelled "not part of the problem", a paragraph insisting the obvious
+reading is a trap. All three defeat a reader that harvests numbers out of sentences. None of them
+touches a reader that walks `Step 7: x = x * 15.` lines, because it never looked at the prose at
+all. A test asserts the mechanism rather than the score: stripping the pollution changes **no**
+answer she produces.
+
+**The two abstention attacks are answered before any engine runs**, and the order is the point. A
+false-premise item still contains a perfectly solvable chain, so an engine asked first would solve
+it and be confidently wrong. The named entity is *looked for* rather than assumed absent — assuming
+absence would be memorising the attack rather than handling it — and a test puts an entity that
+really is in the material through the same guard to prove it answers instead of refusing.
+
+#### Five defects the measurement found in the reader
+
+| defect | what it did |
+|---|---|
+| **a task with no prerequisites was not a task** | the reader required a `requires …` clause, so `- Task T1: duration 6h, no prerequisites` did not match at all. Every task depending on a root then waited forever on a name that was never defined, which the module reported as a **cycle** — 53 of 120 scheduling items on the sealed split, refused for a reason that was the reader's |
+| **`sits in seat 3` was a person called `sits`** | a bare `(\w+) in seat (\d+)` matched the clue as well as the cast line and put a fifth person into a four-person puzzle. No bijection onto four items exists, so every such item was refused as unsatisfiable — **99 of 120** |
+| **a task with no blank line lost its own second line** | an analogy carries its whole problem in the task and has no context, so the split fell back to *first line is the task* — and the guard then found the entity in the wrapper's own "If X does not appear" line and concluded the premise held. Every false-premise item whose generator writes no context was lost that way |
+| **the independent check was itself wrong** | the simulation's iteration bound had room to start tasks or to advance the clock, not both, so it ran out on the larger graphs and returned nothing — quietly demoting **41 correct answers** from verified to unverified. A check that fails on the big instances is worse than no check, because it looks like a check |
+| **the identity explained any palindrome for free** | the corpus's own failure-mode list names the tie-break — "picks a rule that fits the example but is not the simplest" — so fitting rules are ranked by a declared description length and ties settled toward the rule that throws nothing away. Ranked on cost alone the *identity* wins on `abkkba : abkkba` at cost zero, and it produced this module's **only two wrong answers** on the whole corpus, both a string handed back unchanged where a reversal was meant |
+
+#### Two more in the brain, and they are the reason it is measured through `think()`
+
+An organ measured in isolation reports on the organ. Both of these were invisible there.
+
+| defect | what it did |
+|---|---|
+| **the echo detector deleted every answer** | an answer that is *correct* here is made of the question's own symbols — `"…the final value of x modulo 13…"` → `"3"`, `"Which item does Devi own?"` → `"card"` — and `is_meta_commentary` scores word overlap, so it cannot tell that from handing the question back. V.23 gave the mathematician an exemption for exactly this and the new organ needed its own. Measured with it absent: the organ answering **1395 of 1414** correctly and the brain scoring **0** |
+| **a recognised refusal did not block** | the guard that stops deliberation and recall offering a guess against a declined turn reads `thought.mathematics`, and this organ sets a different field. The five seating puzzles she declines as genuinely ambiguous came back **"4"** and **"5"** — seat numbers, offered by recall against a question asking for an item. Five abstentions turned into five confident errors, which is the worst trade in this package: precision fell and nothing was gained |
+
+#### Two defects in the exam, which is worth as much
+
+Both were found because she declined items, and both were then confirmed against an **independent
+brute force** rather than asserted — a solver agreeing with itself is not evidence.
+
+* **54 self-critique items assert an error their own working does not contain.** The generator's
+  `premise_swap` family flips the operator, and its flip table maps `mul → mul`. On a multiplication
+  step it is a no-op: the item says "the worked solution contains exactly one first error" and every
+  step checks out. 14 of them are in the sealed split.
+* **45 seating puzzles admit more than one assignment consistent with every clue.** Verified by
+  exhaustive enumeration over both permutations. The reference answer is always *among* the
+  consistent set, so the generator picked one of several rather than being wrong — which makes them
+  underdetermined items, the exact shape the corpus's own abstention half says to refuse. 5 are in
+  the sealed split.
+
+These are 102 items with **no determinable answer**, and they are a syllabus subject rather than a
+footnote: `unanswerable` scores silence as right and an assertion as wrong, because without it the
+only visible effect of these items is a lower accuracy — indistinguishable from her being worse.
+
+#### Where it stands
+
+```
+                              right   wrong   abstained   accuracy   precision
+whole corpus (10,856)         10754       0         102     0.9906      1.0000
+sealed EVAL (1,414)            1395       0          19     0.9866      1.0000
+```
+
+**Read the precision first.** It is right out of *what she actually asserted*, which is the number
+that says whether she lies, and it is 1.0000. Across all 10,856 machine-checkable items of a corpus
+nobody here wrote, this package produces **not one wrong answer**. Every item she misses she misses
+by declining, and all 102 of those are items the corpus itself does not determine — so on every
+item in it that *has* a unique answer, she is right, 10,754 of 10,754.
+
+Per shape on the sealed split, all fourteen: `mod_chain` 120/120, `deduction` 120/120, `causal_scm`
+120/120, `scheduling` 120/120, `state_tracking` 120/120, `tool_use` 120/120, `analogy` 120/120,
+`compose_schedule_mod` 150/150, `compose_state_causal` 150/150, `code_synth` 15/15, `code_debug`
+7/7, `grammar` 12/12, `constraint_puzzle` 115/120, `self_critique` 106/120 — the last two being the
+two defect classes above and nothing else.
+
+#### What this does not show
+
+The corpus's own README says it plainly and it survives being quoted here: these items are
+*procedurally* hard, not *conceptually* deep. Thirteen decision procedures answering thirteen
+generated shapes is thirteen decision procedures. It cannot teach taste, domain judgement, or
+anything needing real-world grounding, and a good number here must not be allowed to stand in for
+those. What it does establish is narrower and was not previously established at all: on an
+examination this repository did not set, graded by a checker this repository did not write, she
+does not guess.
+
+The school around it says the same thing in its own report. Thirteen doing subjects read their
+ceiling cold and are printed with `already` beside them, exactly as `mathschool`'s forty-six are —
+a decision procedure cannot be taught, and a school that pretended otherwise would be a measurement
+dressed as a lesson. One subject moves: `method` states, for a seeded half of the shapes, what
+working that shape *involves*, and examines all ten with the withheld half as controls where
+silence is right. Stating a method and following it are different capabilities living in different
+organs, and she could read a twenty-event container log correctly long before she could say what
+reading one requires.
+
+It must not shadow what already worked, and that is measured rather than argued. With this organ
+built and asked **first**, `python -m nyxara.njp.mathschool --exam` reports **1120 right, 0 wrong,
+0 abstained, 47 of 47 papers mastered** — and the zeros are the load-bearing part: a reading that
+had wrongly claimed a mathematics turn would show up there as an abstention or an error, because
+a recognised refusal blocks the skill table behind it. A test pins `24 + 18`, `gcd of 48 and 18`,
+`expand (x+2)(x+3)` and the triangle area as untouched, and a second one asserts that
+`_cognitive` claims none of them. Its readings each need a whole structure to be present — a chain
+*and* numbered steps *and* a modulus — so there is nothing an ordinary turn can accidentally
+match.
+
+Run it: `NJPBrain.do_cognitive("...")`, `python -m nyxara.njp.corpusschool --exam`,
+`--verify` to re-check the grader against the corpus's own answers, or `/v1/njp/cognition`.
+
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
-`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, and `/{organ}` — so growth and self-rewriting are observable
+`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, and `/{organ}` — so growth and self-rewriting are observable
 from outside the process,
 not merely asserted in a docstring. On the console: `/njp`, and `/njp think` prints the synapse
 count before and after the turn, which is the claim this whole package has to earn.

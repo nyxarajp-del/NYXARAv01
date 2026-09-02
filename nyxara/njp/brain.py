@@ -226,6 +226,12 @@ class NJPThought:
     #: into it for the reason `derivation` is: a computed answer and a recalled one read the same
     #: in a string and are entirely different epistemic objects.
     mathematics: Any = None
+    #: The reading :mod:`nyxara.njp.corpussolver` made of this turn — a ``corpussolver.Reading``,
+    #: carrying which engine claimed it, why, and whether a second independent computation agreed.
+    #: Kept beside the answer for the reason ``mathematics`` is, plus one of its own: ``verified``
+    #: is the difference between an answer that was checked twice and one that was not, and that
+    #: distinction is destroyed by folding it into a string.
+    cognition: Any = None
     #: The retirement trial run this turn, where the gate is on — a ``field.Trial``. ``None``
     #: means the gate is off or the slow count was not due, and those are both "nothing was
     #: proposed" rather than "a proposal was refused".
@@ -365,6 +371,10 @@ class NJPBrain:
         self.mathematician = self._build_mathematician(c)
         # After the mathematician and consulted *before* it: see `_mathematical`.
         self.solver = self._build_solver(c)
+        # After the mathematician's solver and consulted *before* it: see `_cognitive`. Its
+        # readings each require a whole structure — a chain with a modulus, a rule base with a
+        # goal, a dependency graph — so it claims nothing the mathematician wants.
+        self.cognition = self._build_cognition(c)
         self.meta = self._build_meta(c)
         self.goals = self._build_goals(c)
         self.curiosity = self._build_curiosity(c)
@@ -1478,6 +1488,21 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_cognition(self, c: Any) -> Any:
+        """The thirteen task shapes of an examination she did not write.
+
+        Measured cold against the sealed split of that corpus, before this existed: **1 right in
+        200**, and 34 of the first 97 items filed into the knowledge store as facts about the
+        world. See :mod:`nyxara.njp.corpussolver`.
+        """
+        if not self._gate("corpussolver", True):
+            return None
+        try:
+            from nyxara.njp.corpussolver import CorpusSolver
+            return CorpusSolver()
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_cortex(self, c: Any) -> Any:
         """Her cortex, as a proposer. Absent weights make it honestly unavailable, not absent."""
         if not self._gate("cortex", True):
@@ -2000,6 +2025,51 @@ class NJPBrain:
         try:
             from nyxara.njp.mathschool import MathExam
             return MathExam(self, limit=limit, seed=seed).sit(papers)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def do_cognitive(self, task: str) -> Any:
+        """Read one item from an outside cognitive corpus and solve it, with the working.
+
+        The counterpart to :meth:`do_maths`, and read-only in the same sense: a solved chain is
+        not a fact somebody stated, so nothing reaches the store. An item no reading claims comes
+        back ``recognised=False`` rather than with a guess — and one that *is* claimed and
+        declined comes back ``recognised=True, ok=False``, which is a different answer and is kept
+        as one.
+        """
+        try:
+            if self.cognition is None:
+                from nyxara.njp.corpussolver import Reading
+                return Reading()
+            return self.cognition.solve(task)
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.corpussolver import Reading
+            return Reading()
+
+    def go_to_corpus_school(self, *, rounds: int = 1, seed: int = 25,
+                            subjects: Any = None) -> Any:
+        """Sit the syllabus built around a corpus nobody in this repository wrote.
+
+        The counterpart to :meth:`go_to_maths_school`, and the difference is the only thing it is
+        for: that school's questions and its code have the same author, and this one's do not.
+        """
+        try:
+            from nyxara.njp.corpusschool import CorpusSchool
+            return CorpusSchool(seed=seed, rounds=rounds, subjects=subjects).attend(self)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def sit_corpus_exam(self, *, split: str = "EVAL", limit: Optional[int] = 200,
+                        seed: int = 20260902) -> Any:
+        """Sit the sealed split of that corpus. Writes nothing and teaches nothing.
+
+        Answers live in a file this path never opens; the grader is the corpus's own. Reported by
+        faculty, by generator and by verifier type, because a single aggregate hides exactly the
+        thing the split policy was built to expose.
+        """
+        try:
+            from nyxara.njp.corpusschool import Examination
+            return Examination(self, split=split, limit=limit, seed=seed).sit()
         except Exception:  # noqa: BLE001
             return None
 
@@ -2643,6 +2713,45 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _cognitive(self, problem: str) -> Any:
+        """This turn's reading by :mod:`nyxara.njp.corpussolver`, or ``None``.
+
+        Asked **before** :meth:`_mathematical` for the reason that method gives about its own
+        solver, one level further out: these readings are the most specific in the package. Each
+        needs a whole structure to be present — ``Start with x = …`` *and* numbered steps *and* a
+        modulus; a rule base *and* a named goal — so a reading that claims a turn has already
+        established far more about it than any phrase match could, and nothing it claims is
+        something the mathematician wanted. A test pins that: the twenty-eight-paper maths
+        examination reports the same score with this organ present as without it.
+        """
+        try:
+            if self.cognition is None:
+                return None
+            reading = self.cognition.solve(problem)
+            return reading if reading.recognised else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _is_cognitive_task(self, problem: str) -> bool:
+        """The store question, asked for thirteen more shapes.
+
+        :meth:`_is_maths_task` was written against exactly this failure and covers arithmetic
+        only, so an outside corpus walked straight past it: *"Move the seal from the brown sack to
+        the black tin."* is a well-formed statement about the world, and the grounder was filing
+        it as one — 34 times in the first 97 items of the sealed split, at the same confidence as
+        a fact she had been taught.
+
+        A recognised task is a task **whether or not it has an answer**, which is why this asks
+        ``recognised`` and not ``ok``: the five constraint puzzles she declines as ambiguous are
+        no more claims about the world than the ones she solves.
+        """
+        try:
+            if self.cognition is None:
+                return False
+            return bool(self.cognition.recognised_task(problem))
+        except Exception:  # noqa: BLE001
+            return False
+
     def _is_maths_task(self, problem: str) -> bool:
         """Is this an instruction to work something out — *even though nothing could*?
 
@@ -2879,7 +2988,8 @@ class NJPBrain:
                         out.grounding = self.grounder.ground(
                             out.stimulus, intent=intent,
                             store=self._mathematical(out.stimulus) is None
-                            and not self._is_maths_task(out.stimulus))
+                            and not self._is_maths_task(out.stimulus)
+                            and not self._is_cognitive_task(out.stimulus))
                     except Exception:  # noqa: BLE001
                         out.grounding = None
 
@@ -3022,8 +3132,17 @@ class NJPBrain:
             # procedure does not get a guess offered against it, and that has to hold when the
             # procedure's output is "none" as much as when it is a number. Otherwise every honest
             # refusal in `mathematics` becomes an invitation for a plausible substitute.
-            refused = (out.mathematics is not None
-                       and not getattr(out.mathematics, "ok", False))
+            # The same rule, for the organ added in V.25, and it had to be written separately
+            # because it reads a different field. Measured with this clause absent: the five
+            # seating puzzles `corpussolver` declines as genuinely ambiguous came back **"4"** and
+            # **"5"** — seat numbers, offered by recall against a question asking for an item.
+            # Five abstentions turned into five confident errors, which is the worst trade in this
+            # package: precision fell and nothing was gained. A procedure that says "there is more
+            # than one answer" is an answer, exactly as "there is none" is.
+            refused = ((out.mathematics is not None
+                        and not getattr(out.mathematics, "ok", False))
+                       or (out.cognition is not None
+                           and not getattr(out.cognition, "ok", False)))
             if not out.answer and not refused:
                 # A prediction that resolves **inside this turn**, which is the whole test the
                 # raw-stimulus key failed: she commits to whether the ladder will find an answer,
@@ -3666,6 +3785,14 @@ class NJPBrain:
             #
             # After the social gate above, never before it: "how are you" is not improved by being
             # checked for arithmetic first, and the policy that owns that decision is the policy.
+            # Before the mathematician, and a recognised refusal blocks exactly as firmly as an
+            # answer does — the rule V.24 established. A constraint puzzle with two consistent
+            # answers must not be handed down to something that will find one of them.
+            read = self._cognitive(thought.stimulus)
+            if read is not None:
+                thought.cognition = read
+                return str(read.answer)[:2000] if read.ok else ""
+
             worked = self._mathematical(thought.stimulus)
             if worked is not None:
                 thought.mathematics = worked
@@ -3788,6 +3915,20 @@ class NJPBrain:
             # with working attached is proof she did something to the question rather than
             # repeating it.
             if getattr(getattr(thought, "mathematics", None), "ok", False):
+                return False
+            # The same exemption, for the same reason, one organ further out — and it had to be
+            # written separately because the evidence is a different object. Every answer
+            # `corpussolver` produces is built from the item's own symbols, so the overlap score
+            # condemns all of them:
+            #
+            #     "…final value of x modulo 13…"   → "3"        the digit is in the question
+            #     "Which item does Devi own?"      → "card"     the word is in the clues
+            #
+            # Measured: with the organ wired and this line absent, the sealed split scored
+            # **0 right in 1414** through `think` while the organ itself was answering 1395 of
+            # them correctly. A right answer deleted on its way out is indistinguishable from
+            # never having had one.
+            if getattr(getattr(thought, "cognition", None), "ok", False):
                 return False
             return is_meta_commentary(thought.answer, thought.stimulus)
         except Exception:  # noqa: BLE001

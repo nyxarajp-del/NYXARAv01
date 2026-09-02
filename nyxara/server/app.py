@@ -1353,7 +1353,7 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
 
     # Organs readable over the wire, by URL segment. Read-only: this route never acts.
     _NJP_ORGANS = ("fabric", "truth", "soulsync", "evolver", "pulse", "ledger",
-                   "learner", "calculate", "maths", "mathsolver", "language")
+                   "learner", "calculate", "maths", "mathsolver", "language", "cognition")
     # Where the URL segment does not match the attribute on the brain.
     _ORGAN_ATTR = {"calculate": "calculator", "maths": "mathematician",
                    "mathsolver": "solver"}
@@ -1405,6 +1405,28 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
             return _off("MATHEMATICS_ENABLED")
         got = brain.do_maths(req.stimulus)
         return got.to_dict() if hasattr(got, "to_dict") else {"ok": False}
+
+    @app.post("/v1/njp/cognition", dependencies=auth)
+    def njp_cognition(req: NyxThinkRequest) -> dict:
+        """Solve one item of an outside cognitive corpus and return which engine claimed it.
+
+        Read-only in the sense `/v1/njp/maths` is: a solved chain is not a fact somebody stated,
+        so nothing is written to the store.
+
+        Three outcomes over the wire, never two. ``recognised=false`` means no reading claimed
+        the item; ``recognised=true, ok=false`` means one claimed it and declined, and those are
+        different answers. ``verified`` says whether a second independent computation agreed.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "cognition", None) is None:
+            return _off("CORPUSSOLVER_ENABLED")
+        got = brain.do_cognitive(req.stimulus)
+        return {"recognised": bool(getattr(got, "recognised", False)),
+                "ok": bool(getattr(got, "ok", False)),
+                "answer": str(getattr(got, "answer", "")),
+                "engine": str(getattr(got, "engine", "")),
+                "why": str(getattr(got, "why", "")),
+                "verified": bool(getattr(got, "verified", False))}
 
     @app.post("/v1/njp/recall", dependencies=auth)
     def njp_recall(req: NyxThinkRequest) -> dict:

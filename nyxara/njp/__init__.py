@@ -341,6 +341,11 @@ from nyxara.njp.calculate import Calculator, Evaluation
 from nyxara.njp.mathematics import Mathematician, Poly, Solution as MathSolution
 from nyxara.njp.mathsolver import Constraint, Expr, Problem, Solver
 from nyxara.njp.mathsolver import Solution as SolvedProblem
+# The corpus reader and its engines are imported; `nyxara.njp.corpusschool` carries a `__main__`
+# and is kept out for the reason `mathschool` is — `NJPBrain.go_to_corpus_school` and
+# `NJPBrain.sit_corpus_exam` are its in-process entry points.
+from nyxara.njp.corpus import CorpusRecord, CorpusVerdict, verify_corpus_answer
+from nyxara.njp.corpussolver import CorpusReading, CorpusSolver
 from nyxara.njp.index import IntelligenceIndex, IntelligenceVector, Term
 from nyxara.njp.core import (
     CognitiveLearningCore,
@@ -465,6 +470,7 @@ __all__ = [
     "Mathematician", "MathSolution", "Poly",
     # NJP V.24 — problems she has never seen
     "Constraint", "Expr", "Problem", "SolvedProblem", "Solver",
+    "CorpusReading", "CorpusRecord", "CorpusSolver", "CorpusVerdict", "verify_corpus_answer",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions
