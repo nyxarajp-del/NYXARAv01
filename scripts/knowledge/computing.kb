@@ -54,7 +54,7 @@ debugging | is_a=activity | purpose=finding and removing a bug | involves=reprod
 version control | is_a=system | purpose=recording the history of changes to code | has_kind=Git
 Git | is_a=version control system | inventor=Linus Torvalds | has_part=commit | has_part=branch | has_part=repository
 API | means=application programming interface | is_a=interface | purpose=letting one program use another
-library | is_a=collection of reusable code | purpose=saving a programmer from rewriting common work
+code library | is_a=collection of reusable code | purpose=saving a programmer from rewriting common work
 test | is_a=program that checks a program | purpose=catching a regression before a user does | has_kind=unit test | has_kind=integration test
 Python | is_a=programming language | has_property=interpreted | has_property=dynamically typed | inventor=Guido van Rossum | purpose=scripting | purpose=data science
 c | is_a=programming language | has_property=compiled | has_property=close to the hardware | inventor=Dennis Ritchie
@@ -93,8 +93,8 @@ gradient descent | is_a=optimisation algorithm | purpose=reducing a loss by step
 backpropagation | is_a=algorithm | purpose=computing the gradient of the loss with respect to each weight | requires=the chain rule
 overfitting | is_a=failure mode | occurs_when=a model learns the training data rather than the pattern | causes=poor performance on new data | requires=regularisation or more data to fix
 underfitting | is_a=failure mode | occurs_when=a model is too simple for the pattern in the data
-transformer | is_a=neural network architecture | has_part=attention mechanism | has_part=feed forward layer | purpose=modelling sequences | causes=the modern language model
-attention mechanism | is_a=neural network mechanism | purpose=letting a model weigh which parts of the input matter | part_of=transformer
+transformer model | is_a=neural network architecture | has_part=attention mechanism | has_part=feed forward layer | purpose=modelling sequences | causes=the modern language model
+attention mechanism | is_a=neural network mechanism | purpose=letting a model weigh which parts of the input matter | part_of=transformer model
 language model | is_a=machine learning model | purpose=predicting the next token in a sequence | requires=a tokenizer | requires=text
 tokenizer | is_a=component of a language model | purpose=splitting text into tokens | has_kind=byte pair encoding
 token | is_a=unit of text | means=the smallest piece a language model reads | part_of=a sequence

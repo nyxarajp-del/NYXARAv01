@@ -1,0 +1,138 @@
+# mythology.kb — the myths, epics and folklore traditions of the world.
+#
+# `philosophy.kb` describes the living religions as institutions, carefully and from outside.
+# This file is the neighbouring subject: the *stories* — Greek, Norse, Egyptian, Hindu, Chinese —
+# which general knowledge treats as literature and history rather than as doctrine, and which the
+# corpus held nothing of. "Who is Zeus", "what is the Ramayana about", "what is a phoenix" are
+# ordinary quiz questions and every one of them came back empty.
+#
+# **Everything here is written as what a tradition tells, never as what is the case.** A figure is
+# `is_a=Greek god` — a role inside a story — and never `is_a=god`, and no line asserts that any
+# being exists or acted. That is the same restraint `philosophy.kb` applies to living religion,
+# and it is what lets a fact store hold this material honestly: "the Iliad says Achilles was
+# nearly invulnerable" is a fact about a poem, and the poem is the subject.
+
+# --- what a myth is ------------------------------------------------------------------------------ #
+mythology | is_a=body of stories | means=the traditional stories a culture tells about its gods, origins and heroes | purpose=explaining the world and carrying a people's values | has_kind=Greek mythology | has_kind=Norse mythology | has_kind=Egyptian mythology | has_kind=Hindu mythology
+myth | is_a=story | means=a traditional story involving beings and events outside ordinary experience | has_property=told as significant rather than as reportage
+legend | is_a=story | means=a traditional story attached to a real place or person | has_property=treated as having happened, however altered
+folklore | is_a=body of stories | means=the tales, songs, sayings and customs passed on within a community | has_property=carried by telling rather than by writing | has_kind=fairy tale | has_kind=fable | has_kind=proverb
+fable | is_a=story | means=a short tale, usually with animals, that ends in a moral | has_kind=Aesop's fable | has_kind=Panchatantra tale
+fairy tale | is_a=story | means=a folk tale with enchantment in it, usually told to children
+proverb | is_a=saying | means=a short traditional saying that states a general truth
+creation myth | is_a=myth | means=a story of how the world came to be | has_property=nearly every culture has one
+flood myth | is_a=myth | means=a story of a great flood that destroys and renews the world | has_property=found independently in many traditions
+hero | is_a=role in a story | means=a figure who undertakes something beyond ordinary human capacity | involves=a trial | involves=a return
+quest | is_a=element of a story | means=a journey undertaken to obtain or achieve something
+oracle | is_a=element of a story | means=a source that gives ambiguous knowledge of the future | causes=a prophecy that is fulfilled in an unexpected way
+prophecy | is_a=element of a story | means=a statement of what is to come | causes=characters acting to avoid it and bringing it about
+pantheon | is_a=group | means=the whole set of figures a mythology recognises
+epic poem as a form | is_a=poem | means=a long narrative poem about heroic deeds | has_property=usually composed to be recited aloud
+
+# --- Greek and Roman ------------------------------------------------------------------------------- #
+Greek mythology | is_a=mythology | located_in=Ancient Greece | has_part=Olympian gods | involves=the Trojan War | causes=much of the vocabulary of European art and literature
+Olympian gods | is_a=pantheon | part_of=Greek mythology | located_in=Mount Olympus | has_kind=Zeus | has_kind=Hera | has_kind=Poseidon | has_kind=Athena | has_kind=Apollo
+Zeus | is_a=Greek god | involves=the sky and thunder | has_property=the chief of the Olympian gods
+Hera | is_a=Greek god | involves=marriage | has_property=the consort of Zeus in the stories
+Poseidon | is_a=Greek god | involves=the sea and earthquakes
+Athena | is_a=Greek god | involves=wisdom and skilled craft | located_in=Athens as its patron in the stories
+Apollo | is_a=Greek god | involves=light, music, poetry and prophecy
+Artemis | is_a=Greek god | involves=the hunt and the Moon
+Ares | is_a=Greek god | involves=war
+Aphrodite | is_a=Greek god | involves=love and beauty
+Hermes | is_a=Greek god | involves=messages, travellers and trade
+Hades | is_a=Greek god | involves=the underworld
+Demeter | is_a=Greek god | involves=grain and the harvest | involves=the story that explains the seasons
+Hephaestus | is_a=Greek god | involves=fire and metalworking
+Prometheus | is_a=figure in Greek mythology | involves=bringing fire to humanity | involves=being punished for it
+Pandora | is_a=figure in Greek mythology | involves=a jar whose opening released every trouble into the world
+Heracles | is_a=Greek hero | involves=twelve labours | also_known_as=Hercules
+Achilles | is_a=Greek hero | part_of=the Iliad | has_property=vulnerable only at the heel in the later stories
+Odysseus | is_a=Greek hero | part_of=the Odyssey | involves=a ten year journey home | has_property=known in the stories for cunning rather than strength
+Perseus | is_a=Greek hero | involves=the killing of Medusa
+Theseus | is_a=Greek hero | involves=the labyrinth and the Minotaur
+Icarus | is_a=figure in Greek mythology | involves=wings of wax | involves=flying too near the Sun
+Midas | is_a=figure in Greek mythology | involves=a touch that turned everything to gold
+Sisyphus | is_a=figure in Greek mythology | involves=rolling a boulder uphill for ever
+Narcissus | is_a=figure in Greek mythology | involves=falling in love with his own reflection
+Trojan War | is_a=legend | part_of=Greek mythology | involves=the siege of Troy | involves=the wooden horse
+Trojan horse | is_a=element of a story | part_of=Trojan War | means=a hollow horse concealing soldiers | causes=the word for a deception that is welcomed in
+Medusa | is_a=creature in Greek mythology | has_property=snakes for hair | has_property=a gaze that turned onlookers to stone
+Minotaur | is_a=creature in Greek mythology | has_property=the head of a bull on a human body | located_in=the labyrinth
+Pegasus | is_a=creature in Greek mythology | has_property=a winged horse
+Cyclops | is_a=creature in Greek mythology | has_property=a single eye
+Sphinx | is_a=creature in mythology | involves=a riddle | located_in=Greek and Egyptian traditions alike
+Roman mythology | is_a=mythology | located_in=Ancient Rome | has_property=largely the Greek stories under Roman names | involves=the founding of Rome
+Jupiter as a god | is_a=Roman god | involves=the sky and thunder | has_property=the Roman counterpart of Zeus
+Mars as a god | is_a=Roman god | involves=war
+Venus as a goddess | is_a=Roman god | involves=love and beauty
+Romulus and Remus | is_a=legend | part_of=Roman mythology | involves=twins raised by a wolf | involves=the founding of Rome
+
+# --- Norse and Egyptian --------------------------------------------------------------------------------- #
+Norse mythology | is_a=mythology | located_in=Scandinavia | has_part=Asgard | involves=Ragnarok | causes=the English names of four days of the week
+Asgard | is_a=place in a myth | part_of=Norse mythology | means=the home of the Norse gods
+Odin | is_a=Norse god | involves=wisdom, poetry and war | has_property=gave an eye for knowledge in the stories
+Thor | is_a=Norse god | involves=thunder | has_part=Mjolnir
+Mjolnir | is_a=object in a myth | part_of=Norse mythology | means=Thor's hammer
+Loki | is_a=Norse god | involves=trickery and shape changing
+Freya | is_a=Norse god | involves=love, beauty and war
+Valhalla | is_a=place in a myth | part_of=Norse mythology | means=the hall where those who fell in battle are received
+Yggdrasil | is_a=element of a story | part_of=Norse mythology | means=the world tree joining the realms
+Ragnarok | is_a=myth | part_of=Norse mythology | means=the foretold battle in which the world ends and is renewed
+Valkyrie | is_a=figure in Norse mythology | involves=choosing who falls in battle
+Egyptian mythology | is_a=mythology | located_in=Ancient Egypt | involves=the afterlife | involves=the Nile
+Ra | is_a=Egyptian god | involves=the Sun | has_property=chief among the gods in much of the tradition
+Osiris | is_a=Egyptian god | involves=the afterlife and rebirth
+Isis | is_a=Egyptian god | involves=magic and healing
+Anubis | is_a=Egyptian god | involves=embalming and the guidance of the dead | has_property=depicted with a jackal's head
+Horus | is_a=Egyptian god | involves=kingship and the sky | has_property=depicted with a falcon's head
+mummification | is_a=practice | located_in=Ancient Egypt | purpose=preserving a body for the afterlife | requires=removal of moisture
+Book of the Dead | is_a=text | located_in=Ancient Egypt | purpose=guiding the dead through the afterlife
+
+# --- Indian and East Asian ------------------------------------------------------------------------------------ #
+Hindu mythology | is_a=mythology | located_in=India | has_part=Puranas | involves=cycles of creation and dissolution | has_property=carried in epics as well as in scripture
+Puranas | is_a=text | part_of=Hindu mythology | means=collections of myth, genealogy and cosmology
+Brahma | is_a=figure in Hindu tradition | involves=creation in the trinity of the tradition
+Vishnu | is_a=figure in Hindu tradition | involves=preservation | involves=the avatars
+Shiva | is_a=figure in Hindu tradition | involves=destruction and renewal | involves=the dance of Nataraja
+Ganesha | is_a=figure in Hindu tradition | involves=the removal of obstacles | has_property=depicted with an elephant's head
+Hanuman | is_a=figure in the Ramayana | involves=devotion and great strength
+Rama | is_a=figure in the Ramayana | involves=exile | involves=the recovery of Sita
+Sita | is_a=figure in the Ramayana | involves=abduction by Ravana
+Ravana | is_a=figure in the Ramayana | located_in=Lanka in the story | involves=the abduction of Sita
+Krishna | is_a=figure in the Mahabharata | involves=the counsel given in the Bhagavad Gita
+Arjuna | is_a=figure in the Mahabharata | involves=archery | involves=the dialogue of the Bhagavad Gita
+Kurukshetra war | is_a=element of a story | part_of=Mahabharata | means=the war the epic is built around
+Pandavas | is_a=group in the Mahabharata | means=the five brothers the epic follows
+Kauravas | is_a=group in the Mahabharata | means=the cousins the Pandavas contend with
+Panchatantra | is_a=collection of stories | located_in=India | means=animal fables gathered to teach statecraft and prudence
+Jataka tales | is_a=collection of stories | located_in=India | means=stories of the Buddha's previous lives
+Chinese mythology | is_a=mythology | located_in=China | involves=dragons | involves=the ordering of heaven and earth
+Chinese dragon | is_a=creature in mythology | located_in=China | has_property=associated with water and good fortune rather than with menace
+Monkey King | is_a=figure in Chinese literature | involves=a journey to fetch scriptures | has_property=known for mischief and transformation
+Japanese mythology | is_a=mythology | located_in=Japan | involves=kami | involves=the origin of the islands
+Amaterasu | is_a=figure in Japanese mythology | involves=the Sun
+yokai | is_a=creature in mythology | located_in=Japan | means=a supernatural being of Japanese folklore
+
+# --- creatures and motifs that travel ------------------------------------------------------------------------------ #
+dragon | is_a=creature in mythology | has_property=a large serpent or reptile, often winged | has_property=a hoarder and a menace in Europe, a bringer of rain in East Asia
+phoenix | is_a=creature in mythology | has_property=burns and is reborn from its own ashes | causes=a byword for renewal after ruin
+unicorn | is_a=creature in mythology | has_property=a horse with a single horn | has_property=a symbol of purity in European tradition
+mermaid | is_a=creature in mythology | has_property=a woman above and a fish below | located_in=coastal folklore across the world
+giant | is_a=creature in mythology | has_property=of vastly greater than human size
+ghost | is_a=figure in folklore | means=the appearance of a person who has died
+vampire | is_a=creature in folklore | located_in=Eastern Europe | has_property=said to feed on the living
+werewolf | is_a=creature in folklore | has_property=a person who becomes a wolf
+troll | is_a=creature in folklore | located_in=Scandinavia
+griffin | is_a=creature in mythology | has_property=the body of a lion and the head and wings of an eagle
+centaur | is_a=creature in Greek mythology | has_property=human above and horse below
+Anansi | is_a=figure in folklore | located_in=West Africa | involves=a spider who wins by wit
+trickster | is_a=role in a story | means=a figure who upsets the order by cleverness rather than force | has_kind=Loki | has_kind=Anansi | has_property=found in nearly every tradition
+Aesop | is_a=storyteller | located_in=Ancient Greece | involves=fables with animals and morals
+Arabian Nights | is_a=collection of stories | means=a frame story enclosing many tales | involves=Scheherazade | involves=Aladdin | involves=Sinbad
+Scheherazade | is_a=figure in a story | part_of=Arabian Nights | involves=telling a story each night to stay alive
+King Arthur | is_a=legend | located_in=Britain | involves=the Round Table | involves=Excalibur
+Excalibur | is_a=object in a myth | part_of=King Arthur | means=the sword of the legend
+Robin Hood | is_a=legend | located_in=England | involves=taking from the rich to give to the poor
+Atlantis | is_a=legend | means=an island civilisation said to have sunk beneath the sea | has_property=first appears in Plato as an illustration
+Gilgamesh | is_a=epic poem | located_in=Mesopotamia | has_property=among the oldest surviving works of literature | involves=a search for immortality

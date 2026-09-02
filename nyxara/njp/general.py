@@ -68,7 +68,7 @@ confident answer. Measured: ``recall`` reported **4,572 of 4,572 right with no a
 all**, on a corpus where the shipped QA file abstains on 19% of its questions. It is its own
 verdict — ``declined`` — and it is neither right nor silent.
 
-What it measures, on the corpus as shipped (11,402 facts over 3,144 subjects, 38 domains), 400
+What it measures, on the corpus as shipped (12,106 facts over 3,400 subjects, 40 domains), 400
 items a paper, in about 145 seconds::
 
     paper          asked  right  wrong  declined  silent   score
@@ -93,7 +93,7 @@ re-measured by putting the table back the way it was. "Is the sun a star" return
 relations the scan ever tried were ``has_property`` and ``capable_of``. One name added to one
 table moved both papers to 0.99. The two items still wrong are one subject — *One Hundred Years
 of Solitude* — and one cause: :meth:`Grounder._read_polar_surface` searches at most four words for
-where the subject ends, and a handful of the corpus's 3,144 subjects are longer than that. It is a real
+where the subject ends, and a handful of the corpus's 3,400 subjects are longer than that. It is a real
 ceiling, it is a fraction of a percent of the corpus, and it is named here rather than tuned away.
 
 ``inheritance`` is 400/400 and **every one of them came through the ladder, none through English**.

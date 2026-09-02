@@ -10,6 +10,15 @@
 # animal carries `is_a` to a class that `biology.kb` already defines, so a property stated once of
 # `mammal` reaches two hundred subjects; and each carries its own `has_property`, `capable_of`,
 # `requires` and `located_in` so that inheritance can be *checked* against something stated.
+#
+# **A feeding or activity role is written at @0.8, below the taxonomic class.** A tiger is a mammal
+# and a tiger is a carnivore, and stating both at the same confidence made "what is a tiger" come
+# back CONFLICTING — `Grounder.answer` saw two equally supported readings and correctly refused to
+# pick one, which is the right rule producing a useless answer. The fix is not to weaken the rule
+# but to write down what is actually true of the two claims: `mammal` is what a tiger *is*, and
+# `carnivore` is a role it fills, which a bear fills part-time and a panda barely fills at all.
+# Both remain inheritable — the role still carries `requires=meat` down to its members — and the
+# ordinary question now has an ordinary answer.
 
 # --- the groups ------------------------------------------------------------------------------- #
 invertebrate | is_a=animal | means=an animal with no backbone | has_kind=insect | has_kind=arachnid | has_kind=mollusc | has_kind=crustacean | has_kind=worm | has_property=most animal species are these
@@ -60,60 +69,60 @@ elephant trunk | is_a=body part | purpose=breathing, smelling, grasping and drin
 hump | is_a=body part | consists_of=fat | purpose=storing energy | located_in=camels
 
 # --- mammals ------------------------------------------------------------------------------------ #
-lion | is_a=mammal | is_a=carnivore | located_in=Africa | has_property=lives in a group called a pride | capable_of=roaring | requires=meat
-tiger | is_a=mammal | is_a=carnivore | located_in=Asia | has_property=striped | has_property=the largest cat | capable_of=swimming
-leopard | is_a=mammal | is_a=carnivore | has_property=spotted | capable_of=climbing trees with its kill
-cheetah | is_a=mammal | is_a=carnivore | has_property=the fastest land animal | capable_of=short bursts of great speed
-elephant | is_a=mammal | is_a=herbivore | has_part=elephant trunk | has_part=tusk | has_property=the largest land animal | capable_of=remembering routes over many years
-rhinoceros | is_a=mammal | is_a=herbivore | has_part=horn | has_property=thick skin | has_property=endangered
-hippopotamus | is_a=mammal | is_a=herbivore | located_in=African rivers | has_property=spends the day in water
-giraffe | is_a=mammal | is_a=herbivore | has_property=the tallest land animal | has_property=a very long neck | capable_of=reaching leaves other browsers cannot
-zebra | is_a=mammal | is_a=herbivore | has_property=striped | located_in=Africa
-camel | is_a=mammal | is_a=herbivore | has_part=hump | located_in=deserts | capable_of=going many days without drinking
-horse | is_a=mammal | is_a=herbivore | purpose=riding and pulling loads | has_part=hoof | capable_of=galloping
-donkey | is_a=mammal | is_a=herbivore | purpose=carrying loads | has_property=sure footed
-cow | is_a=mammal | is_a=herbivore | purpose=milk and draught power | capable_of=chewing the cud | has_property=four stomach chambers
-buffalo | is_a=mammal | is_a=herbivore | purpose=milk and ploughing | located_in=South Asia
-goat | is_a=mammal | is_a=herbivore | purpose=milk and meat | capable_of=climbing steep ground
-sheep | is_a=mammal | is_a=herbivore | purpose=wool and meat | has_property=lives in a flock
-pig | is_a=mammal | is_a=omnivore | purpose=meat | has_property=a keen sense of smell
-deer | is_a=mammal | is_a=herbivore | has_part=antler | capable_of=running from predators
-monkey | is_a=mammal | is_a=omnivore | capable_of=climbing | has_property=grasping hands | has_property=a tail
+lion | is_a=mammal | is_a=carnivore@0.8 | located_in=Africa | has_property=lives in a group called a pride | capable_of=roaring | requires=meat
+tiger | is_a=mammal | is_a=carnivore@0.8 | located_in=Asia | has_property=striped | has_property=the largest cat | capable_of=swimming
+leopard | is_a=mammal | is_a=carnivore@0.8 | has_property=spotted | capable_of=climbing trees with its kill
+cheetah | is_a=mammal | is_a=carnivore@0.8 | has_property=the fastest land animal | capable_of=short bursts of great speed
+elephant | is_a=mammal | is_a=herbivore@0.8 | has_part=elephant trunk | has_part=tusk | has_property=the largest land animal | capable_of=remembering routes over many years
+rhinoceros | is_a=mammal | is_a=herbivore@0.8 | has_part=horn | has_property=thick skin | has_property=endangered
+hippopotamus | is_a=mammal | is_a=herbivore@0.8 | located_in=African rivers | has_property=spends the day in water
+giraffe | is_a=mammal | is_a=herbivore@0.8 | has_property=the tallest land animal | has_property=a very long neck | capable_of=reaching leaves other browsers cannot
+zebra | is_a=mammal | is_a=herbivore@0.8 | has_property=striped | located_in=Africa
+camel | is_a=mammal | is_a=herbivore@0.8 | has_part=hump | located_in=deserts | capable_of=going many days without drinking
+horse | is_a=mammal | is_a=herbivore@0.8 | purpose=riding and pulling loads | has_part=hoof | capable_of=galloping
+donkey | is_a=mammal | is_a=herbivore@0.8 | purpose=carrying loads | has_property=sure footed
+cow | is_a=mammal | is_a=herbivore@0.8 | purpose=milk and draught power | capable_of=chewing the cud | has_property=four stomach chambers
+buffalo | is_a=mammal | is_a=herbivore@0.8 | purpose=milk and ploughing | located_in=South Asia
+goat | is_a=mammal | is_a=herbivore@0.8 | purpose=milk and meat | capable_of=climbing steep ground
+sheep | is_a=mammal | is_a=herbivore@0.8 | purpose=wool and meat | has_property=lives in a flock
+pig | is_a=mammal | is_a=omnivore@0.8 | purpose=meat | has_property=a keen sense of smell
+deer | is_a=mammal | is_a=herbivore@0.8 | has_part=antler | capable_of=running from predators
+monkey | is_a=mammal | is_a=omnivore@0.8 | capable_of=climbing | has_property=grasping hands | has_property=a tail
 ape | is_a=mammal | has_property=no tail | has_kind=gorilla | has_kind=chimpanzee | has_kind=orangutan
-gorilla | is_a=ape | is_a=herbivore | located_in=Africa | has_property=the largest primate
-chimpanzee | is_a=ape | is_a=omnivore | capable_of=using tools | has_property=among the closest relatives of human beings
-dog | is_a=mammal | is_a=carnivore | purpose=companionship, guarding and herding | has_property=a very keen sense of smell | capable_of=being trained
-cat | is_a=mammal | is_a=carnivore | purpose=companionship | capable_of=seeing in dim light | has_property=retractable claws
-rat | is_a=mammal | is_a=rodent | is_a=omnivore | capable_of=gnawing through wood
-mouse | is_a=mammal | is_a=rodent | has_property=small | is_a=omnivore
+gorilla | is_a=ape | is_a=herbivore@0.8 | located_in=Africa | has_property=the largest primate
+chimpanzee | is_a=ape | is_a=omnivore@0.8 | capable_of=using tools | has_property=among the closest relatives of human beings
+dog | is_a=mammal | is_a=carnivore@0.8 | purpose=companionship, guarding and herding | has_property=a very keen sense of smell | capable_of=being trained
+cat | is_a=mammal | is_a=carnivore@0.8 | purpose=companionship | capable_of=seeing in dim light | has_property=retractable claws
+rat | is_a=mammal | is_a=rodent | is_a=omnivore@0.8 | capable_of=gnawing through wood
+mouse | is_a=mammal | is_a=rodent | has_property=small | is_a=omnivore@0.8
 rodent | is_a=mammal | has_property=front teeth that never stop growing | has_kind=rat | has_kind=mouse | has_kind=squirrel | has_kind=beaver
 squirrel | is_a=rodent | capable_of=climbing | has_property=a bushy tail | capable_of=storing nuts
-rabbit | is_a=mammal | is_a=herbivore | has_property=long ears | capable_of=digging a burrow
-bat | is_a=mammal | capable_of=flying | capable_of=echolocation | has_property=the only mammal that truly flies | is_a=nocturnal animal
+rabbit | is_a=mammal | is_a=herbivore@0.8 | has_property=long ears | capable_of=digging a burrow
+bat | is_a=mammal | capable_of=flying | capable_of=echolocation | has_property=the only mammal that truly flies | is_a=nocturnal animal@0.8
 whale | is_a=mammal | located_in=the ocean | capable_of=holding its breath for long periods | has_property=breathes air through a blowhole | has_kind=blue whale
-blue whale | is_a=whale | has_property=the largest animal that has ever lived | is_a=carnivore
+blue whale | is_a=whale | has_property=the largest animal that has ever lived | is_a=carnivore@0.8
 dolphin | is_a=mammal | located_in=the ocean | capable_of=echolocation | has_property=highly social | has_property=among the most intelligent animals
-seal | is_a=mammal | located_in=cold seas | capable_of=swimming | is_a=carnivore
-bear | is_a=mammal | is_a=omnivore | capable_of=hibernation | has_kind=polar bear | has_kind=brown bear
-polar bear | is_a=bear | located_in=the Arctic | has_property=white fur | is_a=carnivore
-wolf | is_a=mammal | is_a=carnivore | has_property=hunts in a pack | capable_of=howling
-fox | is_a=mammal | is_a=omnivore | has_property=a bushy tail | has_property=mostly active at night
+seal | is_a=mammal | located_in=cold seas | capable_of=swimming | is_a=carnivore@0.8
+bear | is_a=mammal | is_a=omnivore@0.8 | capable_of=hibernation | has_kind=polar bear | has_kind=brown bear
+polar bear | is_a=bear | located_in=the Arctic | has_property=white fur | is_a=carnivore@0.8
+wolf | is_a=mammal | is_a=carnivore@0.8 | has_property=hunts in a pack | capable_of=howling
+fox | is_a=mammal | is_a=omnivore@0.8 | has_property=a bushy tail | has_property=mostly active at night
 kangaroo | is_a=mammal | is_a=marsupial | located_in=Australia | capable_of=hopping | has_part=pouch
 marsupial | is_a=mammal | has_part=pouch | means=a mammal whose young finish developing in a pouch | has_kind=kangaroo | has_kind=koala
 koala | is_a=marsupial | located_in=Australia | requires=eucalyptus leaves
 platypus | is_a=mammal | located_in=Australia | has_property=lays eggs | has_property=a bill like a duck's
-human being | is_a=mammal | is_a=omnivore | capable_of=language | capable_of=making tools | has_property=walks upright | also_known_as=Homo sapiens
+human being | is_a=mammal | is_a=omnivore@0.8 | capable_of=language | capable_of=making tools | has_property=walks upright | also_known_as=Homo sapiens
 
 # --- birds ----------------------------------------------------------------------------------------- #
 sparrow | is_a=bird | has_property=small and brown | located_in=towns and villages | requires=seeds and insects
-crow | is_a=bird | is_a=omnivore | has_property=black | capable_of=solving simple puzzles | has_property=among the most intelligent birds
+crow | is_a=bird | is_a=omnivore@0.8 | has_property=black | capable_of=solving simple puzzles | has_property=among the most intelligent birds
 pigeon | is_a=bird | capable_of=finding its way home over long distances | purpose=carrying messages before the telegraph
 parrot | is_a=bird | capable_of=imitating human speech | has_property=brightly coloured | has_property=a curved beak
 peacock | is_a=bird | has_property=a large fan of tail feathers in the male | purpose=courtship display | located_in=India
 eagle | is_a=bird | is_a=bird of prey | capable_of=seeing prey from a great height | has_property=powerful talons
-bird of prey | is_a=bird | is_a=carnivore | has_kind=eagle | has_kind=hawk | has_kind=falcon | has_kind=owl | has_property=hooked beak and sharp talons
-owl | is_a=bird of prey | is_a=nocturnal animal | capable_of=flying almost silently | capable_of=turning its head very far
-vulture | is_a=bird | is_a=scavenger | purpose=clearing carcasses | has_property=a bare head
+bird of prey | is_a=bird | is_a=carnivore@0.8 | has_kind=eagle | has_kind=hawk | has_kind=falcon | has_kind=owl | has_property=hooked beak and sharp talons
+owl | is_a=bird of prey | is_a=nocturnal animal@0.8 | capable_of=flying almost silently | capable_of=turning its head very far
+vulture | is_a=bird | is_a=scavenger@0.8 | purpose=clearing carcasses | has_property=a bare head
 penguin | is_a=bird | located_in=the southern hemisphere | has_property=cannot fly | capable_of=swimming very well
 ostrich | is_a=bird | has_property=the largest bird | has_property=cannot fly | capable_of=running very fast
 hen | is_a=bird | is_a=poultry | purpose=eggs and meat | also_known_as=chicken
@@ -127,39 +136,39 @@ flamingo | is_a=bird | has_property=pink | has_property=stands on one leg | requ
 cuckoo | is_a=bird | has_property=lays its eggs in another bird's nest
 
 # --- reptiles, amphibians and fish --------------------------------------------------------------------- #
-snake | is_a=reptile | is_a=carnivore | has_property=no legs | capable_of=swallowing prey whole | capable_of=shedding its skin
+snake | is_a=reptile | is_a=carnivore@0.8 | has_property=no legs | capable_of=swallowing prey whole | capable_of=shedding its skin
 cobra | is_a=snake | has_property=venomous | has_property=spreads a hood when threatened | located_in=Asia and Africa
 python snake | is_a=snake | has_property=not venomous | capable_of=killing prey by constriction
 lizard | is_a=reptile | capable_of=shedding its tail to escape | has_property=four legs and a long tail
 chameleon | is_a=lizard | capable_of=changing colour | capable_of=moving each eye independently
-crocodile | is_a=reptile | is_a=carnivore | located_in=rivers and swamps | has_property=powerful jaws
+crocodile | is_a=reptile | is_a=carnivore@0.8 | located_in=rivers and swamps | has_property=powerful jaws
 turtle | is_a=reptile | has_part=shell | located_in=the sea | has_property=long lived
-tortoise | is_a=reptile | has_part=shell | located_in=land | is_a=herbivore | has_property=very long lived
+tortoise | is_a=reptile | has_part=shell | located_in=land | is_a=herbivore@0.8 | has_property=very long lived
 frog | is_a=amphibian | capable_of=jumping | capable_of=breathing through its skin | occurs_when=a tadpole completes metamorphosis
 toad | is_a=amphibian | has_property=dry warty skin | located_in=drier ground than a frog
 salamander | is_a=amphibian | has_property=a tail as an adult | capable_of=regrowing a lost limb
-shark | is_a=fish | is_a=carnivore | has_property=a skeleton of cartilage | has_property=many rows of teeth
+shark | is_a=fish | is_a=carnivore@0.8 | has_property=a skeleton of cartilage | has_property=many rows of teeth
 salmon | is_a=fish | capable_of=swimming upriver to breed | purpose=food
-goldfish | is_a=fish | is_a=pet | located_in=ponds and tanks
+goldfish | is_a=fish | is_a=pet@0.8 | located_in=ponds and tanks
 eel | is_a=fish | has_property=a long snake like body
 seahorse | is_a=fish | has_property=the male carries the eggs | has_property=swims upright
 
 # --- insects and other invertebrates ------------------------------------------------------------------- #
 ant | is_a=insect | has_property=lives in a colony | capable_of=carrying many times its own weight | involves=division of labour
 bee | is_a=insect | purpose=pollination | capable_of=making honey | has_property=lives in a hive | capable_of=communicating direction by dancing
-wasp | is_a=insect | capable_of=stinging more than once | is_a=carnivore
+wasp | is_a=insect | capable_of=stinging more than once | is_a=carnivore@0.8
 butterfly | is_a=insect | involves=metamorphosis | requires=nectar | has_property=brightly coloured wings
-moth | is_a=insect | is_a=nocturnal animal | has_property=drawn to light
+moth | is_a=insect | is_a=nocturnal animal@0.8 | has_property=drawn to light
 mosquito | is_a=insect | capable_of=carrying malaria and dengue | requires=standing water to breed | causes=itchy bites
 housefly | is_a=insect | capable_of=carrying disease onto food | located_in=human settlements
-grasshopper | is_a=insect | capable_of=jumping a long way | is_a=herbivore
+grasshopper | is_a=insect | capable_of=jumping a long way | is_a=herbivore@0.8
 locust | is_a=insect | capable_of=swarming | causes=destruction of crops
 cockroach | is_a=insect | has_property=very hardy | located_in=warm dark places
 beetle | is_a=insect | has_property=hard wing cases | has_property=the largest order of insects
-dragonfly | is_a=insect | capable_of=flying in any direction | is_a=carnivore
+dragonfly | is_a=insect | capable_of=flying in any direction | is_a=carnivore@0.8
 termite | is_a=insect | capable_of=digesting wood | has_property=lives in a colony | causes=damage to timber
-spider | is_a=arachnid | capable_of=spinning a web | is_a=carnivore | has_property=eight legs
-scorpion | is_a=arachnid | has_property=a stinging tail | is_a=nocturnal animal
+spider | is_a=arachnid | capable_of=spinning a web | is_a=carnivore@0.8 | has_property=eight legs
+scorpion | is_a=arachnid | has_property=a stinging tail | is_a=nocturnal animal@0.8
 snail | is_a=mollusc | has_part=shell | has_property=moves very slowly
 octopus | is_a=mollusc | has_property=eight arms | capable_of=changing colour | has_property=among the most intelligent invertebrates
 crab | is_a=crustacean | capable_of=walking sideways | has_part=claw

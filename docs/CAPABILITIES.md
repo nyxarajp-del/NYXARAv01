@@ -1807,32 +1807,47 @@ General knowledge cannot be examined that way. There is no minting a fresh fact 
 what she knows of it is exactly what she was told. So the held-out surface has to be built the
 other way round: **from facts she was told, compose questions whose answers she was never told.**
 
-**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 38 — from **3,745 facts
-over 966 subjects to 11,402 over 3,144**, a little over three times the corpus.
+**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 40 — from **3,745 facts
+over 966 subjects to 12,106 over 3,400**, a little over three times the corpus.
 
-The first pass added the six subjects that were simply absent: `arts`, `sport`, `philosophy`
-(with the world religions described rather than asserted), `body` (the anatomy `medicine` assumed
-and never stated), `food` and `measurement`.
+The first pass added six subjects that were simply absent: `arts`, `sport`, `philosophy` (with the
+world religions described rather than asserted), `body` (the anatomy `medicine` assumed and never
+stated), `food` and `measurement`.
 
 The second went after a different kind of gap — places where the corpus named a *category* and
 never a member of it. `biology.kb` defined `mammal`, `bird`, `reptile`, `insect` and `vertebrate`
-and did not name one animal, so a taxonomy with kinds and no members was a hierarchy one level
-deep and the inheritance machinery in `njp/core.py` had almost nothing to walk through. Seventeen
-more domains: `animals`, `plants`, `materials`, `mind` (psychology — the terms this package uses
-about itself, with `attention` and `episodic memory` as modules and no fact about either),
-`environment`, `transport`, `world` (fifty more countries, and the organisations between them),
-`india`, `law`, `finance`, `inventions`, `people`, `space`, `media`, `work`, `home` and `health`.
+and did not name one animal, so a taxonomy with kinds and no members was a hierarchy one level deep
+and the inheritance machinery in `njp/core.py` had almost nothing to walk *through*. Nineteen more
+domains: `animals`, `plants`, `materials`, `mind` (psychology — the terms this package uses about
+itself, with `attention` and `episodic memory` as module names and no fact about either),
+`environment`, `transport`, `world` (fifty more countries and the organisations between them),
+`india` (the brain is expected to work in Hindi and Hinglish and held nothing about the Ganga),
+`law`, `finance`, `inventions`, `people`, `space`, `media`, `work`, `home`, `health`, `mythology`,
+and `basics` — colour, shape, direction, quantity and the senses, the layer that had been invisible
+because it appears in the *questions* rather than in the answers.
 
-**Nine name collisions were resolved by hand**, and they are the interesting part of a merge at
-this scale, because the store keys on the name: `bat` the animal against the cricket bat, `python`
-the snake against the language, `memory` the faculty against RAM, `attention` the psychological
-process against the transformer mechanism, `bus` the vehicle against the data bus, `tree` the
-plant against the data structure, `trade` the exchange against the skilled trade, `charge` the
-electric quantity against the criminal one, and `act` the deed against the Act of Parliament. That
-last one was caught by the exam rather than by inspection: `arrest is_a act`, `act is_a statute`,
-and "what is arrest used for" inherited the purpose of legislation. Everything else that collides
-— `cricket`, `ethics`, `calendar`, `steel`, `road` — is the same concept in two files, and those
-merge correctly and enrich each other.
+**Twelve name collisions were resolved by hand**, which is the interesting part of a merge at this
+scale, because the store keys on the name and would otherwise hold one subject that is two things:
+`bat` the animal against the cricket bat; `python` the snake against the language; `memory` the
+faculty against RAM; `attention` the psychological process against the transformer mechanism; `bus`
+the vehicle against the data bus; `tree` the plant against the data structure; `trade` against the
+skilled trade; `charge` the electric quantity against the criminal one; `library`, `transformer` and
+`mercury`, all three of which predate this change set; and `act` the deed against the Act of
+Parliament.
+
+That last was caught by the exam rather than by reading: `arrest is_a act`, `act is_a statute`, and
+"what is arrest used for" inherited the purpose of legislation. Everything else that collides —
+`cricket`, `ethics`, `calendar`, `steel`, `road`, and 57 more — is one concept classified at two
+granularities (`bone` as tissue and as organ, `teacher` as person and as profession), and those
+merge correctly and give the inheritance walk two routes instead of one.
+
+**A feeding role is now written below the taxonomic class.** `tiger is_a mammal` and `tiger is_a
+carnivore` at equal confidence made "what is a tiger" come back CONFLICTING — `Grounder.answer`
+saw two equally supported readings and correctly refused to pick one, which is the right rule
+producing a useless answer. Roles are written at `@0.8` instead, because that is what is actually
+true of the two claims: `mammal` is what a tiger *is*, `carnivore` is a role it fills, which a bear
+fills part-time. Both stay inheritable. Measured, `recall` moved from 0.835 to 0.887 and 21 of its
+abstentions became answers.
 
 **How she is examined.** `nyxara.njp.general` is seven papers, each defined by what it holds out:
 
@@ -1877,7 +1892,7 @@ of it could ever have been answered. One relation name added to one table moved 
 searched the subject's neighbours.
 
 The items still wrong are one subject and one cause: `_read_polar_surface` searches at most four
-words for where the subject ends, and a handful of the corpus's 3,144 subjects are longer —
+words for where the subject ends, and a handful of the corpus's 3,145 subjects are longer —
 *One Hundred Years of Solitude* is the one that keeps being sampled. A real ceiling over a
 fraction of a percent of the corpus, named here rather than tuned away.
 

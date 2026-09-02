@@ -5,7 +5,7 @@
 # --- the solar system ------------------------------------------------------------------------ #
 solar system | is_a=planetary system | has_part=the sun | has_part=planet | has_part=moon | has_part=asteroid | has_part=comet | located_in=the Milky Way
 Sun | is_a=star | is_a=yellow dwarf | consists_of=hydrogen | consists_of=helium | causes=daylight | causes=the seasons | purpose=supplying energy to the Earth | has_property=about one hundred and nine times the diameter of Earth
-Mercury | is_a=planet | has_property=the closest planet to the sun | has_property=the smallest planet | has_property=no atmosphere to speak of
+planet Mercury | is_a=planet | has_property=the closest planet to the sun | has_property=the smallest planet | has_property=no atmosphere to speak of
 Venus | is_a=planet | has_property=the hottest planet | has_property=a thick carbon dioxide atmosphere | also_known_as=the morning star
 Earth | is_a=planet | has_property=the only planet known to support life | has_part=atmosphere | has_part=ocean | requires=the sun for energy
 Mars | is_a=planet | has_property=red | also_known_as=the red planet | has_property=two small moons | has_part=Olympus Mons
