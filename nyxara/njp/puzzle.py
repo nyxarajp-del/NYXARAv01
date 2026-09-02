@@ -124,6 +124,29 @@ _CONSTRAINT = re.compile(
 _ANALOGY = re.compile(
     r"^(?P<a>.+?)\s+is\s+to\s+(?P<b>.+?)\s+as\s+(?P<c>.+?)\s+is\s+to\s+(?:what|which)\s*\??$")
 
+#: "what is X part of" / "what is X a part of" — `part_of` is stored and, as the corpus builder
+#: records, has no question form that parses through the ordinary grammar. It has one here.
+_PART_OF = re.compile(
+    r"^what\s+(?:is|are)\s+(?P<s>.+?)\s+(?:a\s+)?part\s+of\s*\??$")
+
+#: "what would you use to measure temperature" — `purpose` read backwards. The store says a
+#: thermometer's purpose is measuring temperature; nothing says what measures temperature, and the
+#: question is asked far more often in that direction.
+_FOR_PURPOSE = re.compile(
+    r"^what\s+(?:would\s+you\s+use|do\s+you\s+use|is\s+used)\s+(?:to|for)\s+"
+    r"(?P<purpose>.+?)\s*\??$")
+
+#: "what is the capital of the country whose currency is the yen" — a bridge whose *start* is
+#: unknown and has to be found from a property first. The nested form walks outward from a named
+#: subject; this walks inward to one.
+_WHOSE = re.compile(
+    r"^what(?:'s| is|\s+are)\s+(?:the\s+)?(?P<outer>[\w ]+?)\s+of\s+(?:the\s+)?"
+    r"(?P<kind>[\w ]+?)\s+whose\s+(?P<relation>[\w ]+?)\s+is\s+(?P<value>.+?)\s*\??$")
+
+#: "why does rain fall" / "why does X happen" — the causes of a thing, which `grounding` reads
+#: only for the exact form "why does X happen". Here the subject may be any stored effect.
+_WHY = re.compile(r"^why\s+(?:does|do|is|are)\s+(?P<s>.+?)(?:\s+(?:happen|occur|fall|form))?\s*\??$")
+
 _CHAIN = re.compile(
     r"^what\s+does\s+(?P<s>.+?)\s+(?:eventually|ultimately|in\s+the\s+end)\s+"
     r"(?:cause|lead\s+to|result\s+in)\s*\??$")
@@ -244,16 +267,70 @@ class PuzzleSolver:
         return folded if any(p == folded for _s, p in self.by_sp) else ""
 
     @staticmethod
-    def _contains(haystack: str, needle: str) -> bool:
-        """Is ``needle`` a **contiguous run of whole words** inside ``haystack``?
+    def _stem(word: str) -> str:
+        """Enough of a stem to see that "flying" and "fly" are the same claim.
 
-        Substring containment is wrong here and wrong in a way that reads as a right answer.
-        Measured: "which ocean is the largest ocean" answered *Atlantic Ocean*, because the stored
-        property "the second largest ocean" contains the string "largest ocean" — a qualifier the
-        question did not ask for, swallowed silently. As tokens, ``the largest ocean`` is not a
-        contiguous run inside ``the second largest ocean``, and the wrong answer disappears.
+        Not a stemmer, and not trying to be one. The store writes a capability as "flying" and a
+        question asks "can fly"; without this the two never meet, and with anything cleverer the
+        matching starts inventing relationships nobody stated.
         """
-        big, small = haystack.split(), needle.split()
+        for suffix in ("ing", "ies", "es", "ed", "s"):
+            if len(word) > len(suffix) + 2 and word.endswith(suffix):
+                trimmed = word[: -len(suffix)]
+                if suffix == "ies":
+                    return trimmed[:-1]
+                # English doubles the final consonant before -ing and -ed: "swimming" trims to
+                # "swimm", which matches nothing. Measured — "which bird can swim" was answered
+                # correctly, then refused, the moment stemming was introduced without this line.
+                if (suffix in ("ing", "ed") and len(trimmed) > 2
+                        and trimmed[-1] == trimmed[-2] and trimmed[-1] not in "aeiou"):
+                    return trimmed[:-1]
+                return trimmed
+        # A trailing silent "e" is the other half of the same problem: the store writes "measuring
+        # temperature" and the question asks "measure temperature", and "measur" against "measure"
+        # is one character from matching. Only on words long enough that dropping it cannot make
+        # two unrelated short words collide.
+        if len(word) > 3 and word.endswith("e"):
+            return word[:-1]
+        return word
+
+    @classmethod
+    def _in_order(cls, haystack: str, needle: str) -> bool:
+        """Are ``needle``'s words all in ``haystack``, in order, not necessarily adjacent?
+
+        Weaker than :meth:`_contains` and used in exactly one place — see :meth:`for_purpose` —
+        because on identifying values this looseness is what let "the largest ocean" match "the
+        second largest ocean". On descriptive purpose phrases it is what lets "measure pressure"
+        reach "measuring atmospheric pressure".
+        """
+        big = [cls._stem(w) for w in haystack.split()]
+        small = [cls._stem(w) for w in needle.split()]
+        if not small:
+            return False
+        index = 0
+        for word in big:
+            if index < len(small) and word == small[index]:
+                index += 1
+        return index == len(small)
+
+    @classmethod
+    def _contains(cls, haystack: str, needle: str) -> bool:
+        """Is ``needle`` a **contiguous run of whole words** inside ``haystack``, stems compared?
+
+        Two failures shaped this, in opposite directions.
+
+        Substring containment let a qualifier through: "which ocean is the largest ocean" answered
+        *Atlantic*, because the stored property "the second largest ocean" contains the string
+        "largest ocean". As whole words it does not.
+
+        And matching the other way round — asking whether a *stored* phrase appears inside the
+        *question* — let a short object match a long question about something else entirely:
+        "which bird can fly and lives in India" found the stored value ``india`` sitting inside the
+        question and answered from it. That direction is gone; a stored property may be longer than
+        what the question named, never shorter.
+        """
+        big = [cls._stem(w) for w in haystack.split()]
+        small = [cls._stem(w) for w in needle.split()]
         if not small or len(small) > len(big):
             return False
         return any(big[i:i + len(small)] == small for i in range(len(big) - len(small) + 1))
@@ -462,7 +539,9 @@ class PuzzleSolver:
         if not hits:
             loose: Set[str] = set(exact)
             for obj, subjects in self.inverted.get(predicate, {}).items():
-                if self._contains(obj, want_value) or self._contains(want_value, obj):
+                # One direction only: the stored property may say more than the question asked
+                # ("liquid" against "liquid at room temperature"), never less. See :meth:`_contains`.
+                if self._contains(obj, want_value):
                     loose.update(subjects)
             hits = [s for s in sorted(loose) if want_kind in set(self._ancestors(s)) | {s}]
         if not hits:
@@ -545,9 +624,10 @@ class PuzzleSolver:
         low = " ".join(str(question or "").strip().lower().split())
         if not low:
             return Solution()
-        for reader in (self._read_nested, self._read_where_in, self._read_common,
-                       self._read_odd, self._read_constraint, self._read_analogy,
-                       self._read_chain):
+        for reader in (self._read_nested, self._read_whose, self._read_where_in,
+                       self._read_common, self._read_odd, self._read_constraint,
+                       self._read_analogy, self._read_chain, self._read_part_of,
+                       self._read_for_purpose, self._read_why):
             try:
                 got = reader(low)
             except Exception:  # noqa: BLE001
@@ -672,6 +752,132 @@ class PuzzleSolver:
     def _read_chain(self, low: str) -> Optional[Solution]:
         match = _CHAIN.match(low)
         return None if match is None else self.chain(match.group("s"))
+
+    def part_of(self, subject: str) -> Solution:
+        """What a thing belongs to — stated, or reached through what it is stated to be part of.
+
+        ``part_of`` carries the highest transitivity prior in :mod:`nyxara.njp.core` and, as
+        ``prepare_knowledge_corpus`` records, no question form that parses: "what is a wheel part
+        of" reads as ``('wheel part of', 'is_a')`` through the ordinary grammar. So the relation
+        was written into the graph deliberately and could never be asked for. It can be now.
+        """
+        out = Solution(form="part_of")
+        node = self._term(subject)
+        if not node:
+            return out
+        for predicate in ("part_of", "located_in"):
+            held = self.by_sp.get((node, predicate), [])
+            if held:
+                out.answer = held[0]
+                out.answers = tuple(dict.fromkeys(held))
+                out.steps = (f"{node} —{predicate}→ {out.answer}",)
+                out.confidence = 0.8
+                out.why = f"stated {predicate}"
+                return out
+        # Not stated of the thing itself: inherited from what it is. A prokaryotic cell is a cell,
+        # and a cell is part of an organism.
+        for kind in self._ancestors(node):
+            for predicate in ("part_of", "located_in"):
+                held = self.by_sp.get((kind, predicate), [])
+                if held:
+                    out.answer = held[0]
+                    out.answers = tuple(dict.fromkeys(held))
+                    out.steps = (f"{node} is_a* {kind}", f"{kind} —{predicate}→ {held[0]}")
+                    out.confidence = 0.55
+                    out.why = f"inherited {predicate} from {kind}"
+                    return out
+        return out
+
+    def for_purpose(self, purpose: str) -> Solution:
+        """What is used *for* something — ``purpose`` read backwards.
+
+        The store says a thermometer's purpose is measuring temperature. Nothing says what measures
+        temperature, and that is the direction the question is nearly always asked in. Exactly the
+        read/write asymmetry ``_CAUSE_OF`` exists to close for causation, one relation over.
+        """
+        out = Solution(form="for_purpose")
+        want = self._term(purpose)
+        if not want:
+            return out
+        hits: List[Tuple[str, str]] = []
+        for obj, subjects in self.inverted.get("purpose", {}).items():
+            if self._contains(obj, want):
+                hits.extend((s, obj) for s in subjects)
+        if not hits:
+            # A stated purpose is a descriptive phrase and a question names only part of it: the
+            # store says "measuring atmospheric pressure" and the question asks "measure pressure",
+            # which is not a contiguous run. So the words are required in order but not adjacent —
+            # loosened *only here*, where the phrases are descriptions rather than the identifying
+            # values a `constraint` search compares, and where the alternative is refusing a
+            # question whose answer she plainly holds.
+            for obj, subjects in self.inverted.get("purpose", {}).items():
+                if self._in_order(obj, want):
+                    hits.extend((s, obj) for s in subjects)
+        if not hits:
+            return out
+        hits.sort(key=lambda pair: (len(pair[1]), pair[0]))
+        out.answer = hits[0][0]
+        out.answers = tuple(dict.fromkeys(s for s, _o in hits))
+        out.steps = tuple(f"{s} —purpose→ {o}" for s, o in hits[:4])
+        out.confidence = 0.7
+        out.why = f"{len(hits)} thing(s) with that purpose"
+        return out
+
+    def whose(self, kind: str, relation: str, value: str, outer: str) -> Solution:
+        """Find a subject by one of its properties, then read another off it.
+
+        "The capital of the country whose currency is the yen" is a bridge walked inward: the
+        subject is not named, it is *described*, and finding it is the first hop.
+        """
+        out = Solution(form="whose")
+        found = self.constraint(kind, relation, value)
+        if not found.ok:
+            return out
+        objects = self.by_sp.get((self._term(found.answer), outer), [])
+        if not objects:
+            return out
+        out.answer = objects[0]
+        out.answers = tuple(dict.fromkeys(objects))
+        out.steps = found.steps + (f"{found.answer} —{outer}→ {out.answer}",)
+        out.confidence = 0.65
+        out.why = f"found {found.answer} by its {relation}, then read its {outer}"
+        return out
+
+    def _read_part_of(self, low: str) -> Optional[Solution]:
+        match = _PART_OF.match(low)
+        return None if match is None else self.part_of(match.group("s"))
+
+    def _read_for_purpose(self, low: str) -> Optional[Solution]:
+        match = _FOR_PURPOSE.match(low)
+        return None if match is None else self.for_purpose(match.group("purpose"))
+
+    def _read_whose(self, low: str) -> Optional[Solution]:
+        match = _WHOSE.match(low)
+        if match is None:
+            return None
+        outer = self._relation(match.group("outer"))
+        relation = self._relation(match.group("relation"))
+        if not outer or not relation:
+            return None
+        return self.whose(match.group("kind"), relation, match.group("value"), outer)
+
+    def _read_why(self, low: str) -> Optional[Solution]:
+        """"Why does X happen" — the causes of X, which is `causes` read from the far end."""
+        match = _WHY.match(low)
+        if match is None:
+            return None
+        effect = self._term(match.group("s"))
+        causes = sorted({s for s, objects in self.inverted.get("causes", {}).items()
+                         for s in ([] if s != effect else objects)})
+        if not causes:
+            return None
+        out = Solution(form="why")
+        out.answer = causes[0]
+        out.answers = tuple(causes)
+        out.steps = tuple(f"{c} —causes→ {effect}" for c in causes[:4])
+        out.confidence = 0.7
+        out.why = f"{len(causes)} stated cause(s)"
+        return out
 
 
 def solver(brain: Any) -> PuzzleSolver:

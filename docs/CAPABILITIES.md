@@ -1807,8 +1807,8 @@ General knowledge cannot be examined that way. There is no minting a fresh fact 
 what she knows of it is exactly what she was told. So the held-out surface has to be built the
 other way round: **from facts she was told, compose questions whose answers she was never told.**
 
-**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 47 — from **3,745 facts
-over 966 subjects to 13,650 over 3,828**, three and a half times the corpus.
+**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 48 — from **3,745 facts
+over 966 subjects to 13,755 over 3,937**, three and a half times the corpus.
 
 The first pass added six subjects that were simply absent: `arts`, `sport`, `philosophy` (with the
 world religions described rather than asserted), `body` (the anatomy `medicine` assumed and never
@@ -2034,6 +2034,36 @@ chain            142    142      0         0       0   1.000
 And, for the fifth time in this work, a **one-value gold on a many-valued relation** — twice more,
 in `chain` (deforestation has two true two-hop endings) and `constraint` (a kidney and a lung are
 both "two of them"). Each is pinned by a test.
+
+**A second tier, added after the five papers were already at 0.999.** Probing for what she still
+could not do turned up six more forms, and one of them was worse than a refusal — "which bird can
+fly and lives in India" answered **"bird"**, because the stored value `india` was found sitting
+inside the question. That is the mirror of the substring bug fixed a paragraph earlier: a stored
+property may say *more* than the question named, never less, and that direction of matching is gone.
+
+The other five were absent rather than wrong, and all five now answer:
+
+| question | answer | why it was refused |
+|---|---|---|
+| "what is the heart part of?" | circulatory system | `part_of` is stored, carries the highest transitivity prior in `core`, and had no question form that parses |
+| "what would you use to measure temperature?" | thermometer | `purpose` read backwards — the store says what a thermometer is *for* and never what measures temperature |
+| "what would you use to measure pressure?" | barometer | the same, and the stored phrase says "measuring **atmospheric** pressure" — words in order, not adjacent |
+| "what is the capital of the country whose currency is the yen?" | tokyo | a bridge walked *inward*: the subject is not named, it is described |
+| "why does an earthquake happen?" | fault | `causes` from the far end, for any stored effect |
+
+**And a defect none of the papers could see: 105 compound kinds had no parent.** `island country`
+sat unattached, so **Japan was not a country by any walk**; `precious metal` sat unattached, so gold
+was not a metal; `blood cell` sat unattached, so a red blood cell was not a cell. 839 of 1,269 kinds
+had no parent, and most of those are roots and belong that way — but the compounds are not roots,
+they are unattached. It is invisible until something walks the hierarchy, and it was quietly
+weakening every inheritance, every commonality and every constraint search in the corpus.
+
+`taxonomy.kb` states them, on a rule mechanical enough to check: **an English head-final compound is
+a its head.** It does not hold for head-initial phrases — a "creature in mythology" is not a
+mythology, a "unit of time" is not a time — so anything with " of " or " in " was excluded, and a
+further list rejected by hand where the head is a different sense ("gas giant" against the giant of
+folklore). Nothing in the file is a new claim about the world: every line says a thing is what its
+own name already says it is, and the corpus never wrote it down.
 
 Run it: `NJPBrain.puzzle("...")`, or `python -m nyxara.njp.general` for the full twelve papers.
 Nothing in the module writes to the store: a constructed answer is an inference, and filing it

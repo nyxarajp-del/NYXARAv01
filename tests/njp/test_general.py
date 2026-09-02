@@ -178,7 +178,13 @@ def test_a_refusal_is_declined_and_not_silence(exam):
 
 def test_silence_is_the_pass_on_an_inverted_paper(exam):
     """And an answer on one is a confabulation however confident it sounds."""
-    item = next(i for i in exam.items("abstention") if i.subject in UNTAUGHT)
+    # Built directly rather than sampled. At this file's reduced limit the draw need not contain an
+    # untaught subject — the pool grew with the corpus and that half of it is now a small fraction —
+    # and a test that depends on the draw is a flake with a docstring. Second time; see
+    # `test_a_refusal_is_declined_and_not_silence`.
+    untaught = next(name for name in UNTAUGHT if not exam.kinds.get(name))
+    item = njp_general.Item(paper="abstention", question=f"What is {untaught}?",
+                            subject=untaught, predicate="is_a", inverted=True)
     response = exam.ask(item)
     assert item.inverted
     assert response.verdict in {"right", "wrong"}
@@ -187,13 +193,18 @@ def test_silence_is_the_pass_on_an_inverted_paper(exam):
 
 def test_gold_is_every_right_answer_not_the_one_it_was_minted_from(exam):
     """The bug both many-valued papers had: a one-value gold on a many-valued relation."""
-    fever = [i for i in exam.items("inverse") if i.subject == "fever"]
-    if fever:                       # the corpus may not sample it at this limit
-        assert len(fever[0].gold) > 1, fever[0].gold
-    # Built directly rather than sampled, so the assertion does not depend on the draw.
+    # Stated as the invariant rather than as one example. It was written against ``fever``, which
+    # had two stated causes; `causal.kb` later gave fever its own `causes` edges, so it is no
+    # longer an inverse item at all and the test failed on a corpus that had only got better. An
+    # example a growing corpus can grow out of is a test with a shelf life.
     full = GeneralKnowledgeExam(exam.brain, limit=10 ** 6)
-    causers = [i for i in full.items("inverse") if i.subject == "fever"]
-    assert causers and len(causers[0].gold) > 1
+    items = full.items("inverse")
+    assert items
+    assert any(len(i.gold) > 1 for i in items), "no effect in this corpus has two stated causes"
+    for item in items:
+        every = {s for (s, p), objects in full.by_sp.items() if p == "causes"
+                 and any(full.key(o) == item.subject for o in objects)}
+        assert every == {g.strip().lower() for g in item.gold}, item.question
 
 
 # --------------------------------------------------------------------------- #
@@ -219,7 +230,11 @@ def test_she_passes_every_paper_at_the_shipped_corpus(exam):
     """
     report = exam.sit()
     floors = {"recall": 0.70, "membership": 0.90, "taxonomy": 0.90, "inheritance": 0.90,
-              "inverse": 0.85, "abstention": 0.95, "soundness": 0.99}
+              "inverse": 0.85, "abstention": 0.95, "soundness": 0.99,
+              # The hard papers are constructed answers and are held to the same kind of floor:
+              # below the measured 0.99, above anything a broken solver could reach by accident.
+              "bridge": 0.90, "commonality": 0.90, "odd_one_out": 0.90,
+              "constraint": 0.90, "chain": 0.90}
     for paper in report.papers:
         assert paper.score >= floors[paper.name], f"{paper.name}: {paper.score:.3f}"
         assert paper.wrong <= max(4, int(0.05 * paper.asked)), f"{paper.name}: {paper.wrong} wrong"
@@ -343,6 +358,15 @@ def test_a_hard_item_is_not_answerable_by_lookup(exam, paper):
     """
     items = exam.items(paper)
     assert items, paper
+    if paper in ("commonality", "odd_one_out"):
+        # These two are held out in a different way, and asserting the other way is wrong: the
+        # question is about a **set the question invents**, and nothing in the store is about the
+        # set. That `shoe is_a clothing` is stored is not a defect — "what do a shoe and a sock
+        # have in common" is still answered by no single fact. The invariant that does hold is
+        # that the item names at least two subjects, so no one lookup can settle it.
+        for item in items:
+            assert item.question.count(",") >= 2 or " and " in item.question, item.question
+        return
     for item in items:
         stored = {o.strip().lower() for o in exam.by_sp.get((item.subject, item.predicate), ())}
         if not stored:
@@ -421,3 +445,55 @@ def test_a_qualifier_cannot_be_swallowed_by_a_substring():
     contains = PuzzleSolver.__dict__["_contains"].__func__
     assert contains("the second largest ocean", "largest ocean")
     assert not contains("the second largest ocean", "the largest ocean")
+
+
+def test_the_second_tier_of_hard_forms(brain):
+    """The forms added after the first five papers were already at 0.999.
+
+    Each was refused before it existed, and each is a question an ordinary quiz asks. They are
+    tested by name rather than generated into a paper because the corpus offers few of each — a
+    paper of forty items would be forty questions about thermometers.
+    """
+    from nyxara.njp.puzzle import PuzzleSolver
+
+    solver = PuzzleSolver(brain)
+    # `part_of` is stored, carries the highest transitivity prior in `core`, and had no question
+    # form that parses through the ordinary grammar. It has one now.
+    assert solver.solve("what is the heart part of?").answer == "circulatory system"
+    # `purpose`, read backwards: the store says what a thermometer is for and never what measures
+    # temperature, which is the direction the question is actually asked in.
+    assert solver.solve("what would you use to measure temperature?").answer == "thermometer"
+    assert solver.solve("what would you use to measure pressure?").answer == "barometer"
+    # A bridge walked *inward*: the subject is not named, it is described.
+    assert solver.solve(
+        "what is the capital of the country whose currency is the yen?").answer == "tokyo"
+    # "why does X happen" is `causes` from the far end.
+    assert solver.solve("why does an earthquake happen?").ok
+
+
+def test_a_short_stored_value_cannot_match_a_long_question(brain):
+    """The mirror of the substring bug, and it produced a wrong answer rather than a refusal.
+
+    "Which bird can fly and lives in India" found the stored value ``india`` sitting inside the
+    question and answered from it. A stored property may say *more* than the question named, never
+    less, so that direction of matching is gone.
+    """
+    from nyxara.njp.puzzle import PuzzleSolver
+
+    solver = PuzzleSolver(brain)
+    assert not solver.solve("which bird can fly and lives in India?").ok
+    # ...while the legitimate looser direction still works.
+    assert solver.solve("which mammal can fly?").answer == "bat"
+    assert solver.solve("which bird can swim?").answer == "duck"
+
+
+def test_a_compound_kind_is_a_kind_of_its_head(brain):
+    """`taxonomy.kb`: 105 compounds sat unattached and nothing could walk through them.
+
+    Japan was not a country by any walk, because `island country` had no parent — so a search for
+    a country found no country it knew about. Invisible until something walks the hierarchy.
+    """
+    exam = GeneralKnowledgeExam(brain, limit=10)
+    for member, kind in (("japan", "country"), ("gold", "metal"),
+                         ("hindi", "language"), ("neuron", "cell")):
+        assert kind in exam._ancestors(member), f"{member} does not reach {kind}"

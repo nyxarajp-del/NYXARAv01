@@ -75,7 +75,7 @@ facts nobody put together. They are graded through :class:`~nyxara.njp.puzzle.Pu
 than through the question grammar, and the report keeps them in their own block, because a score
 that mixed "she remembered" with "she worked it out" would be measuring neither.
 
-What it measures, on the corpus as shipped (13,650 facts over 3,828 subjects, 47 domains), 400
+What it measures, on the corpus as shipped (13,755 facts over 3,937 subjects, 48 domains), 400
 items a paper, in about 230 seconds::
 
     paper          asked  right  wrong  declined  silent   score
@@ -670,7 +670,10 @@ class GeneralKnowledgeExam:
             if predicate != "causes":
                 continue
             for obj in objects:
-                causers[obj.strip().lower()].append(subject)
+                # `self.key`, not `.lower()`: an effect used as a subject has to be spelled the way
+                # the store spells it, or two writings of one effect become two items with half
+                # the causers each. See :meth:`key`.
+                causers[self.key(obj)].append(subject)
         pool: List[Item] = []
         for key, subjects in causers.items():
             if self.by_sp.get((key, "cause_of")) or self.by_sp.get((key, "causes")):
