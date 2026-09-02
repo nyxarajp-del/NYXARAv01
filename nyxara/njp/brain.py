@@ -1876,6 +1876,24 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def puzzle(self, question: str) -> Any:
+        """Answer a question whose answer is in no single fact she holds.
+
+        The counterpart to :meth:`Grounder.answer`, and the division between them is the point:
+        that one *retrieves*, this one *constructs*. "What is the currency of the country where the
+        Taj Mahal is" has no key in the store under any spelling — it is four locating hops and a
+        lookup, and :mod:`nyxara.njp.puzzle` walks them and reports the path it walked.
+
+        Returns a :class:`~nyxara.njp.puzzle.Solution`, empty where nothing could be constructed.
+        Nothing is written: a constructed answer is an inference, and filing it would let the next
+        question read it back as though somebody had stated it.
+        """
+        try:
+            from nyxara.njp.puzzle import PuzzleSolver
+            return PuzzleSolver(self).solve(question)
+        except Exception:  # noqa: BLE001
+            return None
+
     def pursue(self, goal: Any, *, actuator: Any = None, steps: int = 4) -> Any:
         """Plan toward ``goal`` over the learned world model and act, re-planning each step.
 

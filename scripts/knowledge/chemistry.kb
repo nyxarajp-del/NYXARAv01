@@ -59,6 +59,7 @@ iron | is_a=metal | symbol=Fe | has_property=magnetic | purpose=making steel | p
 copper | is_a=metal | symbol=Cu | has_property=ductile | has_property=an excellent conductor | has_property=reddish brown | purpose=making electrical wire
 zinc | is_a=metal | symbol=Zn | purpose=galvanising steel
 silver | is_a=precious metal | symbol=Ag | has_property=the best electrical conductor | purpose=making jewellery
+precious metal | is_a=metal | means=a metal that is rare and resists corrosion | has_kind=gold | has_kind=silver | has_kind=platinum
 gold | is_a=precious metal | symbol=Au | has_property=unreactive | has_property=malleable | purpose=making jewellery | purpose=backing currency
 mercury | is_a=metal | symbol=Hg | has_property=liquid at room temperature | has_property=toxic
 lead | is_a=metal | symbol=Pb | has_property=dense | has_property=toxic | purpose=shielding against radiation

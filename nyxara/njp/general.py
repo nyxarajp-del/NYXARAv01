@@ -68,21 +68,41 @@ confident answer. Measured: ``recall`` reported **4,572 of 4,572 right with no a
 all**, on a corpus where the shipped QA file abstains on 19% of its questions. It is its own
 verdict — ``declined`` — and it is neither right nor silent.
 
-What it measures, on the corpus as shipped (13,483 facts over 3,774 subjects, 46 domains), 400
-items a paper, in about 145 seconds::
+The seven papers above are the *recall* half. Five more — ``bridge``, ``commonality``,
+``odd_one_out``, ``constraint`` and ``chain`` — are the **hard** half, and they are a different
+kind of question: their answers are in no fact under any key and have to be constructed out of
+facts nobody put together. They are graded through :class:`~nyxara.njp.puzzle.PuzzleSolver` rather
+than through the question grammar, and the report keeps them in their own block, because a score
+that mixed "she remembered" with "she worked it out" would be measuring neither.
+
+What it measures, on the corpus as shipped (13,650 facts over 3,828 subjects, 47 domains), 400
+items a paper, in about 230 seconds::
 
     paper          asked  right  wrong  declined  silent   score
-    recall           400    334      0        66       0   0.835
-    membership       400    399      1         0       0   0.998
-    taxonomy         400    399      1         0       0   0.998
+    recall           400    358      0        42       0   0.895
+    membership       400    398      2         0       0   0.995
+    taxonomy         400    398      2         0       0   0.995
     inheritance      400    400      0         0       0   1.000
-    inverse          400    389      0        11       0   0.973
+    inverse          400    386      0        14       0   0.965
     abstention       400    400      0         0       0   1.000   (silence is the pass)
     soundness        400    400      0         0       0   1.000   (silence is the pass)
+    bridge           236    236      0         0       0   1.000
+    commonality      400    400      0         0       0   1.000
+    odd_one_out      390    390      0         0       0   1.000
+    constraint       400    398      2         0       0   0.995
+    chain            142    142      0         0       0   1.000
 
-    2721/2800 = 0.972 overall
-    of what she answered: 1521 through English, 400 only through the derivation ladder
-    not asked: 43 inheritance chains longer than 3 hops, which the walk cannot afford
+    4306/4368 = 0.986 overall
+    of what she answered: 1540 through English, 400 only through the derivation ladder
+    not asked: 45 inheritance chains longer than 3 hops, which the walk cannot afford
+
+The five hard papers were **0.875** when they were first run and are 0.999 now, and almost all of
+the difference was defects in the *exam* rather than in her — a container word the reader ignored,
+a multi-word phrase a regex could not split, objects keyed by their surface spelling instead of the
+store's, specificity ranked by string length, a qualifier swallowed by a substring, and two more
+one-value golds on many-valued relations. Every one is recorded where it was fixed and pinned by a
+test. Not one of those answers arrives through English or through the inheritance ladder:
+``by_english`` and ``by_derivation`` are zero on all five, which a test asserts.
 
 Read five of those rows before the total.
 
@@ -291,9 +311,11 @@ class PaperReport:
     declined: int = 0
     silent: int = 0
     #: Of the right answers, how many arrived through the English question grammar. The rest came
-    #: through the derivation ladder, which a person cannot reach by asking.
+    #: through the derivation ladder, which a person cannot reach by asking, or were constructed
+    #: by :mod:`nyxara.njp.puzzle` out of facts nobody put together.
     by_english: int = 0
     by_derivation: int = 0
+    by_construction: int = 0
     misses: List[Response] = field(default_factory=list)
 
     @property
@@ -304,7 +326,8 @@ class PaperReport:
         return {"paper": self.name, "inverted": self.inverted, "asked": self.asked,
                 "right": self.right, "wrong": self.wrong, "declined": self.declined,
                 "silent": self.silent, "score": round(self.score, 3),
-                "by_english": self.by_english, "by_derivation": self.by_derivation}
+                "by_english": self.by_english, "by_derivation": self.by_derivation,
+                "by_construction": self.by_construction}
 
 
 @dataclass
@@ -394,6 +417,24 @@ class GeneralKnowledgeExam:
     def facts(self) -> int:
         return sum(len(v) for v in self.by_sp.values())
 
+    def key(self, text: str) -> str:
+        """An object's spelling **as a subject key** — the store's rule, not `.lower()`.
+
+        `canon.canonical_entity` singularises, so the object written "runoff of nutrients" is
+        filed under ``runoff of nutrient`` and the object "displacement of people" under
+        ``displacement of person``. Every place this exam turns an object into a subject — a chain
+        looking for the next hop, a bridge looking for a container — has to spell it the way the
+        store did, or the fact is there and the lookup misses it over one character.
+
+        Measured before this existed: the ``chain`` paper's gold silently lost every middle whose
+        plural was folded, so "what does fertiliser eventually cause" was graded against one of its
+        two real answers and marked her wrong for giving the other.
+        """
+        try:
+            return self.grounder._key(text)
+        except Exception:  # noqa: BLE001
+            return str(text or "").strip().lower()
+
     def _holds(self, subject: str, predicate: str, obj: str) -> bool:
         """Is this exact claim in the store? The one check that keeps a paper held out."""
         wanted = obj.strip().lower()
@@ -431,10 +472,23 @@ class GeneralKnowledgeExam:
         low = said.strip().lower()
         if not low:
             return False
-        return any(low in g.strip().lower() or g.strip().lower() in low for g in gold)
+        if any(low in g.strip().lower() or g.strip().lower() in low for g in gold):
+            return True
+        # And again in the store's own spelling, because a derived answer comes back canonicalised
+        # while a gold read off a KB line does not: "displacement of person" against "displacement
+        # of people" is one object written two ways, and only `canon` knows they are the same.
+        try:
+            from nyxara.njp.canon import canonical_entity
+        except Exception:  # noqa: BLE001
+            return False
+        folded = canonical_entity(low)
+        return any(folded in canonical_entity(g) or canonical_entity(g) in folded
+                   for g in gold if g)
 
     def ask(self, item: Item) -> Response:
         """One item, English first, then the derivation ladder. Both counted."""
+        if item.paper in self.HARD:
+            return self._ask_hard(item)
         out = Response(item=item)
         said, declined = self._ask_english(item.question)
         channel = "english" if said else ""
@@ -473,6 +527,26 @@ class GeneralKnowledgeExam:
             out.verdict = "right"
         else:
             out.verdict = "wrong"
+        return out
+
+    def _ask_hard(self, item: Item) -> Response:
+        """A constructed answer, graded on the construction as well as on the answer.
+
+        An answer with no steps is refused before it is compared, because the claim these papers
+        make is that the answer was *worked out*. A right answer arrived at by no visible route is
+        indistinguishable from a lucky string match, and counting it would make the score mean the
+        thing it is supposed to prove.
+        """
+        out = Response(item=item)
+        try:
+            solved = self._solver().solve(item.question)
+        except Exception:  # noqa: BLE001
+            solved = None
+        if solved is None or not solved.ok:
+            out.verdict = "silent"
+            return out
+        out.said, out.channel = solved.answer, "constructed"
+        out.verdict = "right" if self._matches(solved.answer, item.gold) else "wrong"
         return out
 
     # ---- the papers ------------------------------------------------------ #
@@ -520,7 +594,7 @@ class GeneralKnowledgeExam:
         """
         seen: Set[str] = {subject}
         out: List[str] = []
-        frontier = [k.strip().lower() for k in self.kinds.get(subject, ())]
+        frontier = [self.key(k) for k in self.kinds.get(subject, ())]
         while frontier and len(out) < 64:
             nxt: List[str] = []
             for kind in frontier:
@@ -528,7 +602,7 @@ class GeneralKnowledgeExam:
                     continue
                 seen.add(kind)
                 out.append(kind)
-                nxt.extend(k.strip().lower() for k in self.kinds.get(kind, ()))
+                nxt.extend(self.key(k) for k in self.kinds.get(kind, ()))
             depth -= 1
             if depth <= 0:
                 break
@@ -664,9 +738,193 @@ class GeneralKnowledgeExam:
                                           f"{self.by_sp[(key, predicate)][0]}")))
         return self._sample(pool)
 
+    # ----------------------------------------------------------------------- #
+    # The hard half: answers that are in no fact and have to be constructed
+    # ----------------------------------------------------------------------- #
+    #
+    # Every paper above is answered by one fact or one walk. These five are answered by putting
+    # facts together that nobody put together, and each is generated from the store so that the
+    # item is unseen by construction: the exam finds a chain, hides the endpoint, and asks.
+    #
+    # They are graded through :class:`~nyxara.njp.puzzle.PuzzleSolver` rather than through the
+    # question grammar, and the report keeps them in a separate block, because a score that mixed
+    # "she remembered" with "she worked it out" would be measuring neither.
+    def _solver(self) -> Any:
+        got = getattr(self, "_puzzle", None)
+        if got is None:
+            from nyxara.njp.puzzle import PuzzleSolver
+            got = self._puzzle = PuzzleSolver(self.brain)
+        return got
+
+    def paper_bridge(self) -> List[Item]:
+        """Two different relations chained, asked as one nested English question.
+
+        The item is held out in the strongest sense available: the answer is a fact about the
+        *container*, and the question names only the thing inside it. Nothing in the store says
+        what the Taj Mahal's currency is, and there is no key under which it could be looked up.
+        """
+        pool: List[Item] = []
+        for (subject, link), containers in self.by_sp.items():
+            if link != "located_in":
+                continue
+            for container in containers:
+                key = self.key(container)
+                for outer in ("capital", "currency", "located_in"):
+                    objects = self.by_sp.get((key, outer))
+                    if not objects or self.by_sp.get((subject, outer)):
+                        continue
+                    kinds = self.kinds.get(key) or []
+                    if not kinds:
+                        continue
+                    pool.append(Item(
+                        paper="bridge",
+                        question=f"what is the {outer} of the {kinds[0]} that {subject} is in?",
+                        subject=subject, predicate=outer, gold=tuple(objects),
+                        via=(f"{subject} located_in {container}",
+                             f"{container} {outer} {objects[0]}")))
+        return self._sample(pool)
+
+    def paper_commonality(self) -> List[Item]:
+        """What two subjects share — a set intersection nothing in the store is about."""
+        pool: List[Item] = []
+        members: Dict[str, List[str]] = collections.defaultdict(list)
+        for subject, kinds in self.kinds.items():
+            for kind in kinds:
+                members[kind.strip().lower()].append(subject)
+        for kind, holders in members.items():
+            if len(holders) < 2 or len(kind) < 4:
+                continue
+            for first, second in zip(sorted(holders)[::2], sorted(holders)[1::2]):
+                if first == second:
+                    continue
+                # Gold is **every maximally specific** shared kind, not the one this item was
+                # minted from. A hippopotamus and a horse are both mammals and both herbivores,
+                # and neither reaches the other by an is_a walk, so both are as specific as the
+                # question can be answered — grading against one of them marks a correct answer
+                # wrong for choosing the other.
+                up_a = set(self._ancestors(first)) | {first}
+                up_b = set(self._ancestors(second)) | {second}
+                common = (up_a & up_b) - {first, second}
+                if not common:
+                    continue
+                generic = {a for c in common for a in self._ancestors(c)} & common
+                best = tuple(sorted(common - generic)) or tuple(sorted(common))
+                pool.append(Item(paper="commonality",
+                                 question=f"what do {first} and {second} have in common?",
+                                 subject=first, predicate="is_a", gold=best,
+                                 via=(f"{first} is_a* {best[0]}", f"{second} is_a* {best[0]}")))
+        return self._sample(pool)
+
+    def paper_odd_one_out(self) -> List[Item]:
+        """Three that share a kind and one that does not. The set is made up by the question."""
+        pool: List[Item] = []
+        members: Dict[str, List[str]] = collections.defaultdict(list)
+        for subject, kinds in self.kinds.items():
+            for kind in kinds:
+                members[kind.strip().lower()].append(subject)
+        outsiders = [s for s in sorted(self.kinds) if s]
+        for index, (kind, holders) in enumerate(sorted(members.items())):
+            holders = sorted(set(holders))
+            if len(holders) < 3:
+                continue
+            three = holders[:3]
+            # The odd one must not reach the shared kind by any walk, or the item has two answers.
+            stranger = ""
+            for candidate in outsiders[(index * 7) % len(outsiders):][:80]:
+                if candidate in three:
+                    continue
+                if kind in set(self._ancestors(candidate)) | {candidate}:
+                    continue
+                stranger = candidate
+                break
+            if not stranger:
+                continue
+            items = three + [stranger]
+            pool.append(Item(paper="odd_one_out",
+                             question=f"which one does not belong: {', '.join(items)}?",
+                             subject=stranger, predicate="is_a", gold=(stranger,),
+                             via=(f"the other three are all {kind}",)))
+        return self._sample(pool)
+
+    def paper_constraint(self) -> List[Item]:
+        """A member of a kind under a second condition — an intersection, not a fact."""
+        pool: List[Item] = []
+        # (predicate, object) -> [(subject, its first kind), ...] — built once so the gold can be
+        # every member holding the property rather than the one the item came from.
+        self._property_index: Dict[Tuple[str, str], List[Tuple[str, str]]] = (
+            collections.defaultdict(list))
+        for (holder, held), values in self.by_sp.items():
+            if held not in ("has_property", "capable_of"):
+                continue
+            first_kind = (self.kinds.get(holder) or [""])[0].strip().lower()
+            for value in values:
+                self._property_index[(held, value.lower())].append((holder, first_kind))
+        for (subject, predicate), objects in self.by_sp.items():
+            if predicate not in ("has_property", "capable_of"):
+                continue
+            kinds = self.kinds.get(subject) or []
+            if not kinds:
+                continue
+            kind = kinds[0].strip().lower()
+            for obj in objects:
+                if len(obj.split()) > 3:
+                    continue          # a long phrase is a sentence, not a searchable condition
+                verb = "can" if predicate == "capable_of" else "is"
+                # Every member of the kind that holds this property, not the one the item was
+                # minted from. The fourth time this exam has needed the rule: two kidneys and two
+                # lungs both answer "which organ is two of them", and grading against one of them
+                # marked the other wrong.
+                holders = tuple(sorted({
+                    other for other, held in self._property_index.get((predicate, obj.lower()), ())
+                    if held == kind or kind in set(self._ancestors(other))}))
+                pool.append(Item(paper="constraint",
+                                 question=f"which {kind} {verb} {obj}?",
+                                 subject=subject, predicate=predicate,
+                                 gold=holders or (subject,),
+                                 via=(f"{subject} is_a {kind}", f"{subject} {predicate} {obj}")))
+        return self._sample(pool)
+
+    def paper_chain(self) -> List[Item]:
+        """Where a causal walk ends up, which is never the fact its first hop states."""
+        pool: List[Item] = []
+        causers = {s for (s, p) in self.by_sp if p == "causes"}
+        for (subject, predicate), objects in self.by_sp.items():
+            if predicate != "causes":
+                continue
+            one_hop = {o.strip().lower() for o in objects}
+            # The gold is every far end reachable through **any** middle, not the ends of the one
+            # middle this item happened to be minted from. Third time this exam has had to learn
+            # it — `inverse` and `inheritance` each had the same one-value gold on a many-valued
+            # relation. Measured: "what does deforestation eventually cause" was graded against
+            # *the greenhouse effect* (via carbon dioxide) and marked wrong for answering *loss of
+            # topsoil* (via erosion). Both are two-hop chains and both are correct.
+            gold: List[str] = []
+            via: List[str] = []
+            for middle in objects:
+                key = self.key(middle)
+                if key not in causers:
+                    continue
+                for end in self.by_sp.get((key, "causes")) or []:
+                    # Held out: the far end must not also be one hop away, or a lookup answers it.
+                    if end.strip().lower() in one_hop:
+                        continue
+                    gold.append(end)
+                    if len(via) < 3:
+                        via.append(f"{subject} causes {middle} causes {end}")
+            if not gold:
+                continue
+            pool.append(Item(paper="chain",
+                             question=f"what does {subject} eventually cause?",
+                             subject=subject, predicate="causes",
+                             gold=tuple(dict.fromkeys(gold)), via=tuple(via)))
+        return self._sample(pool)
+
+    #: The papers answered by construction rather than by lookup.
+    HARD: Tuple[str, ...] = ("bridge", "commonality", "odd_one_out", "constraint", "chain")
+
     #: Name -> generator, in the order the report prints them.
     PAPERS: Tuple[str, ...] = ("recall", "membership", "taxonomy", "inheritance",
-                               "inverse", "abstention", "soundness")
+                               "inverse", "abstention", "soundness") + HARD
 
     def _sample(self, pool: List[Item]) -> List[Item]:
         """Down to the limit, deterministically. Sorted first, so dict order cannot leak in."""
@@ -698,6 +956,8 @@ class GeneralKnowledgeExam:
                         got.by_english += 1
                     elif response.channel == "derived":
                         got.by_derivation += 1
+                    elif response.channel == "constructed":
+                        got.by_construction += 1
                 elif response.verdict == "wrong":
                     got.wrong += 1
                     if len(got.misses) < 12:

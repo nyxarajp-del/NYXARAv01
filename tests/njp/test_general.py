@@ -328,3 +328,96 @@ def test_examine_is_the_one_call_a_script_needs(brain):
     report = examine(limit=20, papers=("membership",), brain=brain)
     assert report.paper("membership") is not None
     assert report.asked == 20
+
+
+# --------------------------------------------------------------------------- #
+# The hard half — answers that are in no fact
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("paper", GeneralKnowledgeExam.HARD)
+def test_a_hard_item_is_not_answerable_by_lookup(exam, paper):
+    """The whole claim of these papers: no single stored fact answers the question.
+
+    Checked structurally rather than trusted. If any item's gold could be read straight off the
+    subject under the asked relation, the paper is measuring recall wearing a hat — which is
+    exactly what `taxonomy` had to be rescued from.
+    """
+    items = exam.items(paper)
+    assert items, paper
+    for item in items:
+        stored = {o.strip().lower() for o in exam.by_sp.get((item.subject, item.predicate), ())}
+        if not stored:
+            continue
+        assert not (stored & {g.strip().lower() for g in item.gold}), item.question
+
+
+def test_a_constructed_answer_must_carry_its_derivation(brain):
+    """An answer with no steps is refused before it is compared.
+
+    A right answer arrived at by no visible route is indistinguishable from a lucky string match,
+    and counting it would make the score mean the thing it is supposed to prove.
+    """
+    from nyxara.njp.puzzle import PuzzleSolver, Solution
+
+    solved = PuzzleSolver(brain).solve("what do a whale and a bat have in common?")
+    assert solved.ok and solved.steps
+    assert not Solution(form="bridge", answer="something", steps=()).ok
+
+
+def test_the_hard_papers_are_answered_by_construction_and_nothing_else(exam):
+    """No hard item may be answered through the question grammar or the inheritance ladder."""
+    report = exam.sit(GeneralKnowledgeExam.HARD)
+    for paper in report.papers:
+        assert paper.by_english == 0, paper.name
+        assert paper.by_derivation == 0, paper.name
+        assert paper.by_construction == paper.right, paper.name
+
+
+def test_the_named_hard_problems(brain):
+    """The worked examples the module docstring stands on, asked of the live corpus."""
+    from nyxara.njp.puzzle import PuzzleSolver
+
+    solver = PuzzleSolver(brain)
+    # A five-step walk across three domains. Nothing states the Taj Mahal's currency.
+    money = solver.solve("What is the currency of the country where the Taj Mahal is?")
+    assert money.ok and "rupee" in money.answer.lower()
+    assert len(money.steps) >= 4
+
+    # The container word is not decoration: it says where the walk stops, and changing it must
+    # change the answer even though the walk starts in the same place.
+    country = solver.solve("what is the capital of the country that agra is in?")
+    state = solver.solve("what is the capital of the indian state that agra is in?")
+    assert country.ok and state.ok
+    assert country.answer != state.answer
+
+    assert solver.solve("which mammal can fly?").answer == "bat"
+    assert solver.solve("which one does not belong: copper, iron, gold, oxygen?").answer == "oxygen"
+    assert solver.solve("sparrow is to bird as tiger is to what?").answer == "mammal"
+    assert solver.solve("what does smoking eventually cause?").ok
+
+
+def test_a_question_it_cannot_read_is_refused(brain):
+    """A solver that answers every string is a solver whose score means nothing."""
+    from nyxara.njp.puzzle import PuzzleSolver
+
+    solver = PuzzleSolver(brain)
+    for question in ("", "hello there", "what is the capital of France?",
+                     "why is the sky blue?", "what do quokka and narwhal have in common?"):
+        assert not solver.solve(question).ok, question
+
+
+def test_a_list_item_containing_and_is_not_split_in_half():
+    """"crime and punishment" is one novel, not two things."""
+    from nyxara.njp.puzzle import PuzzleSolver
+
+    assert PuzzleSolver.__dict__["_items"].__func__(
+        "crime and punishment, don quixote, great expectation, fixed cost") == [
+        "crime and punishment", "don quixote", "great expectation", "fixed cost"]
+
+
+def test_a_qualifier_cannot_be_swallowed_by_a_substring():
+    """"the largest ocean" is not inside "the second largest ocean" as whole words."""
+    from nyxara.njp.puzzle import PuzzleSolver
+
+    contains = PuzzleSolver.__dict__["_contains"].__func__
+    assert contains("the second largest ocean", "largest ocean")
+    assert not contains("the second largest ocean", "the largest ocean")

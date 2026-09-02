@@ -29,25 +29,25 @@ national emblem of India | is_a=symbol | means=the lion capital of Ashoka | loca
 
 # --- states and cities --------------------------------------------------------------------------- #
 Indian state | is_a=administrative division | part_of=India | has_property=its own legislature and chief minister | has_kind=Maharashtra | has_kind=Tamil Nadu | has_kind=Uttar Pradesh
-Maharashtra | is_a=Indian state | capital=Mumbai | has_property=India's largest economy among the states
-Uttar Pradesh | is_a=Indian state | capital=Lucknow | has_property=the most populous state
-Tamil Nadu | is_a=Indian state | capital=Chennai | involves=Bharatanatyam | involves=Carnatic music
-Karnataka | is_a=Indian state | capital=Bengaluru | has_property=India's centre of information technology
-Kerala | is_a=Indian state | capital=Thiruvananthapuram | has_property=the highest literacy rate among the states | has_part=backwaters
-West Bengal | is_a=Indian state | capital=Kolkata | has_part=Sundarbans
-Gujarat | is_a=Indian state | capital=Gandhinagar | has_part=Rann of Kutch
-Rajasthan | is_a=Indian state | capital=Jaipur | has_part=Thar Desert | has_property=the largest state by area
-Punjab | is_a=Indian state | capital=Chandigarh | has_property=a centre of wheat farming
-Bihar | is_a=Indian state | capital=Patna | has_part=Nalanda
-Madhya Pradesh | is_a=Indian state | capital=Bhopal | has_property=the largest forest cover among the states
-Odisha | is_a=Indian state | capital=Bhubaneswar | has_part=Konark Sun Temple
-Assam | is_a=Indian state | capital=Dispur | purpose=tea growing | has_part=Kaziranga National Park
-Telangana | is_a=Indian state | capital=Hyderabad
-Andhra Pradesh | is_a=Indian state | capital=Amaravati
-Haryana | is_a=Indian state | capital=Chandigarh city
-Jharkhand | is_a=Indian state | capital=Ranchi | purpose=mining
-Goa | is_a=Indian state | capital=Panaji | has_property=the smallest state by area
-Uttarakhand | is_a=Indian state | capital=Dehradun | has_part=Char Dham
+Maharashtra | is_a=Indian state | capital=Mumbai | has_property=India's largest economy among the states | located_in=India
+Uttar Pradesh | is_a=Indian state | capital=Lucknow | has_property=the most populous state | located_in=India
+Tamil Nadu | is_a=Indian state | capital=Chennai | involves=Bharatanatyam | involves=Carnatic music | located_in=India
+Karnataka | is_a=Indian state | capital=Bengaluru | has_property=India's centre of information technology | located_in=India
+Kerala | is_a=Indian state | capital=Thiruvananthapuram | has_property=the highest literacy rate among the states | has_part=backwaters | located_in=India
+West Bengal | is_a=Indian state | capital=Kolkata | has_part=Sundarbans | located_in=India
+Gujarat | is_a=Indian state | capital=Gandhinagar | has_part=Rann of Kutch | located_in=India
+Rajasthan | is_a=Indian state | capital=Jaipur | has_part=Thar Desert | has_property=the largest state by area | located_in=India
+Punjab | is_a=Indian state | capital=Chandigarh | has_property=a centre of wheat farming | located_in=India
+Bihar | is_a=Indian state | capital=Patna | has_part=Nalanda | located_in=India
+Madhya Pradesh | is_a=Indian state | capital=Bhopal | has_property=the largest forest cover among the states | located_in=India
+Odisha | is_a=Indian state | capital=Bhubaneswar | has_part=Konark Sun Temple | located_in=India
+Assam | is_a=Indian state | capital=Dispur | purpose=tea growing | has_part=Kaziranga National Park | located_in=India
+Telangana | is_a=Indian state | capital=Hyderabad | located_in=India
+Andhra Pradesh | is_a=Indian state | capital=Amaravati | located_in=India
+Haryana | is_a=Indian state | capital=Chandigarh city | located_in=India
+Jharkhand | is_a=Indian state | capital=Ranchi | purpose=mining | located_in=India
+Goa | is_a=Indian state | capital=Panaji | has_property=the smallest state by area | located_in=India
+Uttarakhand | is_a=Indian state | capital=Dehradun | has_part=Char Dham | located_in=India
 Himachal Pradesh | is_a=Indian state | capital=Shimla | located_in=the Himalayas
 Mumbai | is_a=city | located_in=Maharashtra | has_property=India's financial capital | has_part=Gateway of India | is_a=port
 Delhi | is_a=city | is_a=union territory | has_part=Red Fort | has_part=Qutub Minar | has_property=India's capital territory

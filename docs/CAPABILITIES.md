@@ -1807,8 +1807,8 @@ General knowledge cannot be examined that way. There is no minting a fresh fact 
 what she knows of it is exactly what she was told. So the held-out surface has to be built the
 other way round: **from facts she was told, compose questions whose answers she was never told.**
 
-**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 46 — from **3,745 facts
-over 966 subjects to 13,483 over 3,774**, three and a half times the corpus.
+**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 47 — from **3,745 facts
+over 966 subjects to 13,650 over 3,828**, three and a half times the corpus.
 
 The first pass added six subjects that were simply absent: `arts`, `sport`, `philosophy` (with the
 world religions described rather than asserted), `body` (the anatomy `medicine` assumed and never
@@ -1961,6 +1961,83 @@ names them rather than subtracting them silently.
 
 Run it: `python -m nyxara.njp.general`, or `NJPBrain.sit_general_exam()`. Nothing in it writes to
 the brain, so it may be run twice around something that does.
+
+### NJP V.22 — the hard half: answers that are in no fact
+
+The twelve-paper exam's first seven papers are each answered by **one fact or one walk**: a lookup,
+a membership test, an inheritance step, an edge read backwards. She scores 0.979 on them, and that
+number says nothing about whether she can reason, because no item on it requires putting two
+unrelated facts together.
+
+`nyxara.njp.puzzle` is the other half, and `general.py` gained five papers that use it. Each asks a
+question whose answer is **nowhere in the store under any key** and has to be constructed:
+
+| paper | what it needs that a lookup does not |
+|---|---|
+| `bridge` | two different relations chained — "the currency of the country the Taj Mahal is in" |
+| `commonality` | a set intersection nothing in the store is *about* |
+| `odd_one_out` | a majority vote over a set the question invents, then the exception |
+| `constraint` | a search under two conditions at once — "which mammal can fly" |
+| `analogy` | a relation identified from one pair and applied to a third term |
+| `chain` | transitive reach past the first hop, with the path |
+
+**The floor was measured before a line of it was written.**
+
+* `bridge`: 211 opportunities existed and `walk_shape` solved **117 of 120** — and **0 of 40**
+  could be *asked*, because nothing in `_QUESTION_PATTERNS` reads a nested question. The knowledge
+  was there, the walk was there, and the two could not be introduced to each other.
+* `commonality`, `odd_one_out`, `constraint`, `analogy`: **no operation existed at all.**
+* `chain`: 4 of 80 starts reached a second hop — which turned out to measure the *corpus*. Only 35
+  two-hop causal chains existed in 13,483 facts. `causal.kb` was written to supply the joins
+  between things already in the corpus, and reach went to **79 of 80**.
+
+First measurement of the five papers: **0.875**. After the defects below: **741/742 = 0.999**, and
+every one of those answers arrived through construction — `by_english` and `by_derivation` are
+zero on all five, asserted by a test.
+
+```
+paper          asked  right  wrong  declined  silent   score
+bridge           150    150      0         0       0   1.000
+commonality      150    149      0         0       1   0.993
+odd_one_out      150    150      0         0       0   1.000
+constraint       150    150      0         0       0   1.000
+chain            142    142      0         0       0   1.000
+```
+
+**What the exam found, and most of it was the exam.** Four of the six defects were mine:
+
+* **The container word is not decoration.** "The capital of the country that Agra is in" returned
+  *Lucknow* — Uttar Pradesh's capital — because the walk took the first hop that yielded anything.
+  The noun in the middle of a nested question says *where to stop*: `bridge_to_kind` walks until a
+  node that **is a** country, and "capital of the **indian state** that Agra is in" and "capital of
+  the **country** that Agra is in" now give different answers off the same walk.
+* **A multi-word container cannot be split by a regex.** With a non-greedy pattern, "the capital of
+  the indian state that mumbai is in" split as container *indian*, subject *state that mumbai*, and
+  every such question came back silent. The blob is captured whole and each split is tried, keeping
+  the one whose subject the store knows — the same signal `_read_polar_surface` uses.
+* **The store's spelling rule applies to objects used as subjects.** `canon` singularises, so
+  "runoff of nutrients" is filed under `runoff of nutrient`. The exam was keying on the surface
+  form, so `chain`'s gold silently lost every middle whose plural folded and marked her wrong for
+  giving the answer it had dropped. Same bug hid `displacement of people` behind
+  `displacement of person`.
+* **Specificity is not string length.** "What do a pressure cooker and a spoon have in common"
+  answered *object* over *utensil*; "a keyboard instrument and a percussion instrument" answered
+  *tool* over *musical instrument*. Both true, both useless — everything shares something at the
+  top of a hierarchy. A shared kind is less specific exactly when another shared kind reaches it by
+  an `is_a` walk, and ranking on that makes "utensil beats object" follow from the taxonomy.
+* **A qualifier can be swallowed by a substring.** "Which ocean is the largest ocean" answered
+  *Atlantic*, because the stored property "the second largest ocean" contains the string "largest
+  ocean". As whole words it does not, and the wrong answer disappears.
+* **"Crime and Punishment" is one novel.** Splitting an item list on " and " as well as on commas
+  turned four items into five, two of them half a book.
+
+And, for the fifth time in this work, a **one-value gold on a many-valued relation** — twice more,
+in `chain` (deforestation has two true two-hop endings) and `constraint` (a kidney and a lung are
+both "two of them"). Each is pinned by a test.
+
+Run it: `NJPBrain.puzzle("...")`, or `python -m nyxara.njp.general` for the full twelve papers.
+Nothing in the module writes to the store: a constructed answer is an inference, and filing it
+would let the next question read it back as though somebody had stated it.
 
 ### The question grammar — 18 of 25 everyday phrasings did not parse
 

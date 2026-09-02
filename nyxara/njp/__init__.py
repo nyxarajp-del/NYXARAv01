@@ -394,6 +394,8 @@ from nyxara.njp.dialects import Dialect, Utterance, mint_dialect
 # the same reason; `NJPBrain.go_to_school` is the in-process entry point.
 # `nyxara.njp.general` is kept out for the third time for the same reason — it is
 # `python -m nyxara.njp.general` — and `NJPBrain.sit_general_exam` is its in-process entry point.
+# `nyxara.njp.puzzle` has no `__main__` and could be imported here; it is kept beside `general`
+# instead because the two are one subject, and `NJPBrain.puzzle` is its in-process entry point.
 from nyxara.njp.predictive import (
     Assumption,
     Explanation,
