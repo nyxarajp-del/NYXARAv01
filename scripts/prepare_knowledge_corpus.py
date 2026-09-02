@@ -450,6 +450,14 @@ def unaskable_subjects(rows: Iterable[Dict[str, Any]]) -> List[str]:
     from nyxara.njp.grounding import Grounder, _clean       # noqa: PLC0415 — optional at import
 
     grounder = Grounder()
+    # The reader consults its own store to tell "the capital of France" (a relation about a
+    # subject) from "the Age of Exploration" (a subject whose name contains " of "), so a check
+    # run against an *empty* Grounder is stricter than the thing it is checking: it reported
+    # `age of exploration` and `unit of measurement` unaskable while the live brain reads both
+    # correctly. Seeding the subject keys — the only thing `_known_entity` looks at — makes this
+    # measure the reader that actually runs.
+    for subject in {row["subject"] for row in rows}:
+        grounder.facts.setdefault((grounder._key(subject), "is_a"), [])
     lost: List[str] = []
     for subject in sorted({row["subject"] for row in rows}):
         text = next(r["subject_text"] for r in rows if r["subject"] == subject)

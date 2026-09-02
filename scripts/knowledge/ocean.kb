@@ -1,0 +1,81 @@
+# ocean.kb — the sea: its structure, its movement, its life and what people take from it.
+#
+# `geography.kb` names the five oceans and the Mariana Trench; `earth_science.kb` has `ocean` as
+# one line among fifty. Between them, nothing about the thing that covers seven tenths of the
+# planet: no tide mechanism, no current, no zone, no reef beyond a landmark, no fishery.
+#
+# It joins three files that were left dangling. `weather.kb` says a cyclone needs warm ocean
+# water; `environment.kb` says coral reefs need stable warm water; `animals.kb` puts a whale,
+# a shark and a jellyfish in "the sea". This is what all three were referring to.
+
+# --- structure ---------------------------------------------------------------------------------- #
+sea | is_a=body of water | means=a large body of salt water, usually smaller than an ocean or partly enclosed
+seawater | is_a=water | consists_of=water | consists_of=dissolved salt | has_property=about three and a half percent salt by mass | has_property=denser than fresh water | causes=things floating more easily than in fresh water
+salinity | is_a=physical quantity | means=how much dissolved salt water holds | causes=density differences that drive deep currents | has_property=higher where evaporation exceeds rainfall
+continental shelf | is_a=landform | means=the shallow seabed fringing a continent | has_property=where most fishing and most marine life is | causes=fisheries being concentrated near coasts
+continental slope | is_a=landform | means=where the shelf drops steeply toward the deep floor
+abyssal plain | is_a=landform | means=the flat deep ocean floor | has_property=among the least explored places on Earth
+ocean trench | is_a=landform | means=a very deep narrow furrow in the sea floor | occurs_when=one tectonic plate is forced under another | has_kind=Mariana Trench
+mid-ocean ridge | is_a=landform | means=an underwater mountain chain where plates pull apart | causes=new sea floor being made | has_property=the longest mountain range on Earth
+seamount | is_a=landform | means=an underwater mountain that does not reach the surface | causes=rich fishing grounds where currents rise over it
+hydrothermal vent | is_a=feature | located_in=mid-ocean ridges | means=a fissure venting mineral rich hot water | causes=communities of life that need no sunlight at all
+photic zone | is_a=ocean zone | means=the sunlit upper layer | has_property=where photosynthesis is possible | causes=nearly all ocean food chains starting here
+aphotic zone | is_a=ocean zone | means=the layer sunlight does not reach | has_property=cold, dark and under great pressure
+deep sea | is_a=ocean zone | has_property=high pressure and near freezing | causes=animals with slow metabolisms and unusual adaptations
+bioluminescence | is_a=phenomenon | means=light made by a living organism | located_in=the deep sea especially | purpose=luring prey, signalling or startling a predator
+estuary | is_a=body of water | means=where a river meets the sea and fresh mixes with salt | purpose=a nursery for many fish | has_property=very productive
+lagoon | is_a=body of water | means=shallow water separated from the sea by a reef or a sandbar
+bay | is_a=body of water | means=a broad inlet of the sea
+gulf | is_a=body of water | means=a large inlet of the sea, deeper into the land than a bay
+coast | is_a=landform | means=where land meets sea | has_property=constantly reshaped by waves and tides
+
+# --- movement ------------------------------------------------------------------------------------- #
+tide | is_a=phenomenon | means=the regular rise and fall of the sea | occurs_when=the Moon and Sun pull on the ocean as the Earth rotates | causes=two high and two low tides at most coasts each day | requires=the Moon's gravity mostly
+spring tide | is_a=tide | occurs_when=the Sun and Moon pull in line at new and full moon | causes=the largest range between high and low
+neap tide | is_a=tide | occurs_when=the Sun and Moon pull at right angles | causes=the smallest range
+tidal range | is_a=measure | means=the height difference between high and low tide | has_property=varies enormously from coast to coast
+ocean current | is_a=flow of water | means=a steady large scale movement of seawater | causes=heat being carried from the tropics toward the poles | requires=wind, temperature and salinity differences
+surface current | is_a=ocean current | requires=wind | located_in=the upper few hundred metres
+deep current | is_a=ocean current | requires=differences in temperature and salinity | has_property=very slow, taking centuries to circulate
+thermohaline circulation | is_a=system | means=the global overturning driven by heat and salt | causes=climate being moderated far from where the heat was gathered | also_known_as=the ocean conveyor belt
+Gulf Stream | is_a=ocean current | located_in=the Atlantic | causes=north-western Europe being milder than its latitude
+upwelling | is_a=process | means=deep nutrient rich water rising to the surface | causes=some of the richest fishing grounds in the world
+ocean wave | is_a=phenomenon | occurs_when=wind transfers energy to the water surface | causes=erosion of coasts
+swell | is_a=ocean wave | means=waves that have travelled far from the wind that made them | has_property=long and regular
+breaker | is_a=ocean wave | occurs_when=a wave reaches water too shallow to support it | causes=surf
+rip current | is_a=flow of water | means=a narrow fast flow running away from the beach | causes=swimmers being carried out | has_property=escaped by swimming across it rather than against it
+tsunami as a wave | is_a=ocean wave | occurs_when=an undersea earthquake or landslide displaces a great volume of water | causes=devastating flooding at the coast | has_property=barely noticeable in deep water
+
+# --- life ------------------------------------------------------------------------------------------- #
+marine life | is_a=life | means=organisms living in the sea | has_kind=plankton | has_kind=fish | has_kind=marine mammal | has_kind=coral
+plankton | is_a=marine life | means=organisms that drift rather than swim against currents | has_kind=phytoplankton | has_kind=zooplankton | causes=the base of nearly every ocean food chain
+phytoplankton | is_a=plankton | capable_of=photosynthesis | causes=a large share of the world's oxygen | requires=sunlight and nutrients
+zooplankton | is_a=plankton | means=drifting animals, many of them tiny | requires=phytoplankton
+krill | is_a=zooplankton | purpose=food for whales and seabirds | has_property=among the most abundant animals on Earth
+marine mammal | is_a=mammal | located_in=the sea | has_kind=whale | has_kind=dolphin | has_kind=seal | requires=surfacing to breathe
+coral polyp | is_a=animal | means=the tiny animal that builds a reef | requires=warm clear shallow water | causes=a limestone skeleton that becomes reef
+coral bleaching | is_a=process | occurs_when=warm water makes coral expel the algae that feed it | causes=reefs turning white and dying if it persists
+kelp forest | is_a=ecosystem | consists_of=large brown algae | purpose=shelter and food for many species | located_in=cool coastal waters
+mangrove ecosystem | is_a=ecosystem | located_in=tropical tidal coasts | purpose=nursery for fish and protection against storm surge
+seagrass meadow | is_a=ecosystem | purpose=stabilising the seabed and storing carbon
+food chain in the sea | is_a=food chain | means=phytoplankton to zooplankton to small fish to large fish and mammals | causes=pollutants concentrating toward the top
+
+# --- people and the sea ----------------------------------------------------------------------------------- #
+fishery | is_a=activity | means=the taking of fish and shellfish from a stock | requires=the stock reproducing at least as fast as it is taken
+overfishing | is_a=problem | occurs_when=fish are taken faster than the stock can replace them | causes=stocks collapsing | causes=fewer and smaller fish for greater effort
+bycatch | is_a=problem | means=animals caught unintentionally in fishing gear | causes=turtles, dolphins and seabirds being killed
+trawling | is_a=fishing method | means=dragging a net through the water or along the bottom | causes=damage to the sea floor when it is a bottom trawl
+sustainable fishing | is_a=practice | purpose=taking no more than the stock can replace | requires=quotas | requires=enforcement
+aquaculture as farming | is_a=activity | means=farming fish, shellfish or seaweed | causes=supply without taking from wild stocks | causes=pollution where waste is concentrated
+marine protected area | is_a=protected area | purpose=letting a stretch of sea and its stocks recover | causes=fish spilling over into surrounding waters
+desalination | is_a=process | means=removing salt from seawater to make it drinkable | requires=a great deal of energy | purpose=fresh water where there is none
+shipping lane | is_a=route | means=a habitual path for merchant ships | causes=most of world trade moving by sea
+territorial waters | is_a=zone | means=the belt of sea a coastal state governs as its own
+exclusive economic zone | is_a=zone | means=the sea in which a coastal state holds the rights to resources | has_property=extends well beyond territorial waters
+ocean acidification | is_a=process | occurs_when=the sea absorbs carbon dioxide from the air | causes=shells and coral skeletons being harder to build
+marine pollution | is_a=pollution | has_kind=plastic pollution | has_kind=oil spill | has_kind=agricultural runoff | causes=dead zones where oxygen is used up
+dead zone | is_a=region | occurs_when=nutrient runoff causes a bloom whose decay strips the oxygen | causes=water that will not support fish
+oceanography | is_a=discipline | means=the study of the ocean | involves=physics, chemistry, geology and biology
+sonar | is_a=technology | purpose=mapping the sea floor and locating objects by sound | requires=sound travelling far better than light in water
+submersible | is_a=vehicle | purpose=carrying instruments or people to great depth | requires=a hull that resists enormous pressure
+lighthouse as a mark | is_a=building | purpose=marking a hazard or a landfall for shipping

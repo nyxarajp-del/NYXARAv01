@@ -128,7 +128,7 @@ past | is_a=period | means=time that has already happened
 present | is_a=period | means=the time that is now
 future | is_a=period | means=time that has not happened yet
 duration | is_a=quantity | means=how long something lasts | unit=second
-age of a thing | is_a=quantity | means=how long a thing has existed
+chronological age | is_a=quantity | means=how long a thing has existed
 
 # --- the senses and what they report ---------------------------------------------------------------------------- #
 sense | is_a=faculty | means=a way of taking in something about the world | has_kind=sight | has_kind=hearing | has_kind=smell | has_kind=taste | has_kind=touch

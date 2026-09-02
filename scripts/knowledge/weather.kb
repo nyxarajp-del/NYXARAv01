@@ -1,0 +1,84 @@
+# weather.kb — meteorology: what the air is doing, why, and how it is forecast.
+#
+# `earth_science.kb` names `weather`, `climate`, `wind`, `cloud`, `rain`, `hurricane`, `tornado`,
+# `drought` and `flood` — nine outcomes with no mechanism between them. Nothing said what pressure
+# has to do with wind, what humidity is, why it rains at a front, or how a forecast is made, so
+# every "why" question about the most-discussed subject there is came back empty.
+#
+# `environment.kb` owns climate *change*; this file owns ordinary weather, and the two meet at
+# `extreme weather`.
+
+# --- the atmosphere at work ------------------------------------------------------------------- #
+meteorology | is_a=discipline | means=the study of the atmosphere and its weather | involves=observation | involves=modelling | purpose=forecasting
+air pressure | is_a=physical quantity | means=the weight of the air above a place | unit=hectopascal | causes=wind when it differs between two places | has_property=falls with altitude
+low pressure area | is_a=weather system | means=a region where air pressure is lower than around it | causes=air rising | causes=cloud and rain | also_known_as=depression
+high pressure area | is_a=weather system | means=a region where air pressure is higher than around it | causes=air sinking | causes=clear settled weather | also_known_as=anticyclone
+wind as a flow | is_a=flow of air | occurs_when=air moves from high pressure to low pressure | causes=the transfer of heat and moisture around the world | requires=a pressure difference
+sea breeze | is_a=wind | occurs_when=land heats faster than the sea by day | causes=cool air moving inland during the afternoon
+land breeze | is_a=wind | occurs_when=land cools faster than the sea by night | causes=air moving out to sea before dawn
+trade winds | is_a=wind | located_in=the tropics | has_property=steady and easterly | causes=the sailing routes of the age of sail
+jet stream | is_a=wind | located_in=the upper atmosphere | has_property=a fast narrow band of wind | causes=weather systems being steered across continents
+Coriolis effect | is_a=physical effect | occurs_when=air moves over a rotating Earth | causes=winds curving rather than travelling straight | causes=storms rotating in opposite directions in the two hemispheres
+humidity | is_a=physical quantity | means=how much water vapour the air holds | causes=sweat evaporating slowly when it is high | has_kind=relative humidity
+relative humidity | is_a=humidity | means=how near the air is to holding all the vapour it can at that temperature | has_property=stated as a percentage
+dew point | is_a=temperature | means=the temperature at which air becomes saturated and water condenses | causes=dew, mist and fog
+evaporation | is_a=process | means=liquid water becoming vapour | requires=heat | causes=water entering the atmosphere
+condensation | is_a=process | means=water vapour becoming liquid | occurs_when=moist air is cooled to its dew point | causes=cloud, dew and rain
+precipitation | is_a=process | means=water falling out of the atmosphere | has_kind=rain | has_kind=snow | has_kind=hail | has_kind=drizzle | occurs_when=droplets grow too heavy to stay aloft
+convection in air | is_a=process | means=warm air rising and cool air sinking | causes=towering clouds and thunderstorms | requires=surface heating
+
+# --- clouds, storms and what they bring ----------------------------------------------------------- #
+cloud formation | is_a=process | occurs_when=rising air cools to its dew point | requires=condensation nuclei | causes=a visible cloud
+condensation nucleus | is_a=particle | purpose=giving water vapour a surface to condense on | has_kind=dust | has_kind=sea salt
+cumulus | is_a=cloud | has_property=heaped and white with a flat base | means=fair weather cloud unless it grows tall
+cumulonimbus | is_a=cloud | has_property=towering, with an anvil top | causes=thunderstorms | causes=hail and lightning
+stratus | is_a=cloud | has_property=a flat grey layer | causes=drizzle and dull skies
+cirrus | is_a=cloud | has_property=thin and wispy, made of ice crystals | located_in=high altitude | means=often a sign of an approaching front
+fog | is_a=phenomenon | means=cloud at ground level | occurs_when=moist air is cooled to its dew point near the surface | causes=greatly reduced visibility
+mist | is_a=phenomenon | means=the same as fog but with visibility less reduced
+dew | is_a=phenomenon | occurs_when=surfaces cool below the dew point overnight | causes=water on grass in the morning
+frost | is_a=phenomenon | occurs_when=surfaces cool below freezing and vapour deposits as ice | causes=damage to crops
+hail | is_a=precipitation | occurs_when=droplets are carried repeatedly through freezing levels in a storm | causes=damage to crops and vehicles
+thunderstorm | is_a=weather system | requires=warm moist air and instability | causes=lightning | causes=thunder | causes=heavy rain in a short time
+lightning | is_a=phenomenon | occurs_when=charge separated within a cloud discharges | causes=thunder | has_property=heats the air to many times the temperature of the Sun's surface briefly
+thunder | is_a=phenomenon | occurs_when=air heated by lightning expands explosively | causes=the delay between flash and sound giving the distance
+weather front | is_a=boundary | means=where two air masses of different temperature meet | causes=cloud and precipitation | has_kind=cold front | has_kind=warm front
+cold front | is_a=weather front | occurs_when=cold air pushes under warm air | causes=a short spell of heavy rain and a temperature drop
+warm front | is_a=weather front | occurs_when=warm air rides over cold air | causes=a long spell of steady rain
+air mass | is_a=body of air | means=a large body of air with roughly uniform temperature and humidity
+cyclone | is_a=weather system | means=a rotating storm around a low pressure centre | has_kind=tropical cyclone | requires=warm ocean water to form | causes=storm surge | also_known_as=hurricane or typhoon by region
+storm surge | is_a=phenomenon | occurs_when=a cyclone's winds and low pressure pile sea water against a coast | causes=most of the deaths in a severe cyclone
+eye of a storm | is_a=part of a cyclone | means=the calm centre around which the storm rotates
+monsoon season | is_a=season | occurs_when=the monsoon wind reverses and brings moist ocean air | causes=most of the annual rainfall in South Asia | causes=the farming calendar being built around it
+heat index | is_a=measure | means=how hot it feels once humidity is taken into account | causes=a warning being issued below the temperature alone would suggest
+wind chill | is_a=measure | means=how cold it feels once wind is taken into account
+
+# --- season and climate ------------------------------------------------------------------------------ #
+season as a period | is_a=period | means=a division of the year with its own characteristic weather | occurs_when=the Earth's tilt changes how directly sunlight falls | has_kind=summer | has_kind=winter | has_kind=spring | has_kind=autumn
+axial tilt | is_a=property of the Earth | means=that the axis is tilted relative to the plane of its orbit | causes=the seasons | causes=day length changing through the year
+solstice | is_a=event | means=the day of longest or shortest daylight | occurs_when=the tilt points most toward or away from the Sun
+equinox | is_a=event | means=a day when daylight and darkness are nearly equal | occurs_when=the tilt is side-on to the Sun
+climate zone | is_a=region | means=a band of the world with a characteristic long term weather pattern | has_kind=tropical | has_kind=temperate | has_kind=polar | has_kind=arid
+tropical climate | is_a=climate zone | has_property=hot all year with high rainfall | located_in=near the equator
+temperate climate | is_a=climate zone | has_property=distinct seasons without extremes | located_in=the middle latitudes
+polar climate | is_a=climate zone | has_property=cold all year with little precipitation
+arid climate | is_a=climate zone | has_property=very low rainfall | causes=deserts
+El Nino | is_a=phenomenon | means=a periodic warming of the eastern Pacific | causes=shifted rainfall patterns across much of the world | has_property=recurs every few years
+rain shadow | is_a=phenomenon | occurs_when=air loses its moisture climbing a mountain range | causes=a dry region on the far side
+microclimate | is_a=climate | means=the climate of a very small area, differing from around it | causes=a city being warmer than the countryside around it
+urban heat island | is_a=microclimate | occurs_when=buildings and roads store and re-radiate heat | causes=a city being several degrees warmer at night
+
+# --- forecasting ---------------------------------------------------------------------------------------- #
+weather forecast | is_a=prediction | purpose=saying what the weather will do | requires=observations | requires=a numerical model | has_property=less reliable the further ahead it looks
+weather station | is_a=facility | purpose=recording temperature, pressure, humidity, wind and rainfall | causes=the observations a forecast starts from
+weather balloon | is_a=instrument | purpose=measuring the atmosphere at height as it rises | has_part=radiosonde
+radiosonde | is_a=instrument | purpose=sending back readings from a rising balloon
+weather radar | is_a=instrument | purpose=locating and measuring precipitation | causes=warnings minutes to hours ahead
+numerical weather prediction | is_a=method | means=solving the equations of the atmosphere on a computer | requires=initial conditions | has_property=sensitive to small errors in those conditions
+chaos in weather | is_a=property | means=that tiny differences in the starting state grow into large differences later | causes=a hard limit on how far ahead weather can be forecast
+ensemble forecast | is_a=method | means=running a model many times from slightly different starts | purpose=turning a single guess into a probability
+probability of precipitation | is_a=measure | means=the chance that measurable rain falls at a point in a period
+weather warning | is_a=notice | purpose=telling people that dangerous weather is expected | causes=preparation before it arrives
+isobar | is_a=line on a map | means=a line joining places of equal air pressure | causes=close isobars indicating strong wind
+weather map | is_a=map | purpose=showing pressure, fronts and systems at one moment
+climate record | is_a=data | means=long term measurements of weather | purpose=telling an unusual season from a changing climate | requires=decades of consistent observation

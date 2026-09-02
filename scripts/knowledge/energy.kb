@@ -1,0 +1,80 @@
+# energy.kb — where power comes from, how it is generated and how it reaches a socket.
+#
+# `physics.kb` has energy as a quantity with a unit and its conservation law. `technology.kb` has
+# `solar panel`, `wind turbine`, `hydroelectric dam`, `nuclear power plant`, `battery`, `generator`
+# and `power grid` — seven devices with a purpose each and no system joining them. So "how is
+# electricity made", "what is the grid", "why is solar intermittent" and "what is a unit on the
+# bill" had no answer, and `environment.kb`'s lines about emissions had no mechanism behind them.
+#
+# The chain this file makes walkable is the real one: a fuel or a flow, a turbine, a generator, a
+# transformer, a transmission line, a meter, an appliance.
+
+# --- the idea --------------------------------------------------------------------------------- #
+energy source | is_a=resource | means=something from which useful energy can be drawn | has_kind=nuclear fuel | has_kind=renewable resource
+primary energy | is_a=energy | means=energy as it is found, before conversion | has_kind=coal | has_kind=sunlight | has_kind=wind
+secondary energy | is_a=energy | means=energy after conversion into a carrier | has_kind=electricity | has_kind=hydrogen
+energy conversion | is_a=process | means=turning energy from one form into another | causes=some of it always becoming waste heat | requires=a machine
+efficiency | is_a=measure | means=the fraction of energy in that comes out as the wanted form | has_property=always below one | causes=the rest leaving as heat
+waste heat | is_a=energy | occurs_when=any conversion takes place | has_property=unavoidable | causes=cooling towers and radiators
+power as a rate | is_a=physical quantity | means=energy delivered per unit of time | unit=watt
+kilowatt hour | is_a=unit of energy | means=a kilowatt drawn for one hour | purpose=what an electricity bill is measured in | also_known_as=a unit on the bill
+load | is_a=measure | means=how much power is being drawn at one moment | causes=generation having to match it continuously
+base load | is_a=load | means=the minimum demand that is present at all hours
+peak load | is_a=load | means=the highest demand of the day | causes=expensive plant being run for a few hours
+energy security | is_a=condition | means=having reliable and affordable supply | requires=diverse sources | requires=storage or flexible generation
+energy poverty | is_a=condition | means=lacking reliable access to modern energy | causes=cooking on smoky fuel | causes=study and work limited to daylight
+
+# --- fuels ------------------------------------------------------------------------------------------ #
+coal | is_a=fossil fuel | occurs_when=ancient plant matter is buried and compressed | purpose=generating electricity and making steel | causes=the most carbon dioxide per unit of energy of the common fuels
+natural gas | is_a=fossil fuel | consists_of=methane | purpose=heating, cooking and generating electricity | causes=less carbon dioxide per unit than coal
+crude oil | is_a=fossil fuel | purpose=the source of petrol, diesel and the feedstock for plastics | requires=refining
+refining | is_a=process | means=separating crude oil into fractions by boiling point | causes=petrol, diesel, kerosene and bitumen | requires=a fractionating column
+combustion of a fuel | is_a=chemical reaction | means=a fuel reacting with oxygen and releasing heat | requires=oxygen | causes=carbon dioxide and water from a hydrocarbon
+calorific value | is_a=measure | means=the energy released by burning a stated amount of a fuel
+biomass fuel | is_a=renewable resource | means=fuel from recently living material | has_kind=firewood | has_kind=crop residue | has_property=only carbon neutral if what is burnt is regrown
+firewood | is_a=biomass fuel | causes=indoor air pollution when burnt in an unvented stove | causes=deforestation where it is cut faster than it grows
+biofuel | is_a=biomass fuel | means=a liquid fuel made from crops or waste | has_kind=ethanol | has_kind=biodiesel
+nuclear fuel | is_a=energy source | consists_of=uranium | causes=heat through fission | has_property=an enormous amount of energy per kilogram | causes=radioactive waste that must be stored for a very long time
+nuclear fission as a source | is_a=nuclear reaction | means=a heavy nucleus splitting and releasing energy | requires=a controlled chain reaction | causes=heat used to raise steam
+nuclear fusion as a source | is_a=nuclear reaction | means=light nuclei joining and releasing energy | has_property=the Sun's process | has_property=not yet a practical source of electricity on Earth
+hydrogen as a fuel | is_a=secondary energy | purpose=storing and carrying energy | causes=only water when burnt | requires=energy to produce in the first place
+
+# --- generating electricity ------------------------------------------------------------------------------ #
+electricity generation | is_a=process | means=turning some other form of energy into electrical energy | requires=a generator in almost every case | causes=electricity that must be used or stored at once
+turbine | is_a=machine | purpose=turning a flow of steam, water, gas or air into rotation | causes=a generator shaft turning | requires=a moving fluid
+steam turbine | is_a=turbine | requires=high pressure steam | located_in=coal, gas and nuclear power stations
+boiler | is_a=machine | purpose=turning water into steam using a heat source | part_of=a thermal power station
+thermal power station | is_a=power station | means=a station that burns fuel to raise steam | has_part=boiler | has_part=steam turbine | has_part=generator | has_part=cooling tower | causes=emissions unless the fuel is carbon neutral
+cooling tower | is_a=structure | purpose=rejecting waste heat to the air | causes=the visible plume, which is water vapour rather than smoke
+nuclear power station | is_a=power station | requires=nuclear fuel | has_part=reactor | has_part=containment building | causes=no carbon dioxide from generation | causes=radioactive waste
+reactor | is_a=machine | purpose=holding and controlling a nuclear chain reaction | has_part=control rod | has_part=coolant
+control rod | is_a=component | purpose=absorbing neutrons to slow or stop the chain reaction | causes=the reaction being controllable
+hydroelectric power | is_a=renewable resource | means=electricity from falling or flowing water | requires=a height difference | causes=no fuel cost and no emissions from generation | causes=land being flooded behind a dam
+dam | is_a=structure | purpose=storing water and creating a height difference | causes=a reservoir | causes=displacement of people and habitat where it floods
+pumped storage | is_a=storage | means=pumping water uphill when power is cheap and releasing it when it is dear | purpose=storing energy at grid scale
+solar panel as a device | is_a=device | purpose=turning sunlight directly into electricity | requires=sunlight | has_property=no moving parts | has_property=produces nothing at night
+photovoltaic effect | is_a=physical effect | means=light freeing charge carriers in a semiconductor | causes=a solar cell producing current
+solar thermal | is_a=technology | means=concentrating sunlight to raise steam | purpose=generating electricity or heating water
+wind turbine as a device | is_a=turbine | purpose=turning wind into electricity | has_part=blade | has_part=nacelle | has_property=output varies with the cube of wind speed
+geothermal energy | is_a=renewable resource | means=heat drawn from underground | purpose=heating and electricity | located_in=volcanic regions mostly
+tidal energy | is_a=renewable resource | means=energy from the rise and fall of tides | has_property=predictable, unlike wind and sun
+intermittency | is_a=property | means=that output depends on conditions rather than on demand | has_kind=solar | has_kind=wind | requires=storage or flexible backup to manage
+grid scale storage | is_a=technology | purpose=holding energy until it is needed | has_kind=pumped storage | has_kind=battery storage | causes=intermittent sources becoming dependable
+
+# --- getting it to a socket ---------------------------------------------------------------------------------- #
+power grid as a system | is_a=network | means=the whole system of generation, transmission and distribution | requires=supply matching demand at every instant | causes=a blackout when it fails
+transmission line | is_a=infrastructure | purpose=carrying power long distances at very high voltage | has_property=high voltage because it wastes less
+distribution network | is_a=infrastructure | purpose=carrying power from a substation to buildings at low voltage
+substation | is_a=facility | purpose=changing voltage between transmission and distribution | has_part=electrical transformer
+electrical transformer | is_a=device | purpose=raising or lowering alternating voltage | requires=alternating current | causes=long distance transmission being practical
+transmission loss | is_a=loss | means=energy lost as heat in the wires | causes=high voltage being used to reduce it | has_property=rises with the square of current
+alternating current as a supply | is_a=electric current | means=current that reverses direction many times a second | purpose=the form electricity is distributed in | causes=transformers being possible
+direct current as a supply | is_a=electric current | means=current in one direction only | located_in=batteries and electronics
+frequency of the supply | is_a=physical quantity | means=how many times a second the alternating current reverses | has_property=must be held within a narrow band across the whole grid
+blackout | is_a=failure | occurs_when=supply cannot meet demand or a fault cascades | causes=everything on the network stopping at once
+load shedding | is_a=measure | means=cutting supply to some users deliberately | purpose=preventing a whole grid from collapsing
+smart meter | is_a=device | purpose=recording use in detail and reporting it automatically | causes=pricing that varies with the time of day
+off grid | is_a=arrangement | means=generating and using power without a connection to the network | requires=storage
+microgrid | is_a=network | means=a small grid that can run on its own | purpose=supplying a village or a campus where the main grid is weak
+rural electrification | is_a=programme | purpose=bringing grid or off-grid power to villages | causes=study after dark, refrigeration and irrigation pumps
+energy audit | is_a=examination | purpose=finding where energy is being wasted in a building or plant | causes=savings that need no new generation

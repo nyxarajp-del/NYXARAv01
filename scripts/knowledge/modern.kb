@@ -1,0 +1,75 @@
+# modern.kb — the modern world: revolutions, wars, decolonisation and the institutions that came out of them.
+#
+# `history.kb` covers the last three centuries in about fifteen lines — the Industrial Revolution,
+# two world wars, the Cold War, Indian Independence, the Moon landing. Each is a date and a name.
+# Nothing said what the Industrial Revolution actually changed, what the League of Nations was,
+# what decolonisation meant, what the Universal Declaration is for.
+#
+# This is deliberately institutional and causal rather than narrative. Where a subject is still
+# politically live, the line states the record — a treaty was signed, a body was founded, a right
+# was declared — and stops there, because a fact store has no way to mark a judgement as one and
+# would state it flatly.
+
+# --- the long transformation ------------------------------------------------------------------- #
+Industrial Revolution as a change | is_a=historical change | occurs_when=power driven machinery replaces hand production | causes=factories | causes=cities growing very fast | causes=wage labour replacing craft and land | requires=coal and iron
+factory system | is_a=system | means=production gathered under one roof with powered machines | causes=work organised by the clock rather than by the task
+urbanisation in the industrial age | is_a=process | means=people moving from countryside to industrial towns | causes=overcrowding and epidemic disease before sanitation
+child labour | is_a=practice | occurs_when=children are employed in place of adults | causes=schooling laws and factory acts being passed against it
+labour movement | is_a=movement | purpose=improving wages, hours and safety through organisation | causes=trade unions | causes=the eight hour day
+enclosure | is_a=historical change | means=common land being fenced into private holdings | causes=people leaving the land for towns
+Agricultural Revolution of the modern era | is_a=historical change | involves=crop rotation and selective breeding | causes=fewer farmers feeding more people
+steam power as a change | is_a=historical change | causes=factories no longer needing to sit beside a river | causes=railways and steamships
+railway age | is_a=period | causes=goods and people moving faster than a horse for the first time | causes=standard time being adopted so timetables could work
+telegraph age | is_a=period | causes=information travelling faster than the person carrying it | causes=markets and empires being run at a distance
+mass production | is_a=method | means=making identical goods in large numbers on a line | causes=prices falling far enough for ordinary people to buy
+Second Industrial Revolution | is_a=historical change | involves=electricity | involves=steel | involves=chemicals | causes=the modern city
+Information Age as a period | is_a=period | involves=the computer | involves=the internet | causes=information being copied at almost no cost
+
+# --- revolutions and the modern state ------------------------------------------------------------- #
+Enlightenment as a movement | is_a=intellectual movement | involves=reason as the test of authority | causes=arguments for rights, tolerance and constitutional government
+American Revolution as an event | is_a=revolution | causes=the independence of thirteen colonies | causes=a written constitution with separated powers
+French Revolution as an event | is_a=revolution | involves=the overthrow of the monarchy | causes=the language of citizenship and rights across Europe | causes=the metric system
+Declaration of the Rights of Man | is_a=declaration | located_in=France | purpose=stating rights held to belong to every citizen
+Latin American independence | is_a=historical change | occurs_when=Spanish and Portuguese colonies break away | involves=Simon Bolivar
+abolition of slavery | is_a=historical change | means=the ending of legal slavery | causes=long campaigns before and after the laws were passed
+suffrage movement | is_a=movement | purpose=extending the vote, first beyond property and then to women | causes=universal adult suffrage
+nationalism | is_a=political idea | means=that a people sharing a culture should govern themselves | causes=both independence movements and wars over borders
+imperialism | is_a=historical system | means=one state extending rule or control over others | causes=borders and economies shaped for the ruling power
+scramble for Africa | is_a=historical event | means=European powers partitioning Africa among themselves | causes=borders drawn without regard to the peoples inside them
+
+# --- the world wars and after --------------------------------------------------------------------------- #
+First World War as a conflict | is_a=war | occurs_when=alliances turn a regional crisis into a general war | involves=trench warfare | causes=the collapse of four empires | causes=the League of Nations
+trench warfare | is_a=military situation | means=fixed lines of dug positions | causes=enormous casualties for very little movement
+Treaty of Versailles | is_a=treaty | purpose=settling terms after the First World War | causes=grievances that shaped the following two decades
+League of Nations | is_a=international organisation | purpose=preventing war by collective security | has_property=lacked the membership and the means to enforce | causes=the United Nations being designed differently
+Great Depression | is_a=economic crisis | occurs_when=a financial collapse spreads through the world economy | causes=mass unemployment | causes=governments taking a larger role in economies
+Second World War as a conflict | is_a=war | has_property=the deadliest conflict in history | involves=fighting across Europe, Asia, Africa and the oceans | causes=the United Nations | causes=decolonisation accelerating
+Holocaust | is_a=genocide | means=the systematic murder of six million Jews and of Roma, disabled people and others by the Nazi state | causes=the Genocide Convention | causes=the phrase never again
+genocide | is_a=crime | means=acts intended to destroy a national, ethnic, racial or religious group | has_property=defined and prohibited by an international convention
+atomic bombing of Hiroshima and Nagasaki | is_a=historical event | has_property=the only use of nuclear weapons in war | causes=the nuclear age and the arms control that followed
+United Nations founding | is_a=historical event | purpose=an organisation to keep peace and cooperate on shared problems | causes=the Security Council and the General Assembly
+Universal Declaration of Human Rights as a document | is_a=declaration | purpose=setting out rights held to belong to every person | has_property=not itself a treaty, but the basis of many | involves=Eleanor Roosevelt
+Nuremberg trials | is_a=trial | purpose=trying individuals for crimes committed as state policy | causes=the principle that following orders is not a defence
+Geneva Conventions | is_a=treaty | purpose=limiting how war may be conducted and protecting those not fighting | involves=the wounded, prisoners and civilians
+Marshall Plan | is_a=programme | purpose=funding the rebuilding of western Europe after the war
+decolonisation | is_a=historical change | means=colonies becoming independent states | occurs_when=empires weaken and independence movements strengthen | causes=most of the members of the United Nations today
+partition of India | is_a=historical event | occurs_when=British India is divided into India and Pakistan | causes=one of the largest migrations in history | causes=lasting disputes over borders
+apartheid | is_a=historical system | located_in=South Africa | means=racial segregation enforced by law | causes=international sanctions | occurs_when=it is dismantled in the early nineteen nineties
+
+# --- the Cold War and the present order ---------------------------------------------------------------------- #
+Cold War as a rivalry | is_a=historical rivalry | means=confrontation between the United States and the Soviet Union without direct war between them | involves=nuclear deterrence | involves=proxy conflicts | causes=the space race
+nuclear deterrence | is_a=doctrine | means=holding weapons so that using them would be suicidal for either side | causes=arsenals maintained rather than used
+arms control | is_a=practice | purpose=limiting the number or kind of weapons by agreement | involves=verification
+Berlin Wall | is_a=structure | purpose=stopping movement from east to west Berlin | occurs_when=it is opened in 1989 | causes=a symbol of the Cold War ending
+non-aligned movement | is_a=international organisation | means=states declining to side with either Cold War bloc
+Cuban Missile Crisis | is_a=historical event | means=the closest the Cold War came to nuclear war | causes=a direct communication link between the two capitals
+Universal suffrage in the modern era | is_a=historical change | means=the vote extended to all adult citizens | has_property=achieved at very different dates in different countries
+civil rights movement | is_a=movement | located_in=the United States | purpose=ending racial segregation and securing voting rights | involves=non-violent protest
+globalisation as a process | is_a=process | means=economies and cultures becoming more connected across borders | causes=cheaper goods and faster ideas | causes=exposure to shocks that begin elsewhere
+European integration | is_a=historical change | purpose=binding European economies so tightly that war between them becomes impractical | causes=the European Union
+end of the Soviet Union | is_a=historical event | causes=fifteen independent states | causes=the end of the bipolar order
+digital revolution | is_a=historical change | involves=computers, networks and mobile phones | causes=information, money and work moving without regard to distance
+climate negotiations | is_a=process | purpose=agreeing international action on greenhouse gas emissions | involves=the Paris Agreement
+pandemic of 1918 | is_a=pandemic | means=an influenza pandemic that killed tens of millions | causes=public health being organised internationally
+green revolution as a change | is_a=historical change | involves=high yielding varieties, fertiliser and irrigation | causes=famine receding in countries that had expected it
+demographic transition | is_a=process | means=birth and death rates both falling as a country develops | causes=population growth slowing after a period of rapid increase

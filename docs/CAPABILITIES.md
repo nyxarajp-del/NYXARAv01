@@ -1807,8 +1807,8 @@ General knowledge cannot be examined that way. There is no minting a fresh fact 
 what she knows of it is exactly what she was told. So the held-out surface has to be built the
 other way round: **from facts she was told, compose questions whose answers she was never told.**
 
-**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 40 — from **3,745 facts
-over 966 subjects to 12,106 over 3,400**, a little over three times the corpus.
+**What she was taught.** `scripts/knowledge/*.kb` grew from 15 domains to 46 — from **3,745 facts
+over 966 subjects to 13,483 over 3,774**, three and a half times the corpus.
 
 The first pass added six subjects that were simply absent: `arts`, `sport`, `philosophy` (with the
 world religions described rather than asserted), `body` (the anatomy `medicine` assumed and never
@@ -1826,14 +1826,25 @@ itself, with `attention` and `episodic memory` as module names and no fact about
 and `basics` — colour, shape, direction, quantity and the senses, the layer that had been invisible
 because it appears in the *questions* rather than in the answers.
 
-**Twelve name collisions were resolved by hand**, which is the interesting part of a merge at this
+A third pass took the six that were left, each of them a mechanism sitting under facts already in
+the corpus: `microbes` (a virus, and why an antibiotic does nothing to one — `health.kb` said
+handwashing causes large falls in disease and had no mechanism behind it), `weather` (pressure,
+fronts, humidity and how a forecast is actually made, under `earth_science`'s nine named
+outcomes), `energy` (the chain from a fuel to a socket, joining `technology`'s seven unconnected
+devices), `ocean` (tides, currents and zones, which `weather`, `environment` and `animals` had all
+been referring to), `ancient` and `modern` (the two halves of `history.kb`'s ninety lines, which
+gave every civilisation about one).
+
+**Seventeen name collisions were resolved by hand**, which is the interesting part of a merge at this
 scale, because the store keys on the name and would otherwise hold one subject that is two things:
 `bat` the animal against the cricket bat; `python` the snake against the language; `memory` the
 faculty against RAM; `attention` the psychological process against the transformer mechanism; `bus`
 the vehicle against the data bus; `tree` the plant against the data structure; `trade` against the
 skilled trade; `charge` the electric quantity against the criminal one; `library`, `transformer` and
-`mercury`, all three of which predate this change set; and `act` the deed against the Act of
-Parliament.
+`mercury`, all three of which predate this change set; `act` the deed against the Act of
+Parliament; and, from the third pass, `transmission` (disease against gearbox), `vector` (the
+mathematical against the mosquito), `wave` (ocean against physics), `pantheon` (the set of gods
+against the building in Rome) and `library` again.
 
 That last was caught by the exam rather than by reading: `arrest is_a act`, `act is_a statute`, and
 "what is arrest used for" inherited the purpose of legislation. Everything else that collides —
@@ -1950,6 +1961,60 @@ names them rather than subtracting them silently.
 
 Run it: `python -m nyxara.njp.general`, or `NJPBrain.sit_general_exam()`. Nothing in it writes to
 the brain, so it may be run twice around something that does.
+
+### The question grammar — 18 of 25 everyday phrasings did not parse
+
+The exam measures what she can be *asked*, and a second measurement asked a blunter question: of
+25 ordinary phrasings of questions the store could already answer, **how many parse at all?**
+
+**Seven.** The other eighteen failed, and every one failed the same way. The generic
+`what is X` pattern sits near the bottom of `grounding._QUESTION_PATTERNS`, matches to the end of
+the line, and swallows the tail into the subject — so "what is the capital of France" asked `is_a`
+about an entity named *capital of france*, "who invented the telephone" read the verb as part of a
+name, and "where is the Taj Mahal located" produced the subject *the taj mahal located*. The facts
+were in the store, reachable by `_lookup`, reasoned over by the Core, and unaskable in the words
+anybody actually uses. This is the same read/write asymmetry the causal block and the
+`capable_of` block in that table were each added to close, found the same way — by measuring
+instead of assuming.
+
+**The noun form is one pattern, not eleven.** `tell me the <p> of X` had been there since the
+beginning and is the phrasing nobody uses; `what is the <p> of X` is the one everybody uses and was
+absent. Reading the relation out of the noun slot covers capital, currency, symbol, unit, formula,
+purpose, meaning, birthplace, author, inventor and discoverer at once — and every relation added
+later, without a line each.
+
+**That breadth has a cost, and paying it is the interesting part.** The pattern also matches every
+subject whose *name* contains " of ", and this corpus has eighty-nine of them. Measured the moment
+it was added: "what is the Code of Hammurabi" read as `('hammurabi', 'code')`, "what is the
+Republic of India" as `('india', 'republic')`, and the corpus builder's own `unaskable_subjects`
+count — which exists to catch exactly this — went from 2 to 89. So `_NOUN_OF` is a **marker rather
+than a reading**: `_read_question` accepts it only if two things hold, and otherwise keeps scanning.
+
+1. The noun must name a relation something is actually stored under — known to the tables, or
+   present in the live store, so a relation a later corpus introduces is accepted without anyone
+   remembering to update a list.
+2. The whole phrase must not itself be a known entity. *Age of Exploration* is a subject and `age`
+   is also a relation; without this the relation reading wins and a question about the subject is
+   answered about something else. **The store knows its own subjects** — the same signal
+   `_read_polar_surface` uses to find where a subject ends, and the only one that separates these
+   two readings.
+
+`unaskable_subjects` went back to 2 — the two that genuinely cannot be named in English, `a priori`
+and `a posteriori`. It was also fixed itself: it built a *fresh* Grounder, so its check ran against
+an empty store and was stricter than the reader it was checking, reporting `age of exploration`
+unaskable while the live brain read it correctly. It now seeds the subject keys first.
+
+**"What does X do?" is answered by the evidence, not the grammar.** The form is genuinely
+ambiguous — "what does a plumber do" wants `purpose`, "what does a bat do" wants `capable_of`, and
+the five words are identical. It is read as a marker and `Grounder.answer` tries both, taking
+whichever the store has evidence for; neither is guessed, and if neither has any the answer stays
+honestly UNKNOWN. That is the move `_read_polar_surface` already makes for "is X <phrase>", for the
+same reason: the evidence disambiguates and the grammar cannot.
+
+After the change: **25 of 25**, with every existing template in `prepare_knowledge_corpus._ASKABLE`
+and `general.ASKABLE` still reading back as itself, and 23 tests in `tests/njp/test_grounding.py`
+pinning each form.
+
 
 ### Reachable over the wire
 
