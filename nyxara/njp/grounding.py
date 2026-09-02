@@ -1665,12 +1665,28 @@ class Grounder:
         self._subject_tokens: Dict[str, Set[str]] = {}       # content word -> subjects using it
 
     # ---- the one call ----------------------------------------------------- #
-    def ground(self, text: str, *, intent: Any = None, deep: bool = False) -> GroundingResult:
+    def ground(self, text: str, *, intent: Any = None, deep: bool = False,
+               store: bool = True) -> GroundingResult:
         """Ground one turn: answer it if it asks, learn from it if it tells.
 
         ``deep`` permits the fluent surface to be consulted for a sentence the deterministic core
         could not parse. It is off by default because that call is ~5 s against an on-device model
         — far too slow to sit in every turn — and the pulse is the right place to spend it.
+
+        ``store=False`` says **this sentence is not a claim about the world**, whatever its
+        grammar looks like. A question is already exempt — it returns above, before extraction —
+        but an *imperative* is not, and this reader has no category for one. Measured on ordinary
+        maths instructions, each of which filed a triple at confidence 0.75::
+
+            "simplify the fraction 18/24"  →  ('simplify fraction', '18') → '24'
+            "expand (x+2)(x+3)"            →  ('expand', 'x')             → '2 x 3'
+            "convert 5 km to metres"       →  ('convert', '5')            → 'km metres'
+
+        Nothing downstream can tell those from facts somebody stated: inheritance walks them, the
+        puzzle solver reads them, and a contradiction against one of them would be revised *into*
+        the store. The caller that knows the sentence is a task — :meth:`NJPBrain.perceive`, which
+        asks the mathematician first — says so here, and nothing is extracted or asserted. It is
+        not a weaker grounding; it is the absence of a claim to ground.
         """
         out = GroundingResult(text=str(text or ""))
         t0 = time.perf_counter()
@@ -1688,6 +1704,10 @@ class Grounder:
                 else:
                     self.unknown += 1
                 out.ungrounded = self._ungrounded(out.concepts, tally=True)
+                return out
+
+            if not store:
+                out.ungrounded = self._ungrounded(out.concepts, tally=False)
                 return out
 
             triples = self._extract(out.text)
