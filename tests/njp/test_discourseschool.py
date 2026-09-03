@@ -168,10 +168,10 @@ def test_the_attachment_lesson_finds_one_preposition_and_not_the_other():
     assert voice.attach.ambiguous == {"with"}
 
 
-def test_the_syllabus_is_twenty_seven_subjects_with_unique_ids():
+def test_the_syllabus_is_thirty_subjects_with_unique_ids():
     made = [factory() for factory in SUBJECTS]
-    assert len(made) == 27
-    assert len({subject.id for subject in made}) == 27
+    assert len(made) == 30
+    assert len({subject.id for subject in made}) == 30
     assert all(isinstance(subject, DiscourseSubject) for subject in made)
 
 

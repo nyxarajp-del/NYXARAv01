@@ -1363,3 +1363,92 @@ def test_a_word_seen_too_little_is_not_judged():
     voice.hear("qua the box moved?")
     voice.hear("The box moved.")
     assert "not judged" in voice.induction.function("qua").why
+
+
+# --------------------------------------------------------------------------- #
+# 17 · phonotactics, the lexicon, and languages people speak
+# --------------------------------------------------------------------------- #
+
+def test_the_tokeniser_keeps_a_word_and_its_combining_marks_together():
+    """`कुत्ता` came back as `['क','त','त']`, and this package has claimed Hindi since V.09."""
+    from nyxara.njp.semantics import tag_tokens as split
+
+    assert [t.text for t in split("कुत्ता पार्क में दौड़ता है")] == [
+        "कुत्ता", "पार्क", "में", "दौड़ता", "है"]
+    assert [t.text for t in split("मेरा नाम जय है")] == ["मेरा", "नाम", "जय", "है"]
+    # And nothing English changes.
+    assert [t.text for t in split("h2o and covid19")] == ["h2o", "and", "covid19"]
+    assert [t.text for t in split("don't stop")] == ["do", "n't", "stop"]
+    assert [t.text for t in split("3.14 is a number")] == ["3.14", "is", "a", "number"]
+
+
+def _sounds_corpus(voice, words, turns=120):
+    import random as _random
+
+    rng = _random.Random(11)
+    for _ in range(turns):
+        voice.phonotactics.hear(f"{rng.choice(words)} {rng.choice(words)} {rng.choice(words)}",
+                                language=voice.tongue)
+    return voice
+
+
+def test_a_language_heard_too_little_is_not_judged():
+    voice = Communicator()
+    voice.phonotactics.hear("alfa beta gamma", language=voice.tongue)
+    got = voice.phonotactics.judge("alfa", language=voice.tongue)
+    assert got.possible and "not judged" in got.why
+
+
+def test_a_sequence_the_language_never_uses_is_refused_and_named():
+    words = [f"{a}{b}{c}" for a in "bkmt" for b in "aeio" for c in "lnrs"]
+    voice = _sounds_corpus(Communicator(), words)
+    assert voice.phonotactics.judge(words[0], language=voice.tongue).possible
+    got = voice.phonotactics.judge("lbn", language=voice.tongue)
+    assert not got.possible and got.offending
+
+
+def test_letters_a_language_does_not_have_are_foreign_not_impossible():
+    """A different finding, and the two must not be confused."""
+    words = [f"{a}{b}{c}" for a in "bkmt" for b in "aeio" for c in "lnrs"]
+    voice = _sounds_corpus(Communicator(), words)
+    assert voice.phonotactics.judge("θλψ", language=voice.tongue).possible
+
+
+def test_a_noun_s_neighbours_are_nouns_and_a_verb_s_are_verbs():
+    """No dictionary, no thesaurus — only who stands with whom."""
+    import random as _random
+
+    rng = _random.Random(4)
+    nouns = [f"n{i}" for i in range(20)]
+    verbs = [f"v{i}" for i in range(12)]
+    voice = Communicator()
+    for _ in range(300):
+        voice.lexicon.hear(f"the {rng.choice(nouns)} {rng.choice(verbs)} the {rng.choice(nouns)}")
+    assert all(n.word in nouns for n in voice.lexicon.near("n3", limit=3))
+    assert all(n.word in verbs for n in voice.lexicon.near("v3", limit=3))
+
+
+def test_a_word_seen_too_little_has_no_neighbours():
+    voice = Communicator()
+    voice.lexicon.hear("the alpha moved the beta")
+    assert voice.lexicon.near("alpha") == []
+
+
+def test_the_closed_class_criterion_holds_on_languages_people_speak():
+    """V.31 measured it on minted languages; a drawn dialect has the distribution its generator
+    gave it, and the claim is about languages people speak."""
+    import random as _random
+
+    from nyxara.njp.discourse import ClosedClassLearner
+    from nyxara.njp.tongues import CLOSED, LANGUAGES, SENTENCES
+
+    learner = _english(ClosedClassLearner(), _random.Random(3))
+    learner.fit(KNOWN_CLOSED, language="en")
+    for language in LANGUAGES:
+        for sentence in SENTENCES[language]:
+            learner.hear(sentence, language=language)
+        found = learner.closed(language)
+        truth = set(CLOSED[language])
+        assert found, language
+        precision = len(found & truth) / len(found)
+        assert precision >= 0.8, (language, precision, sorted(found - truth))

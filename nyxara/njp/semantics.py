@@ -198,11 +198,40 @@ _ASK_VERBS: Tuple[str, ...] = (
     "batao", "bata", "bolo", "batana", "बताओ",
 )
 
-#: One token is a run of word characters, letters and digits together. Splitting them apart —
-#: which is what excluding ``\d`` did — cuts ``h2o`` into three tokens and ``covid19`` into two,
-#: and an identifier cut into pieces is an entity that cannot be looked up. Decimals keep their
-#: point; nothing else does, so a full stop still ends a sentence.
-_WORD_RX = re.compile(r"\d+\.\d+|[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
+#: The combining marks a word may carry. Python's ``\w`` is alphanumerics, and a Devanagari
+#: vowel sign is neither: ``category('\u0941') == 'Mn'`` and ``'\u0941'.isalnum()`` is ``False``.
+#: So the pattern below, written as ``[^\W_]+``, **shattered every Indic word at every matra** —
+#: ``कुत्ता`` came back as ``['क', 'त', 'त']`` and ``मेरा`` as ``['म', 'र']``.
+#:
+#: That is not a small thing. This module ships 45 Devanagari closed-class words and this package
+#: has claimed Hindi since V.09; almost none of those words can ever have matched, because almost
+#: every Hindi word carries a mark. Only the ones built of bare consonants — ``यह``, ``जय`` —
+#: survived, which is why the failure never showed up as an exception and never showed up in a
+#: test: the reading degraded to ``unreadable`` and this package treats that as an honest answer.
+#:
+#: Found by measuring :class:`~nyxara.njp.discourse.ClosedClassLearner` on real Hindi sentences in
+#: V.35, where the "closed class" it recovered was a list of bare consonants.
+#:
+#: The ranges cover the scripts this package names anywhere — Devanagari and its neighbours, plus
+#: the general combining block and Arabic — rather than every mark in Unicode, because a list that
+#: is checked is worth more than one that is exhaustive and untested.
+_MARKS = (
+    "\u0300-\u036f\u0483-\u0489\u0591-\u05bd\u0610-\u061a\u064b-\u065f\u0670"
+    "\u06d6-\u06ed\u0900-\u0903\u093a-\u094f\u0951-\u0957\u0962-\u0963"
+    "\u0981-\u0983\u09bc\u09be-\u09cd\u0a01-\u0a03\u0a3c-\u0a4d"
+    "\u0a81-\u0a83\u0abc-\u0acd\u0b01-\u0b03\u0b3c-\u0b57\u0bbe-\u0bcd"
+    "\u0c00-\u0c03\u0c3e-\u0c56\u0c81-\u0c83\u0cbc-\u0ccd\u0d00-\u0d03"
+    "\u0d3b-\u0d4d\u0e31-\u0e3a\u0e47-\u0e4e\u200c\u200d"
+)
+
+#: One token is a run of word characters, letters and digits together, **with the combining marks
+#: that belong to them**. Splitting the digits apart — which is what excluding ``\d`` did — cuts
+#: ``h2o`` into three tokens and ``covid19`` into two, and an identifier cut into pieces is an
+#: entity that cannot be looked up. Splitting the marks apart did the same thing to every word of
+#: an Indic language. Decimals keep their point; nothing else does, so a full stop still ends a
+#: sentence.
+_WORD_RX = re.compile(rf"\d+\.\d+|[^\W_](?:[^\W_]|[{_MARKS}])*(?:['’][^\W_]+)*",
+                      re.UNICODE)
 
 
 def _fold(word: str) -> str:

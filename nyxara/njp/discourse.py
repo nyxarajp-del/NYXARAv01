@@ -34,7 +34,7 @@ four is now a subject on the report card with a floor, a lesson and a gain. The 
 — the pronouns, the copula, the factive subordinators, the time words — are the closed class
 :mod:`nyxara.njp.semantics` already defends, where a list is the honest representation.
 
-Sixteen organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather
+Eighteen organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather
 than a new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
 something nobody demonstrated; where two readings survive the answer is that there are two.**
 
@@ -107,7 +107,23 @@ lacks, the reading is flagged figurative and nothing is filed. Where there are n
 the new subject's kinds are unknown, **nothing is claimed** — with an empty store no sentence is
 figurative, and that is the correct answer rather than a limitation to apologise for.
 
-**7 · A word nobody glossed, read off what its turns do** (:class:`Induction`). The Master's
+**7 · What a language's letters may do, and which of its words behave alike**
+(:class:`Phonotactics`, :class:`DistributionalLexicon`). The Master's first list opens with
+phonetics and phonology, and this package is text: no signal, no spectrogram, no articulation, and
+pretending otherwise would be the dressed-up gap the rest of it refuses. What survives a writing
+system is **phonotactics** — which sequences a language permits — and that is induced from the
+words she has heard, with the offending pair named when a form is refused and with **foreign**
+letters told apart from an impossible order, which is a different finding.
+
+And the flattest line in the gap report was that this package has no lexical semantics at all: no
+dictionary, no thesaurus, kinds only where somebody taught an ``is_a``. A dictionary is not the
+only way to have lexical relations. Words that keep the same **company** behave alike, and from
+three hundred sentences a noun's nearest neighbours are nouns and a verb's are verbs, from nothing
+but who stands with whom. It is *near*, not *synonymous* — distribution puts ``hot`` beside
+``cold`` as readily as beside ``warm`` — so it is reported as neighbours with scores and never as
+a definition.
+
+**8 · A word nobody glossed, read off what its turns do** (:class:`Induction`). The Master's
 fourth test asks for a construction that was never in training, whose function she infers **from
 context**. Everything else here learns from a demonstration — somebody says *this surface does
 this* — and that is not what he asked for. Nothing is demonstrated in this one: she is exposed to
@@ -123,7 +139,7 @@ different words. And the honest limit: the content filter works on sentences the
 read, so in a language wholly unreadable to it a confined content word cannot be told from a
 marker by distribution alone.
 
-**8 · Where two speakers stand to each other, and what a turn conveys without saying it**
+**9 · Where two speakers stand to each other, and what a turn conveys without saying it**
 (:class:`Standing`, :class:`Scale`). The Master's sixth test says meaning depends on speaker,
 listener, **relationship** and goal, and the relationship was the half this module could not
 touch. Two things in a transcript bear on it and both were already tracked: who complies with
@@ -140,7 +156,7 @@ implicature. A scale must be demonstrated in two different sentences before it i
 implicature is **reported and never filed** — *"some passed, in fact all did"* is not a
 contradiction, and a store that had filed it would have made it one.
 
-**9 · Which of a language's words are its closed class, found rather than typed**
+**10 · Which of a language's words are its closed class, found rather than typed**
 (:class:`ClosedClassLearner`). :mod:`nyxara.njp.semantics` argues that the closed class is the
 half of a language that does not grow and that a list of it is honest. It does not argue — because
 it cannot — that the list should be **hand-written for every language**: 242 words, 197 Latin and
@@ -150,13 +166,13 @@ verb of a language with few verbs; *frequency* alone is worse. It is the product
 fitted where the answer is known — English — and applied to a language she has only overheard, and
 what transfers is the **criterion**, never the words. Unfitted she claims nothing.
 
-**10 · And a translation carries what it can, and says what it cannot** (:class:`Retelling`).
+**11 · And a translation carries what it can, and says what it cannot** (:class:`Retelling`).
 :meth:`~nyxara.njp.language.LanguageFaculty.translate` carries the roles, the polarity, the tense
 and the mood, verified by reading its own output back. The **act** does not cross, and this reports
 that rather than hiding it: an indirect request is a convention of a speech community, and a
 community that has not been shown one does not have it.
 
-**11 · Why, and what for** (:class:`Connective`). The Master's anchor names eleven slots and six
+**12 · Why, and what for** (:class:`Connective`). The Master's anchor names eleven slots and six
 were reachable — entity, relation, time, belief, uncertainty, and space through ``is_at``. The
 three that were not are here. **Cause** is the interesting one: nothing structural separates
 *"A because B"* from *"B so A"*, both being two clauses with a word between, and which of them
@@ -175,7 +191,7 @@ was dark``. And the winner is the **best-supported** candidate rather than the l
 the rule :mod:`nyxara.njp.semantics` and :mod:`nyxara.njp.compile` both state and which this
 class was breaking.
 
-**12 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
+**13 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
 shapes came back unreadable or worse: *"The window was opened by Ravi."*, *"Ravi has been opening
 the door."*, *"He was tired."* and *"Ravi opened the door and Arun the window."* — the last of
 which had a **wrong** reading rather than none, a single claim whose object was ``door arun
@@ -193,7 +209,7 @@ is what *"He was tired."* is. **As a fallback and never an override** — put ah
 it read *"When I visited Delhi last year I was tired."* as a claim about ``tired`` and lost the
 claim the speaker actually made.
 
-**13 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
+**14 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
 :mod:`nyxara.social.common_ground`). The Master listed seventeen things a conversation does and
 eleven of them were unreachable, for one reason: this module read every turn **alone**. What makes
 a turn a clarification rather than an answer is the turn before it. So adjacency pairs are induced
@@ -208,7 +224,7 @@ says and the hearer's next turn acknowledges it, which is Clark's mechanism run 
 implements it. Measured: the same meaning to the same hearer, eighteen words the first time and
 two the second, with the claim itself unchanged — and a fresh hearer still told everything.
 
-**14 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
+**15 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
 The Master's fifth deep mechanism — ``PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`` — and
 this module did not have it at all. Three things are predicted about a turn before it is looked
 at: what the speaker will be *doing*, what they will be *about*, and what it will do to the
@@ -226,7 +242,7 @@ prediction against a reading it wrote is the same self-confirming loop :class:`F
 to have. Measured with that loop closed: the control exchange's act distribution collapsed to one
 successor and reported 1.00 confidence on a sequence built to be unpredictable.
 
-**15 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
+**16 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
 with the telescope."* The evidence that there is an ambiguity at all is in
 :mod:`nyxara.njp.semantics`'s own output: it has no frame for a prepositional phrase after an
 object, so it fuses the two noun phrases into one object string — ``man telescope``, with ``with
@@ -260,6 +276,7 @@ __all__ = [
     "Readings", "attachment", "AttachLearner", "Marker", "MarkerLearner",
     "Anticipation", "Expectation", "Surprise", "Exchange", "Pair", "Reply",
     "Standing", "Footing", "Scale", "Implied", "Induction", "Function",
+    "Phonotactics", "Wordform", "DistributionalLexicon", "Neighbour",
     "Alternation", "Frame", "Mapping", "frames_of",
     "Connective", "Link", "CAUSE_BEFORE", "CAUSE_AFTER", "GOAL_AFTER",
     "ClosedClassLearner", "Retelling",
@@ -2359,7 +2376,189 @@ def attachment(surface: str, meaning: Optional[Meaning] = None, *,
 
 
 # --------------------------------------------------------------------------- #
-# 8 · a word nobody glossed, read off what its turns do
+# 8 · phonotactics and the lexicon, both from exposure alone
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class Wordform:
+    """Whether a form could be a word of this language, and what is wrong with it if not."""
+
+    form: str = ""
+    possible: bool = True
+    offending: str = ""
+    seen: int = 0
+    why: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"form": self.form, "possible": self.possible, "offending": self.offending,
+                "seen": self.seen, "why": self.why}
+
+
+class Phonotactics:
+    """Which letter sequences a language permits, induced from the words she has heard.
+
+    The Master's first list opens with phonetics and phonology, and this package is text: there
+    is no signal, no spectrogram and no articulation here, and pretending otherwise would be the
+    dressed-up gap the rest of it refuses. What **is** honestly available is the half of phonology
+    that survives the writing system — **phonotactics**, the constraints on which sequences a
+    language allows — read off graphemes rather than phones, and it is a real capability with a
+    stated limit rather than a missing one.
+
+    The mechanism is the simplest thing that could work and is measured rather than argued: every
+    word contributes its letter bigrams, and a form containing a bigram this language has never
+    used is one it does not permit. Two guards keep that from being a memoriser. A language is not
+    judged until it has been heard enough (:attr:`min_words`), and a bigram is only counted
+    against a form when the letters on **both** sides of it are ones the language uses at all —
+    otherwise every unfamiliar letter would look like a phonotactic violation rather than a
+    foreign one, which is a different finding.
+    """
+
+    #: Below this she declines to judge: a handful of words constrain nothing.
+    min_words = 40
+
+    def __init__(self, *, min_words: Optional[int] = None) -> None:
+        if min_words is not None:
+            self.min_words = max(1, int(min_words))
+        self.bigrams: Dict[str, Set[str]] = {}
+        self.letters: Dict[str, Set[str]] = {}
+        self.words: Dict[str, Set[str]] = {}
+
+    def hear(self, text: str, *, language: str = "spoken") -> None:
+        """Take the letter sequences of every word in this sentence."""
+        try:
+            grams = self.bigrams.setdefault(language, set())
+            letters = self.letters.setdefault(language, set())
+            seen = self.words.setdefault(language, set())
+            for token in tag_tokens(text):
+                word = f"^{token.text}$"
+                seen.add(token.text)
+                letters.update(token.text)
+                for index in range(len(word) - 1):
+                    grams.add(word[index:index + 2])
+        except Exception:  # noqa: BLE001
+            return
+
+    def judge(self, form: str, *, language: str = "spoken") -> Wordform:
+        """Could this be a word of that language?"""
+        out = Wordform(form=str(form or "").strip().lower())
+        try:
+            grams = self.bigrams.get(language, set())
+            letters = self.letters.get(language, set())
+            out.seen = len(self.words.get(language, ()))
+            if out.seen < self.min_words:
+                out.why = f"{out.seen} words heard, below {self.min_words} — not judged"
+                return out
+            if not out.form:
+                out.possible = False
+                out.why = "the empty string is not a word"
+                return out
+            padded = f"^{out.form}$"
+            for index in range(len(padded) - 1):
+                pair = padded[index:index + 2]
+                if pair in grams:
+                    continue
+                # Both letters must be ones the language uses. A form with a letter this
+                # language does not have is **foreign**, which is a different finding from a
+                # form built of its own letters in an order it never uses.
+                if not all(ch in letters or ch in "^$" for ch in pair):
+                    continue
+                out.possible = False
+                out.offending = pair.replace("^", "#").replace("$", "#")
+                out.why = (f"{out.offending!r} occurs in no word of {len(self.words[language])} "
+                           f"heard, though both its letters do")
+                return out
+            out.why = "every letter pair in it is one this language uses"
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    def stats(self) -> Dict[str, Any]:
+        return {name: {"words": len(words), "bigrams": len(self.bigrams.get(name, ())),
+                       "letters": len(self.letters.get(name, ()))}
+                for name, words in self.words.items()}
+
+
+@dataclass
+class Neighbour:
+    """One word near another, and how near."""
+
+    word: str = ""
+    score: float = 0.0
+    shared: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"word": self.word, "score": round(self.score, 4), "shared": self.shared}
+
+
+class DistributionalLexicon:
+    """Which words behave like which — **without a dictionary, because there is not one**.
+
+    The gap report's flattest line was that this package has no lexical semantics at all: no
+    dictionary, no thesaurus, and kinds only where somebody had taught an ``is_a``. A dictionary
+    is not the only way to have lexical relations, and it is not the way a child gets them
+    either. Words that turn up in the same **company** are words that behave alike, and that is
+    computable from exposure alone.
+
+    What this gives is real and bounded: *near* rather than *synonymous*. Distribution puts
+    ``hot`` beside ``cold`` as readily as beside ``warm``, because opposites share their company —
+    so this is a similarity of **role**, and calling it meaning would be the overclaim. It is
+    reported as neighbours with scores and never as a definition.
+    """
+
+    #: Below this a word has not been seen in enough company to place.
+    min_seen = 3
+
+    def __init__(self, *, min_seen: Optional[int] = None) -> None:
+        if min_seen is not None:
+            self.min_seen = max(1, int(min_seen))
+        self.company: Dict[str, Dict[str, int]] = {}
+        self.counts: Dict[str, int] = {}
+        self.heard = 0
+
+    def hear(self, text: str) -> None:
+        """Every word in this sentence keeps company with every other."""
+        try:
+            words = [t.text for t in tag_tokens(text)]
+            if len(words) < 2:
+                return
+            self.heard += 1
+            for word in words:
+                self.counts[word] = self.counts.get(word, 0) + 1
+                bucket = self.company.setdefault(word, {})
+                for other in words:
+                    if other != word:
+                        bucket[other] = bucket.get(other, 0) + 1
+        except Exception:  # noqa: BLE001
+            return
+
+    def near(self, word: str, *, limit: int = 5) -> List[Neighbour]:
+        """The words whose company most resembles this one's, best first."""
+        try:
+            word = str(word or "").lower()
+            mine = self.company.get(word)
+            if not mine or self.counts.get(word, 0) < self.min_seen:
+                return []
+            found: List[Neighbour] = []
+            for other, theirs in self.company.items():
+                if other == word or self.counts.get(other, 0) < self.min_seen:
+                    continue
+                shared = set(mine) & set(theirs)
+                if not shared:
+                    continue
+                union = len(set(mine) | set(theirs)) or 1
+                found.append(Neighbour(word=other, score=len(shared) / union,
+                                       shared=len(shared)))
+            found.sort(key=lambda n: (-n.score, n.word))
+            return found[:max(1, int(limit))]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def stats(self) -> Dict[str, Any]:
+        return {"heard": self.heard, "words": len(self.counts)}
+
+
+# --------------------------------------------------------------------------- #
+# 9 · a word nobody glossed, read off what its turns do
 # --------------------------------------------------------------------------- #
 
 @dataclass
@@ -3869,6 +4068,11 @@ class Communicator:
         self.scale = Scale()
         #: What an unglossed word appears to be for — see :class:`Induction`.
         self.induction = Induction()
+        #: Which letter sequences this language permits — see :class:`Phonotactics`.
+        self.phonotactics = Phonotactics()
+        #: Which words behave like which, from company alone — see
+        #: :class:`DistributionalLexicon`.
+        self.lexicon = DistributionalLexicon()
         #: What both parties have taken as established. Driven from :meth:`hear`, which is the
         #: thing :mod:`nyxara.social.common_ground` has never had: it has been a real model of
         #: given-versus-new since it was written and nothing in this package could put a sentence
@@ -4009,6 +4213,8 @@ class Communicator:
             self.induction.observe(out.surface, act=out.interpretation.intended,
                                    content=_content_of(out.meaning))
             self.vocabulary.hear(out.surface, language=self.tongue)
+            self.phonotactics.hear(out.surface, language=self.tongue)
+            self.lexicon.hear(out.surface)
             out.figurative = self.figure.judge(out.meaning)
             self.figure.note_exception(out.figurative)
             out.readings = attachment(out.rewritten, out.meaning, learner=self.attach)
@@ -4339,6 +4545,7 @@ class Communicator:
                 "vocabulary": self.vocabulary.stats(),
                 "exchange": self.exchange.stats(), "standing": self.standing.stats(),
                 "scale": self.scale.stats(), "induction": self.induction.stats(),
+                "phonotactics": self.phonotactics.stats(), "lexicon": self.lexicon.stats(),
                 "ground": ground,
                 "anticipation": self.anticipation.stats(),
                 "markers": self.markers.stats(), "attach": self.attach.stats(),

@@ -3169,6 +3169,71 @@ partly read — which is the situation the test describes.
 
     inferred   a floor, and three of its six items are refusals
 
+#### NJP V.35 — and the defect that had broken Hindi since V.09
+
+Three of the gap report's remaining lines are closed here, and measuring the third found something
+much worse than the line itself.
+
+**Phonotactics.** The Master's first list opens with phonetics and phonology, and this package is
+text: no signal, no spectrogram, no articulation. What survives a writing system is which
+*sequences* a language permits, and that is induced from the words she has heard. A form built of
+sequences the language uses is possible; one built of its own letters in an order it never uses is
+refused with the offending pair named; and a form of letters it does not have at all is **foreign**,
+which is a different finding and must not be confused with the second.
+
+**A lexicon without a dictionary.** The flattest line in the report was that this package has no
+lexical semantics: no dictionary, no thesaurus, kinds only where somebody taught an `is_a`. A
+dictionary is not the only way to have lexical relations. From three hundred sentences, a noun's
+nearest neighbours are nouns and a verb's are verbs, from nothing but who keeps company with whom.
+It is *near*, not *synonymous* — distribution puts `hot` beside `cold` as readily as beside `warm`
+— so it is reported as neighbours with scores and never as a definition.
+
+**And the closed-class criterion, on languages people speak.** V.31 measured it on *minted*
+languages, and a drawn dialect has the distribution its generator gave it. `nyxara/njp/tongues.py`
+carries ordinary sentences of Spanish, French and Hindi with each language's closed class kept
+beside them as an answer key that is never given to her.
+
+```
+es   precision 0.87   recall 0.46
+fr   precision 0.94   recall 0.53
+hi   precision 0.89   recall 0.29
+```
+
+Precision is scored and recall is only reported: these are a few dozen sentences each, and a
+function word appearing twice cannot show breadth. Precision is not bounded that way — calling a
+content word closed is a mistake at any corpus size. Chinese is absent and the reason is stated
+rather than skipped: it is written without spaces, every organ here tokenises on them, and scoring
+characters would be a number with nothing behind it.
+
+##### The Hindi run came back at precision 0.05, and the words it "found" were single consonants
+
+`semantics.py`'s word pattern is `[^\W_]+`. Python's `\w` is alphanumerics, and **a Devanagari
+vowel sign is neither**: `category('\u0941') == 'Mn'` and `'\u0941'.isalnum()` is `False`. So the
+tokeniser **shattered every Indic word at every matra**:
+
+```
+कुत्ता पार्क में दौड़ता है   →   ['क', 'त', 'त', 'प', 'र', 'क', 'म', 'द', 'ड', 'त', 'ह']
+मेरा नाम जय है              →   ['म', 'र', 'न', 'म', 'जय', 'ह']
+```
+
+This module ships **45 Devanagari closed-class words** and this package has claimed Hindi since
+V.09. Almost none of those words can ever have matched, because almost every Hindi word carries a
+mark; only the ones built of bare consonants — `यह`, `जय` — survived. It never raised, never failed
+a test, and never showed up as anything but a reading that came back `unreadable` — which this
+package treats as an honest answer, so a total failure and a principled abstention were
+indistinguishable.
+
+The pattern now carries the combining marks that belong to a word. English is untouched — `h2o`,
+`covid19`, `don't`, `3.14` all tokenise exactly as before, and a test pins each.
+
+```
+hi   precision 0.05  ->  0.89
+```
+
+    sounds     0.67 -> 1.00
+    lexicon    0.00 -> 1.00
+    tongues    0.00 -> 1.00
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -3185,6 +3250,9 @@ partly read — which is the situation the test describes.
   alternations       0.30   1.00   +0.70      10  LEARNED
   anchor             0.23   1.00   +0.77       6  LEARNED
   vocabulary         0.50   1.00   +0.50    4000  LEARNED
+  tongues            0.00   1.00   +1.00    4000  LEARNED
+  sounds             0.67   1.00   +0.33     120  LEARNED
+  lexicon            0.00   1.00   +1.00     600  LEARNED
   adversarial        0.50   1.00   +0.50       5  (fixed by the `bare` level)
   crossdomain        1.00   1.00   +0.00       5  already
   unseen             0.50   1.00   +0.50       0  (fixed at the subordinator)
@@ -3203,12 +3271,12 @@ partly read — which is the situation the test describes.
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      27/27 subjects
-  learned       16 subject(s) moved by teaching
-  overall       233/233 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  mastered      30/30 subjects
+  learned       19 subject(s) moved by teaching
+  overall       253/253 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       233/233 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       253/253 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
 **Four of those floors did not exist before the second pass.** `reference`, `contradiction`,

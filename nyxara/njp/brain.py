@@ -2031,6 +2031,29 @@ class NJPBrain:
             from nyxara.njp.discourse import Retelling
             return Retelling(surface=str(surface or ""), into=str(into))
 
+    def could_be_a_word(self, form: str, *, language: str = "spoken") -> Any:
+        """Could this be a word of that language? Phonotactics, induced from exposure — the half
+        of phonology that survives a writing system. See
+        :class:`~nyxara.njp.discourse.Phonotactics`."""
+        try:
+            if self.discourse is None:
+                from nyxara.njp.discourse import Wordform
+                return Wordform(form=str(form or ""))
+            return self.discourse.phonotactics.judge(str(form or ""), language=language)
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Wordform
+            return Wordform(form=str(form or ""))
+
+    def words_like(self, word: str, *, limit: int = 5) -> Any:
+        """The words whose company most resembles this one's. **Near**, not synonymous:
+        distribution puts ``hot`` beside ``cold`` as readily as beside ``warm``."""
+        try:
+            if self.discourse is None:
+                return []
+            return self.discourse.lexicon.near(str(word or ""), limit=limit)
+        except Exception:  # noqa: BLE001
+            return []
+
     def show_scale(self, surface: str, *, weaker: str, stronger: str) -> None:
         """Demonstrate that one word sits below another on a scale, so *"some passed"* can convey
         that not all did. Which words scale is a fact about a language's words, not about

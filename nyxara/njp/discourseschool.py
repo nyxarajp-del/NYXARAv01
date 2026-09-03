@@ -61,7 +61,8 @@ __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
     "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
     "Anticipating", "ExchangeSubject", "Alternations", "Anchor", "Vocabulary", "Retell",
-    "Inferred", "StandingSubject", "Implicature", "Adversarial", "CrossDomain", "Unseen", "Method",
+    "Sounds", "Lexicon", "RealTongues", "Inferred", "StandingSubject", "Implicature",
+    "Adversarial", "CrossDomain", "Unseen", "Method",
     "Retraining", "Grounded", "Tongue", "Wiring",
     "DiscourseSchool", "SUBJECTS", "main",
 ]
@@ -759,6 +760,199 @@ class Alternations(DiscourseSubject):
         who, what = mint.word(), mint.word()
         self.mark(score, misses, got=voice.alternation.read(f"{who} opened the {what}."),
                   want=None, item="an active sentence reaches no mapping", silence=object())
+        return score, misses
+
+
+class Sounds(DiscourseSubject):
+    """Which letter sequences a language permits, induced from the words she has heard.
+
+    The Master's first list opens with phonetics and phonology, and this package is text: no
+    signal, no spectrogram, no articulation. What survives the writing system is **phonotactics**,
+    and that is a real capability rather than a missing one — read off graphemes, with the limit
+    stated rather than hidden.
+
+    Three kinds of item. A form built of sequences the language uses is possible; one built of
+    sequences it never uses is not, and the offending pair is named. And the control that keeps
+    the second honest: a form made of **letters this language does not have** is foreign, which is
+    a different finding from a phonotactic violation, and she must not confuse them.
+    """
+
+    id = "sounds"
+    title = "which letter sequences a language permits"
+    teaches = "phonotactics from exposure — the half of phonology that survives writing"
+    items = 8
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice, rng = self.student, mint.rng
+        words = [mint.word(rng.choice((2, 3))) for _ in range(60)]
+        self._words = tuple(words)           # noqa: attribute defined outside __init__
+        for _ in range(120):
+            voice.phonotactics.hear(
+                f"{rng.choice(words)} {rng.choice(words)} {rng.choice(words)}",
+                language=voice.tongue)
+        return Taught(120, f"{voice.phonotactics.stats().get(voice.tongue, {})}")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.student
+        score, misses = Score(), []
+        words = getattr(self, "_words", ())
+        for word in list(words)[:3]:
+            got = voice.phonotactics.judge(word, language=voice.tongue)
+            self.mark(score, misses, got=got.possible, want=True,
+                      item=f"{word} — a word of the language")
+        # Built from the language's **own** bigram set rather than assumed: a pair it has never
+        # used, made of letters it has. Assuming one gave ``bababa``, whose halves are among the
+        # commonest pairs there are, and the paper failed three items for a reason that was its.
+        for impossible in self._impossible(voice)[:3]:
+            got = voice.phonotactics.judge(impossible, language=voice.tongue)
+            self.mark(score, misses, got=got.possible, want=False,
+                      item=f"{impossible} — its letters, in an order it never uses")
+        for foreign in ("θλψ", "жщь"):           # letters it does not have at all
+            got = voice.phonotactics.judge(foreign, language=voice.tongue)
+            self.mark(score, misses, got=got.possible, want=True,
+                      item=f"{foreign} — foreign letters, which is not a phonotactic violation")
+        return score, misses
+
+    @staticmethod
+    def _impossible(voice: Communicator) -> List[str]:
+        """Forms made of this language's letters in pairs it has never used."""
+        grams = voice.phonotactics.bigrams.get(voice.tongue, set())
+        letters = sorted(voice.phonotactics.letters.get(voice.tongue, set()))
+        found: List[str] = []
+        for first in letters:
+            for second in letters:
+                if f"{first}{second}" in grams:
+                    continue
+                found.append(f"{first}{second}{first}")
+                if len(found) >= 3:
+                    return found
+        return found or ["zzqqxx"]
+
+
+class Lexicon(DiscourseSubject):
+    """Which words behave like which, from company alone — **without a dictionary**.
+
+    The gap report's flattest line was that this package has no lexical semantics: no dictionary,
+    no thesaurus, and kinds only where somebody taught an ``is_a``. A dictionary is not the only
+    way to have lexical relations. Words that keep the same company behave alike, and that is
+    computable from exposure.
+
+    What is scored is the honest claim: a noun's nearest neighbours are **nouns** and a verb's are
+    **verbs**, from nothing but who stands with whom. Not that they are synonyms — distribution
+    puts ``hot`` beside ``cold`` as readily as beside ``warm``, and calling that meaning would be
+    the overclaim this subject exists to avoid making.
+    """
+
+    id = "lexicon"
+    title = "which words behave like which"
+    teaches = "a distributional lexicon, from company rather than from a dictionary"
+    items = 6
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice, rng = self.student, mint.rng
+        nouns = [mint.word() for _ in range(20)]
+        verbs = [mint.word() for _ in range(12)]
+        self._cast = (tuple(nouns), tuple(verbs))   # noqa: attribute outside __init__
+        for _ in range(300):
+            voice.lexicon.hear(f"the {rng.choice(nouns)} {rng.choice(verbs)} "
+                               f"the {rng.choice(nouns)}")
+        return Taught(300, f"{voice.lexicon.stats()}")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.student
+        score, misses = Score(), []
+        nouns, verbs = getattr(self, "_cast", ((), ()))
+        for word in list(nouns)[:3]:
+            near = [n.word for n in voice.lexicon.near(word, limit=3)]
+            self.mark(score, misses, got=bool(near) and all(n in nouns for n in near),
+                      want=True, item=f"{word}'s neighbours are nouns: {near}")
+        for word in list(verbs)[:3]:
+            near = [n.word for n in voice.lexicon.near(word, limit=3)]
+            self.mark(score, misses, got=bool(near) and all(n in verbs for n in near),
+                      want=True, item=f"{word}'s neighbours are verbs: {near}")
+        return score, misses
+
+
+class RealTongues(DiscourseSubject):
+    """The closed-class criterion, on languages people actually speak.
+
+    V.31 fitted it on English and applied it to a **minted** language. That is the right
+    experiment and it has a gap a minted language cannot close: a drawn dialect has the
+    distribution its generator gave it, and the claim is about languages people speak. So this
+    sits it in front of ordinary Spanish, French and Hindi sentences — see
+    :mod:`nyxara.njp.tongues` — with each language's closed class kept beside the corpus as an
+    answer key and never given to her.
+
+    **Precision is what is scored and recall is only reported.** These corpora are a few dozen
+    sentences each; a function word that appears twice cannot show breadth, so recall is bounded
+    by the corpus rather than by her. Precision is not: calling a content word closed is a mistake
+    at any corpus size.
+    """
+
+    id = "tongues"
+    title = "the criterion on languages people speak"
+    teaches = "nothing new — it moves the V.31 measurement off minted languages"
+    items = 6
+    threshold = 0.8
+
+    SHAPES = ("the {a} {v} the {b}", "a {a} {v} a {b}", "the {a} did not {v} the {b}",
+              "is the {a} in the {b}", "what {v} the {a}", "can the {a} {v} the {b}")
+    KNOWN = ("the", "a", "did", "not", "is", "in", "what", "can")
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice, rng = self.student, mint.rng
+        nouns = [mint.word() for _ in range(300)]
+        verbs = [mint.word() for _ in range(120)]
+        for _ in range(4000):
+            voice.vocabulary.hear(
+                rng.choice(self.SHAPES).format(a=rng.choice(nouns), b=rng.choice(nouns),
+                                               v=rng.choice(verbs)), language="en")
+        fitted = voice.vocabulary.fit(self.KNOWN, language="en")
+        return Taught(4000, f"cut {fitted['cut']}, F1 {fitted['f1']} on English")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp.tongues import CLOSED, LANGUAGES, SENTENCES
+
+        voice = self.student
+        score, misses = Score(), []
+        for language in LANGUAGES:
+            name = f"{language}-{mint.issued}"
+            for sentence in SENTENCES[language]:
+                voice.vocabulary.hear(sentence, language=name)
+            found = voice.vocabulary.closed(name)
+            truth = set(CLOSED[language])
+            hit = len(found & truth)
+            precision = hit / len(found) if found else 0.0
+            seen = truth & set(voice.vocabulary.signature(name))
+            recall = hit / len(seen) if seen else 0.0
+            self.mark(score, misses, got=(precision >= 0.8), want=True,
+                      item=f"{language}: precision {precision:.2f} over {len(found)} words")
+            self.mark(score, misses, got=(hit > 0), want=True,
+                      item=f"{language}: recall {recall:.2f} — bounded by the corpus, reported")
         return score, misses
 
 
@@ -1742,7 +1936,8 @@ class Wiring(DiscourseSubject):
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
     Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating, ExchangeSubject,
-    Alternations, Anchor, Vocabulary, Retell, Inferred, StandingSubject, Implicature,
+    Alternations, Anchor, Vocabulary, RealTongues, Retell, Sounds, Lexicon,
+    Inferred, StandingSubject, Implicature,
     Adversarial, CrossDomain, Unseen, Method, Retraining,
     ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject, Grounded,
     Tongue, Wiring,
