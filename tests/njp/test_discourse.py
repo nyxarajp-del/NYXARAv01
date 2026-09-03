@@ -956,3 +956,101 @@ def _is_pronoun(word):
     from nyxara.njp.discourse import _pronoun
 
     return bool(_pronoun(word))
+
+
+# --------------------------------------------------------------------------- #
+# 12 · the semantic anchor — cause, purpose, and whether it holds or happens
+# --------------------------------------------------------------------------- #
+
+def _causes_taught():
+    voice = Communicator()
+    for who, what, why in (("ravi", "door", "wind"), ("sara", "gate", "storm")):
+        voice.show_cause(f"{who} opened the {what} because the {why} rose.",
+                         cause=f"the {why} rose")
+        voice.show_cause(f"The {why} rose so {who} opened the {what}.",
+                         cause=f"the {why} rose")
+    for who, where, what in (("ravi", "shop", "bread"), ("sara", "field", "grass")):
+        voice.show_cause(f"{who} went to the {where} to carry {what}.",
+                         goal=f"{who} carry {what}")
+    return voice
+
+
+def test_untaught_no_sentence_carries_a_cause_or_a_purpose():
+    voice = Communicator()
+    assert voice.connective.read("Devi lit the lamp because the room was dark.") is None
+    assert voice.connective.read("Meera went to the well to draw water.") is None
+
+
+def test_which_side_the_cause_is_on_is_induced_per_connective():
+    """Nothing structural separates *"A because B"* from *"B so A"*."""
+    voice = _causes_taught()
+    assert voice.connective.kept["because"] == "cause-after"
+    assert voice.connective.kept["so"] == "cause-before"
+
+    forward = voice.connective.read("Devi lit the lamp because the room was dark.")
+    backward = voice.connective.read("The room was dark so devi lit the lamp.")
+    assert forward.cause == backward.cause == "the room was dark"
+    assert forward.effect == backward.effect == "devi lit the lamp"
+
+
+def test_a_determiner_is_not_a_connective():
+    """`the` splits the sentence into two halves that both read, sits earlier than `because`,
+    and gave a cause of `lamp because the room was dark`."""
+    from nyxara.njp.discourse import _splits
+
+    tokens = [token for _left, token, _right
+              in _splits("devi lit the lamp because the room was dark.")]
+    assert tokens == ["because"]
+
+
+def test_the_best_supported_connective_wins_rather_than_the_leftmost():
+    voice = _causes_taught()
+    assert voice.connective.support["because"] >= voice.connective.min_support
+    got = voice.connective.read("Kiran shut the vault because the alarm rang.")
+    assert got.connective == "because"
+
+
+def test_a_purpose_clause_is_told_from_a_prepositional_phrase():
+    voice = _causes_taught()
+    got = voice.connective.read("Meera went to the well to draw water.")
+    assert got.kind == "goal" and got.goal == "meera draw water"
+    # `to the well` is a phrase, not a purpose: a determiner sits between.
+    assert "well" not in got.goal
+
+
+def test_the_sentence_asserts_its_effect_and_not_the_whole_of_itself():
+    """Reading the whole sentence gave an agent of `devi lit the lamp because the room`."""
+    voice = _causes_taught()
+    got = voice.hear("Devi lit the lamp because the room was dark.")
+    assert got.meaning.subject == "devi"
+    assert got.anchor()["cause"] == "the room was dark"
+
+
+def test_whether_a_relation_holds_or_happens_is_read_off_how_it_behaved():
+    voice = Communicator()
+    for first, second, verdict in VERDICTS:
+        voice.show_change(first, second, verdict)
+    voice.hear("The key is in the drawer.")
+    voice.hear("The key is now on the table.")
+    voice.hear("Ravi opened the door.")
+    voice.hear("Ravi opened the window.")
+    assert voice.ledger.kind_of("is_at") == "state"
+    assert voice.ledger.kind_of("open") == "event"
+    assert voice.ledger.kind_of("fly") == ""
+
+
+def test_occurrence_is_not_claimed_before_she_knows_what_a_marked_change_looks_like():
+    """Several live values look identical for an unmarked state and a repeated event."""
+    voice = Communicator()
+    voice.hear("The key is in the drawer.")
+    voice.hear("The key is now on the table.")
+    assert voice.ledger.kind_of("is_at") == ""
+
+
+def test_the_anchor_reports_only_the_slots_the_turn_actually_filled():
+    """A schema that always returns eleven keys cannot be told from one that fills none."""
+    voice = Communicator()
+    got = voice.hear("Ravi opened the window.")
+    filled = got.anchor(voice.ledger)
+    assert filled["agent"] == "ravi" and filled["relation"] == "open"
+    assert "cause" not in filled and "goal" not in filled and "occurrence" not in filled

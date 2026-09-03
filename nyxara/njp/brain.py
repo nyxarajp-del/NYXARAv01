@@ -1981,6 +1981,19 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def show_cause(self, surface: str, *, cause: str = "", goal: str = "") -> None:
+        """Demonstrate which clause of this sentence is the cause, or which is the purpose.
+
+        Which *word* does that is what gets induced: nothing structural separates *"A because B"*
+        from *"B so A"*, and which of them puts the cause first is a fact about English.
+        """
+        try:
+            if self.discourse is not None:
+                self.discourse.show_cause(str(surface or ""), cause=str(cause or ""),
+                                          goal=str(goal or ""))
+        except Exception:  # noqa: BLE001
+            return
+
     def show_alternation(self, plain: str, marked: str) -> None:
         """Demonstrate that these two sentences mean the same thing, one of them in a shape the
         compiler cannot read — a passive, an auxiliary chain, a gapped coordinate. Where each

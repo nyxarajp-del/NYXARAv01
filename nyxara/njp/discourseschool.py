@@ -60,7 +60,8 @@ from nyxara.njp.semantics import compile_meaning
 __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
     "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
-    "Anticipating", "ExchangeSubject", "Alternations", "Grounded", "Tongue", "Wiring",
+    "Anticipating", "ExchangeSubject", "Alternations", "Anchor", "Grounded", "Tongue",
+    "Wiring",
     "DiscourseSchool", "SUBJECTS", "main",
 ]
 
@@ -760,6 +761,91 @@ class Alternations(DiscourseSubject):
         return score, misses
 
 
+class Anchor(DiscourseSubject):
+    """The Master's semantic anchor, and the three slots that were missing from it.
+
+    Six of the eleven were reachable: entity, relation, time, belief, uncertainty and — through
+    ``is_at`` — space. **Cause**, **goal** and the **event-versus-state** distinction were not.
+
+    Cause is the interesting one, because nothing structural separates *"A because B"* from
+    *"B so A"*: both are two clauses with a word between, and which of them puts the cause first
+    is a fact about English. So the direction is induced per connective, and the exam checks both
+    wordings of the same fact land on the **same** cause.
+
+    Occurrence is induced from behaviour rather than from any word: a relation a speaker has
+    marked a change on is a state, one carrying several live values for one subject is an event,
+    and — the control — a relation about which the ledger has seen neither is neither.
+    """
+
+    id = "anchor"
+    title = "cause, purpose, and whether it holds or happens"
+    teaches = "which connective puts the cause where, and which shape carries a purpose"
+    items = 12
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.student
+        for _ in range(2):
+            who, what, why = mint.word(), mint.word(), mint.word()
+            voice.show_cause(f"{who} opened the {what} because the {why} rose.",
+                             cause=f"the {why} rose")
+            voice.show_cause(f"The {why} rose so {who} opened the {what}.",
+                             cause=f"the {why} rose")
+        for _ in range(2):
+            who, where, what = mint.word(), mint.word(), mint.word()
+            voice.show_cause(f"{who} went to the {where} to carry {what}.",
+                             goal=f"{who} carry {what}")
+        Contradiction().teach(_Student(voice), mint, coder=coder)
+        return Taught(6, f"connectives {voice.connective.kept}")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.student
+        score, misses = Score(), []
+        for _ in range(3):                       # the same fact, both ways round
+            who, what, why = mint.word(), mint.word(), mint.word()
+            forward = voice.connective.read(f"{who} shut the {what} because the {why} fell.")
+            backward = voice.connective.read(f"The {why} fell so {who} shut the {what}.")
+            want = f"the {why} fell"
+            self.mark(score, misses, got=(forward.cause if forward else ""), want=want,
+                      item=f"because: {why}", silence="")
+            self.mark(score, misses, got=(backward.cause if backward else ""), want=want,
+                      item=f"so: {why}", silence="")
+        for _ in range(2):                       # the purpose
+            who, where, what = mint.word(), mint.word(), mint.word()
+            got = voice.connective.read(f"{who} went to the {where} to draw {what}.")
+            self.mark(score, misses, got=(got.goal if got else ""), want=f"{who} draw {what}",
+                      item=f"purpose: {who}/{what}", silence="")
+        for _ in range(2):                       # a sentence with nothing joining anything
+            who, what = mint.word(), mint.word()
+            got = voice.connective.read(f"{who} opened the {what}.")
+            self.mark(score, misses, got=got, want=None,
+                      item=f"{who} opened the {what} — no link", silence=object())
+        # Occurrence, and the control that it is not claimed without evidence.
+        fresh = Communicator()
+        fresh.connective = voice.connective
+        fresh.markers = voice.markers
+        what, first, second = mint.word(), mint.word(), mint.word()
+        fresh.hear(f"The {what} is in the {first}.")
+        fresh.hear(f"The {what} is now on the {second}.")
+        self.mark(score, misses, got=fresh.ledger.kind_of("is_at"), want="state",
+                  item=f"{what}: moved once, with the change marked", silence="")
+        who, a, b = mint.word(), mint.word(), mint.word()
+        fresh.hear(f"{who} opened the {a}.")
+        fresh.hear(f"{who} opened the {b}.")
+        self.mark(score, misses, got=fresh.ledger.kind_of("open"), want="event",
+                  item=f"{who}: opened two things", silence="")
+        self.mark(score, misses, got=fresh.ledger.kind_of(mint.word()), want="",
+                  item="a relation the ledger has never seen", silence=object())
+        return score, misses
+
+
 class ExchangeSubject(DiscourseSubject):
     """What counts as a reply to what, and what counts as nothing to do with it.
 
@@ -1105,7 +1191,7 @@ class Wiring(DiscourseSubject):
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
     Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating, ExchangeSubject,
-    Alternations,
+    Alternations, Anchor,
     ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject, Grounded,
     Tongue, Wiring,
 )

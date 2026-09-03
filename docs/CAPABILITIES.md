@@ -2958,6 +2958,46 @@ the contradiction two turns later had nothing to contradict.
 
     alternations   0.30 -> 1.00
 
+#### NJP V.30 — why, and what for
+
+The gap report scored the Master's semantic anchor at six of eleven. Entity, relation, time,
+belief, uncertainty and — through `is_at` — space were reachable. **Cause**, **goal** and the
+**event-versus-state** distinction were not.
+
+**Cause is the one worth dwelling on.** Nothing structural separates *"A because B"* from *"B so
+A"*: both are two clauses with a word between them. Which of them puts the cause first is a fact
+about English, and a module with `{"because": right, "so": left}` written down could never be told
+otherwise. So it is shown instead — a sentence and which of its clauses is the cause — and the
+role of the word at the split is induced at the usual terms. Both wordings of one fact then land
+on the same cause, which is the property worth having and the one the exam checks.
+
+**Purpose** is the same mechanism over an infinitival tail. *"Ravi went to the shop to buy bread"*
+has two prepositions and only one introduces a purpose; the difference is structural, a determiner
+between the preposition and the noun. The goal clause has no subject of its own, so the main
+clause's is put back before it can read at all.
+
+**Occurrence is read off behaviour, not off any word.** A relation a speaker has marked a change
+on is a state; one carrying several live values for one subject is an event. And the control: until
+she has seen a marked change *somewhere*, an unmarked state and a repeated event look identical and
+she says so rather than guessing. Measured without that guard, a location that had moved once came
+back an `event`.
+
+**Two defects the measurement found, and both are the same defect.** `the` was induced as a causal
+connective: it splits *"devi lit | the | lamp because the room was dark"* into two halves that both
+read, and it produced a cause of `lamp because the room was dark`. A determiner is not a
+connective, and constraining the candidates over the closed class is where that belongs. And the
+winner was the **leftmost** split rather than the best-supported one — which is the rule
+`semantics.py` and `compile.py` both state, broken in a third file.
+
+```
+anchor 0.23 -> 1.00
+because -> cause-after    so -> cause-before    to -> goal-after
+"Devi lit the lamp because the room was dark."
+  -> agent devi, relation lit, cause "the room was dark"
+"The room was dark so devi lit the lamp."
+  -> the same anchor
+```
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -2972,6 +3012,7 @@ the contradiction two turns later had nothing to contradict.
   anticipation       0.50   1.00   +0.50      18  LEARNED
   exchange           0.20   1.00   +0.80       4  LEARNED
   alternations       0.30   1.00   +0.70      10  LEARNED
+  anchor             0.23   1.00   +0.77       6  LEARNED
   reference          0.80   1.00   +0.20       9  LEARNED
   contradiction      0.75   1.00   +0.25      10  LEARNED
   memory             0.50   1.00   +0.50      10  LEARNED
@@ -2981,12 +3022,12 @@ the contradiction two turns later had nothing to contradict.
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      16/16 subjects
-  learned       12 subject(s) moved by teaching
-  overall       150/150 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  mastered      17/17 subjects
+  learned       13 subject(s) moved by teaching
+  overall       163/163 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       150/150 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       163/163 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
 **Four of those floors did not exist before the second pass.** `reference`, `contradiction`,

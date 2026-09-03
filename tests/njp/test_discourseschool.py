@@ -43,7 +43,7 @@ def test_every_subject_is_mastered_and_the_taught_ones_moved(taught):
     assert not transcript.failing, [r.subject for r in transcript.failing]
     moved = {r.subject for r in transcript.learned}
     assert {"acts", "transfer", "repair", "figurative", "attachment", "anticipation",
-            "exchange", "alternations", "reference", "contradiction", "memory",
+            "exchange", "alternations", "anchor", "reference", "contradiction", "memory",
             "tongue"} <= moved
 
 
@@ -56,8 +56,8 @@ def test_the_taught_subjects_have_a_real_floor(taught):
     _brain, transcript = taught
     floors = {r.subject: r.pre.accuracy for r in transcript.results}
     for subject in ("acts", "transfer", "repair", "figurative", "attachment", "anticipation",
-                    "exchange", "alternations", "reference", "contradiction", "memory",
-                    "tongue"):
+                    "exchange", "alternations", "anchor", "reference", "contradiction",
+                    "memory", "tongue"):
         assert floors[subject] < 0.9, f"{subject} floor {floors[subject]}"
 
 
@@ -167,10 +167,10 @@ def test_the_attachment_lesson_finds_one_preposition_and_not_the_other():
     assert voice.attach.ambiguous == {"with"}
 
 
-def test_the_syllabus_is_sixteen_subjects_with_unique_ids():
+def test_the_syllabus_is_seventeen_subjects_with_unique_ids():
     made = [factory() for factory in SUBJECTS]
-    assert len(made) == 16
-    assert len({subject.id for subject in made}) == 16
+    assert len(made) == 17
+    assert len({subject.id for subject in made}) == 17
     assert all(isinstance(subject, DiscourseSubject) for subject in made)
 
 

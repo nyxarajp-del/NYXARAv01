@@ -34,8 +34,8 @@ four is now a subject on the report card with a floor, a lesson and a gain. The 
 — the pronouns, the copula, the factive subordinators, the time words — are the closed class
 :mod:`nyxara.njp.semantics` already defends, where a list is the honest representation.
 
-Ten organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather than
-a new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
+Eleven organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather
+than a new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
 something nobody demonstrated; where two readings survive the answer is that there are two.**
 
 **1 · Speech acts are induced, not listed** (:class:`ActLearner`). *"Can you open the window?"* is
@@ -107,7 +107,26 @@ lacks, the reading is flagged figurative and nothing is filed. Where there are n
 the new subject's kinds are unknown, **nothing is claimed** — with an empty store no sentence is
 figurative, and that is the correct answer rather than a limitation to apologise for.
 
-**7 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
+**7 · Why, and what for** (:class:`Connective`). The Master's anchor names eleven slots and six
+were reachable — entity, relation, time, belief, uncertainty, and space through ``is_at``. The
+three that were not are here. **Cause** is the interesting one: nothing structural separates
+*"A because B"* from *"B so A"*, both being two clauses with a word between, and which of them
+puts the cause first is a fact about English that a module could only be told. So it is shown
+instead, per connective, and both wordings of one fact land on the same cause. **Purpose** is the
+same mechanism over an infinitival tail, which is told from a prepositional phrase structurally —
+a determiner between the preposition and the noun. And **whether a relation holds or happens** is
+read off how it has behaved: one a speaker marked a change on is a state, one carrying several
+live values for a subject is an event, and until she has seen a marked change at all she cannot
+tell those apart and says so.
+
+Two things keep the connective honest, and both were found by measurement. A **determiner is not
+a connective** — ``the`` splits *"devi lit | the | lamp because the room was dark"* into two
+halves that both read, and it was induced as causal and gave a cause of ``lamp because the room
+was dark``. And the winner is the **best-supported** candidate rather than the leftmost, which is
+the rule :mod:`nyxara.njp.semantics` and :mod:`nyxara.njp.compile` both state and which this
+class was breaking.
+
+**8 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
 shapes came back unreadable or worse: *"The window was opened by Ravi."*, *"Ravi has been opening
 the door."*, *"He was tired."* and *"Ravi opened the door and Arun the window."* — the last of
 which had a **wrong** reading rather than none, a single claim whose object was ``door arun
@@ -125,7 +144,7 @@ is what *"He was tired."* is. **As a fallback and never an override** — put ah
 it read *"When I visited Delhi last year I was tired."* as a claim about ``tired`` and lost the
 claim the speaker actually made.
 
-**8 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
+**9 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
 :mod:`nyxara.social.common_ground`). The Master listed seventeen things a conversation does and
 eleven of them were unreachable, for one reason: this module read every turn **alone**. What makes
 a turn a clarification rather than an answer is the turn before it. So adjacency pairs are induced
@@ -140,7 +159,7 @@ says and the hearer's next turn acknowledges it, which is Clark's mechanism run 
 implements it. Measured: the same meaning to the same hearer, eighteen words the first time and
 two the second, with the claim itself unchanged — and a fresh hearer still told everything.
 
-**9 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
+**10 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
 The Master's fifth deep mechanism — ``PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`` — and
 this module did not have it at all. Three things are predicted about a turn before it is looked
 at: what the speaker will be *doing*, what they will be *about*, and what it will do to the
@@ -158,7 +177,7 @@ prediction against a reading it wrote is the same self-confirming loop :class:`F
 to have. Measured with that loop closed: the control exchange's act distribution collapsed to one
 successor and reported 1.00 confidence on a sequence built to be unpredictable.
 
-**10 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
+**11 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
 with the telescope."* The evidence that there is an ambiguity at all is in
 :mod:`nyxara.njp.semantics`'s own output: it has no frame for a prepositional phrase after an
 object, so it fuses the two noun phrases into one object string — ``man telescope``, with ``with
@@ -192,6 +211,7 @@ __all__ = [
     "Readings", "attachment", "AttachLearner", "Marker", "MarkerLearner",
     "Anticipation", "Expectation", "Surprise", "Exchange", "Pair", "Reply",
     "Alternation", "Frame", "Mapping", "frames_of",
+    "Connective", "Link", "CAUSE_BEFORE", "CAUSE_AFTER", "GOAL_AFTER",
     "free_words", "clause_proposition",
     "shapes_of", "fillers_of", "literal_act",
     "Act", "Interpretation", "ActLearner",
@@ -1462,6 +1482,46 @@ class Ledger:
     def contested_claims(self) -> List[Tuple[Claim, Claim]]:
         return list(self.conflicts)
 
+    def kind_of(self, relation: str) -> str:
+        """``state`` · ``event`` · ``""`` — induced from how the relation has **behaved**.
+
+        The Master's anchor separates an event from a state, and the difference is not in any
+        word: it is that a state holds one value at a time and an event happens more than once.
+        Both of those are visible in the ledger without anything being declared. A relation a
+        speaker has marked a change on, or one that produced a conflict when re-asserted
+        differently, is a state. A relation that carries several live values for one subject and
+        nobody has treated as a conflict is an event — things happen repeatedly, and a second
+        happening does not deny the first.
+
+        The empty string where the transcript has not shown either, which is most relations most
+        of the time and is the honest answer for them.
+        """
+        try:
+            relation = str(relation or "")
+            if not relation:
+                return ""
+            if relation in self.stateful:
+                return "state"
+            if any(prior.relation == relation for prior, _now in self.conflicts):
+                return "state"
+            if not self.stateful:
+                # Several live values look identical for a state nobody marked a change on and
+                # for an event that simply happened twice. Until she has seen at least one marked
+                # change *somewhere*, she has no way to tell those apart, and the honest answer is
+                # that she cannot. Measured without this: a location that had moved once, with no
+                # markers taught, came back an `event`.
+                return ""
+            live: Dict[str, Set[str]] = {}
+            for claim in self.claims:
+                if claim.relation != relation or claim.superseded or claim.negated:
+                    continue
+                live.setdefault(claim.subject, set()).add(claim.object)
+            if any(len(values) > 1 for values in live.values()):
+                return "event"
+            return ""
+        except Exception:  # noqa: BLE001
+            return ""
+
     def dispute(self, subject: str, relation: str) -> str:
         """The question a contested pair raises, or ``""``.
 
@@ -2241,7 +2301,208 @@ def attachment(surface: str, meaning: Optional[Meaning] = None, *,
 
 
 # --------------------------------------------------------------------------- #
-# 8 · alternations — the same meaning, said a different way round
+# 8 · connectives — what a joining word does to the two clauses either side
+# --------------------------------------------------------------------------- #
+
+#: The three things a joining word has been demonstrated doing. Not a table of words: a table of
+#: **roles**, which is a different object — nothing here says which word plays which, and
+#: :class:`Connective` will not read a word it has not been shown.
+CAUSE_BEFORE = "cause-before"
+CAUSE_AFTER = "cause-after"
+GOAL_AFTER = "goal-after"
+
+
+@dataclass
+class Link:
+    """Two clauses, and what the sentence said about how they go together."""
+
+    kind: str = ""              # ``cause`` · ``goal``
+    connective: str = ""
+    cause: str = ""
+    effect: str = ""
+    goal: str = ""
+    why: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = {"kind": self.kind, "connective": self.connective}
+        for name in ("cause", "effect", "goal", "why"):
+            value = getattr(self, name)
+            if value:
+                out[name] = value
+        return out
+
+
+def _splits(surface: str) -> List[Tuple[str, str, str]]:
+    """``(left, token, right)`` at every position where both sides read as a clause.
+
+    Structural and exhaustive: every position is tried and none is privileged, which is the rule
+    :mod:`nyxara.njp.semantics` and :mod:`nyxara.njp.compile` both state. What a particular token
+    *does* at such a split is not decided here.
+    """
+    out: List[Tuple[str, str, str]] = []
+    try:
+        tokens = tag_tokens(surface)
+        for index in range(1, len(tokens) - 1):
+            # A determiner is not a connective, and neither is a preposition, a pronoun or an
+            # auxiliary — they belong **inside** a clause rather than between two. Without this,
+            # ``the`` was induced as a causal connective: it splits *"devi lit | the | lamp
+            # because the room was dark"* into two halves that both happen to read, it sat
+            # earlier in the list than ``because``, and it won — giving a cause of ``lamp
+            # because the room was dark``. A structural constraint over the closed class, which
+            # is where a constraint of that kind belongs.
+            if tokens[index].tag in (Tag.DET, Tag.PREP, Tag.PRON, Tag.AUX, Tag.NEG):
+                continue
+            left = " ".join(t.text for t in tokens[:index])
+            right = " ".join(t.text for t in tokens[index + 1:])
+            if not left or not right:
+                continue
+            if proposition(left)[0] and proposition(right)[0]:
+                out.append((left, tokens[index].text, right))
+        return out
+    except Exception:  # noqa: BLE001
+        return out
+
+
+def _infinitivals(surface: str) -> List[Tuple[str, str, str]]:
+    """``(main, token, reconstructed goal clause)`` for every ``PREP WORD …`` tail.
+
+    *"Ravi went to the shop to buy bread"* has two prepositions and only one of them introduces a
+    purpose; the difference is structural — a purpose clause is a preposition followed straight by
+    an open word, where a prepositional phrase has a determiner in between. The goal clause has no
+    subject of its own, so the main clause's is put back for it, which is what makes it readable
+    at all.
+    """
+    out: List[Tuple[str, str, str]] = []
+    try:
+        tokens = tag_tokens(surface)
+        for index in range(1, len(tokens) - 1):
+            if tokens[index].tag != Tag.PREP or tokens[index + 1].tag != Tag.WORD:
+                continue
+            head = tokens[:index]
+            main = " ".join(t.text for t in head)
+            opens = [t.text for t in head if t.tag == Tag.WORD]
+            if not opens:
+                continue
+            tail = " ".join(t.text for t in tokens[index + 1:])
+            clause = f"{opens[0]} {tail}"
+            # Only the reconstructed goal clause has to read. Requiring the main clause to read as
+            # well threw away *"Ravi went to the shop to buy bread"* — the compiler has no frame
+            # for a verb with a prepositional phrase, so the main half of the commonest purpose
+            # sentence there is came back unreadable and the goal went with it.
+            if len(opens) >= 2 and proposition(clause)[0]:
+                out.append((main, tokens[index].text, clause))
+        return out
+    except Exception:  # noqa: BLE001
+        return out
+
+
+class Connective:
+    """What a joining word does — **induced**, because which word does which is a language fact.
+
+    *"The farmer watered the plant because it was dry"* and *"The plant was dry so the farmer
+    watered it"* say the same thing with the cause on opposite sides. Nothing structural
+    distinguishes them: both are two clauses with a word between. What differs is ``because``
+    against ``so``, and which of those puts the cause first is a fact about English that a module
+    could only have been told — so it is shown instead.
+
+    A demonstration is a sentence and which of its clauses is the **cause** (or the **goal**).
+    What is induced is the role of the word at the split, at the same terms as everything else
+    here: two demonstrations minimum, differing in content, unanimous, dropped the moment one
+    disagrees. Untaught, no sentence carries a cause and no sentence carries a goal, which is
+    exactly where this module stood.
+
+    Purpose is the same mechanism over :func:`_infinitivals` rather than :func:`_splits`, because
+    a goal clause has no subject of its own and has to be reconstructed before it reads.
+    """
+
+    min_support = 2
+
+    def __init__(self, *, min_support: Optional[int] = None) -> None:
+        if min_support is not None:
+            self.min_support = max(1, int(min_support))
+        self.seen: Dict[str, Dict[str, List[Tuple[str, ...]]]] = {}
+        self.kept: Dict[str, str] = {}
+        #: How many distinct demonstrations stand behind each kept token. Read by :meth:`read`,
+        #: which picks the **best-supported** candidate rather than the leftmost — the rule
+        #: :mod:`nyxara.njp.semantics` and :mod:`nyxara.njp.compile` both state, because ``or``
+        #: short-circuits and a short-circuit is how a sentence gets read by the wrong pattern.
+        self.support: Dict[str, int] = {}
+        self.contested: Set[str] = set()
+        self.shown = 0
+
+    @staticmethod
+    def _same(one: str, other: str) -> bool:
+        return {t.text for t in tag_tokens(one) if t.tag == Tag.WORD} == \
+            {t.text for t in tag_tokens(other) if t.tag == Tag.WORD}
+
+    def show(self, surface: str, *, cause: str = "", goal: str = "") -> None:
+        """One demonstration: in this sentence, **this** clause is the cause (or the goal)."""
+        try:
+            signature = tuple(sorted(t.text for t in tag_tokens(surface) if t.tag == Tag.WORD))
+            if cause:
+                for left, token, right in _splits(surface):
+                    if self._same(left, cause):
+                        self._note(token, CAUSE_BEFORE, signature)
+                    elif self._same(right, cause):
+                        self._note(token, CAUSE_AFTER, signature)
+            if goal:
+                for _main, token, clause in _infinitivals(surface):
+                    if self._same(clause, goal) or goal in clause:
+                        self._note(token, GOAL_AFTER, signature)
+            self.shown += 1
+            self._settle()
+        except Exception:  # noqa: BLE001
+            return
+
+    def _note(self, token: str, role: str, signature: Tuple[str, ...]) -> None:
+        self.seen.setdefault(token, {}).setdefault(role, []).append(signature)
+
+    def _settle(self) -> None:
+        kept: Dict[str, str] = {}
+        support: Dict[str, int] = {}
+        contested: Set[str] = set()
+        for token, roles in self.seen.items():
+            live = [role for role, sigs in roles.items() if sigs]
+            if len(live) > 1:
+                contested.add(token)
+                continue
+            sigs = roles[live[0]]
+            if len(set(sigs)) >= self.min_support:
+                kept[token] = live[0]
+                support[token] = len(set(sigs))
+        self.kept, self.contested, self.support = kept, contested, support
+
+    def read(self, surface: str) -> Optional[Link]:
+        """The cause or the goal this sentence carries, or ``None``."""
+        try:
+            # Every candidate is tried and the winner is chosen on **evidence, never on order**.
+            # Taking the leftmost split let a token with two demonstrations behind it beat one
+            # with four, purely because it occurred earlier in the sentence.
+            causal = [(self.support.get(token, 0), left, token, right)
+                      for left, token, right in _splits(surface)
+                      if self.kept.get(token) in (CAUSE_BEFORE, CAUSE_AFTER)]
+            if causal:
+                _best, left, token, right = max(causal, key=lambda item: item[0])
+                if self.kept[token] == CAUSE_BEFORE:
+                    return Link(kind="cause", connective=token, cause=left, effect=right,
+                                why=f"{token!r} was shown putting the cause first")
+                return Link(kind="cause", connective=token, cause=right, effect=left,
+                            why=f"{token!r} was shown putting the cause second")
+            for main, token, clause in _infinitivals(surface):
+                if self.kept.get(token) == GOAL_AFTER:
+                    return Link(kind="goal", connective=token, effect=main, goal=clause,
+                                why=f"{token!r} was shown introducing a purpose")
+            return None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def stats(self) -> Dict[str, Any]:
+        return {"shown": self.shown, "kept": dict(self.kept),
+                "contested": sorted(self.contested)}
+
+
+# --------------------------------------------------------------------------- #
+# 9 · alternations — the same meaning, said a different way round
 # --------------------------------------------------------------------------- #
 
 def _predication(surface: str) -> Optional[Tuple[str, str, str]]:
@@ -2865,6 +3126,9 @@ class Uptake:
     #: The two readings of a prepositional attachment, when there are two — see
     #: :func:`attachment`.
     readings: Optional[Readings] = None
+    #: The cause or the purpose this sentence carried, when a connective she has been shown said
+    #: so — see :class:`Connective`.
+    link: Optional[Link] = None
     #: What she expected of this turn **before** hearing it, and what the turn did to that
     #: expectation — see :class:`Anticipation`. ``expected`` is made from the exchange so far and
     #: never from this sentence; ``surprise`` is the only field on an uptake that is about her
@@ -2883,6 +3147,48 @@ class Uptake:
     def literal(self) -> bool:
         """Should this sentence be filed as a fact about the world?"""
         return not (self.figurative is not None and self.figurative.figurative)
+
+    def anchor(self, ledger: Optional["Ledger"] = None) -> Dict[str, Any]:
+        """The Master's semantic reality anchor, filled from this turn — and **only** filled.
+
+        Every slot here is something the turn actually carried; a slot nothing established is
+        absent rather than empty, because a schema that always returns eleven keys cannot be told
+        apart from one that fills none of them. Six were reachable when the gap report was
+        written: entity, relation, time, belief, uncertainty and — through ``is_at`` — space.
+        Cause and goal arrive with :class:`Connective`, and the event-versus-state distinction
+        with :meth:`Ledger.kind_of`, which reads it off how the relation has behaved rather than
+        off any list.
+        """
+        out: Dict[str, Any] = {}
+        try:
+            meaning = self.meaning
+            if meaning is not None and meaning.readable:
+                entities = [x for x in (_bare(meaning.subject), _bare(meaning.object)) if x]
+                if entities:
+                    out["entity"] = entities
+                if meaning.subject:
+                    out["agent"] = _bare(meaning.subject)
+                if meaning.relation:
+                    out["relation"] = meaning.relation
+                    if meaning.relation == "is_at" and meaning.object:
+                        out["space"] = _bare(meaning.object)
+                if meaning.temporal:
+                    out["time"] = meaning.temporal
+                if meaning.confidence:
+                    out["uncertainty"] = round(1.0 - float(meaning.confidence), 4)
+            if self.link is not None:
+                if self.link.kind == "cause" and self.link.cause:
+                    out["cause"] = self.link.cause
+                if self.link.kind == "goal" and self.link.goal:
+                    out["goal"] = self.link.goal
+            claim = self.verdict.claim if self.verdict is not None else None
+            if ledger is not None and claim is not None:
+                found = ledger.kind_of(claim.relation)
+                if found:
+                    out["occurrence"] = found
+            return out
+        except Exception:  # noqa: BLE001
+            return out
 
     @property
     def conflict(self) -> bool:
@@ -2907,6 +3213,8 @@ class Uptake:
             out["figurative"] = self.figurative.to_dict()
         if self.readings is not None and self.readings.ambiguous:
             out["readings"] = self.readings.to_dict()
+        if self.link is not None:
+            out["link"] = self.link.to_dict()
         if self.expected is not None and not self.expected.empty:
             out["expected"] = self.expected.to_dict()
         if self.surprise is not None and self.surprise.predicted:
@@ -2944,6 +3252,8 @@ class Communicator:
         self.attach = AttachLearner()
         #: How a shape the compiler has no frame for maps onto roles — see :class:`Alternation`.
         self.alternation = Alternation()
+        #: What a joining word does to the clauses either side — see :class:`Connective`.
+        self.connective = Connective()
         #: What she expects of a turn before it arrives, learned from what has actually
         #: followed what — see :class:`Anticipation`.
         self.anticipation = Anticipation()
@@ -2988,6 +3298,11 @@ class Communicator:
         """Demonstrate what a speaker would call this pair of claims —
         see :meth:`MarkerLearner.show`."""
         self.markers.show(first, second, verdict)
+
+    def show_cause(self, surface: str, *, cause: str = "", goal: str = "") -> None:
+        """Demonstrate which clause of this sentence is the cause, or which is the purpose —
+        see :meth:`Connective.show`. Which *word* does that is what gets induced."""
+        self.connective.show(surface, cause=cause, goal=goal)
 
     def show_alternation(self, plain: str, marked: str) -> None:
         """Demonstrate that these two sentences mean the same thing, one of them in a shape the
@@ -3040,7 +3355,19 @@ class Communicator:
             # `unreadable` would never have been reached for the shape that needed it most.
             # `frames_of` matches three shapes and a mapping needs demonstrations, so an ordinary
             # active sentence reaches none of this.
-            learned = self.alternation.readings(out.rewritten)
+            # What the sentence *asserts* when it also says why. *"Devi lit the lamp because the
+            # room was dark"* asserts that Devi lit the lamp; the other clause is the reason, and
+            # reading the whole sentence as one claim gave an agent of
+            # ``devi lit the lamp because the room`` — a phrase, filed as a thing.
+            out.link = self.connective.read(out.rewritten)
+            asserted = out.rewritten
+            if out.link is not None and out.link.effect:
+                asserted = out.link.effect
+                effect = compile_meaning(asserted)
+                if effect.readable:
+                    out.meaning = effect
+
+            learned = self.alternation.readings(asserted)
             if learned:
                 out.meaning = learned[0]
             elif not out.meaning.readable:
@@ -3049,7 +3376,7 @@ class Communicator:
                 # was not, so a sentence whose only reading is structural introduced no referent
                 # and was judged by nothing.
                 for reader in (_predication, _locative, _possessive):
-                    shape = reader(out.rewritten)
+                    shape = reader(asserted)
                     if shape is not None:
                         out.meaning = Meaning(kind="assertion", subject=shape[0],
                                               relation=shape[1], object=shape[2],
@@ -3062,7 +3389,7 @@ class Communicator:
             literal_assertion = (out.interpretation.intended in ("assertion", "exclamation")
                                  or out.interpretation.literal == "assertion")
             if literal_assertion and out.literal:
-                claim = read_claim(out.rewritten, learned[0] if learned else None,
+                claim = read_claim(asserted, learned[0] if learned else None,
                                    turn=self.turn, markers=self.markers,
                                    alternation=self.alternation)
                 # A claim about a pronoun is a claim about nobody — but only when the pronoun
@@ -3264,6 +3591,7 @@ class Communicator:
             ground = {}
         return {"turns": self.turn, "acts": self.acts.stats(),
                 "alternation": self.alternation.stats(),
+                "connective": self.connective.stats(),
                 "exchange": self.exchange.stats(), "ground": ground,
                 "anticipation": self.anticipation.stats(),
                 "markers": self.markers.stats(), "attach": self.attach.stats(),
