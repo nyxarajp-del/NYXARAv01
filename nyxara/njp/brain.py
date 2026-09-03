@@ -134,6 +134,15 @@ class NJPPercept:
     # What the turn grounded to: entities, relations, and the words that reached neither. The
     # fabric's cell ids say what fired with what; this says what any of it was *about*.
     grounding: Any = None
+    #: What :mod:`nyxara.njp.discourse` made of this turn — the act behind it, what its pronouns
+    #: name, what it does to the claims already on the ledger, and whether it is a sentence to be
+    #: taken literally at all. A ``discourse.Uptake``; ``None`` when the organ is off.
+    #:
+    #: It sits on the **percept** rather than on the thought because two things downstream of
+    #: perception need it before a thought exists: the sentence handed to the grounder has its
+    #: settled pronouns already filled in, and a sentence read as non-literal never reaches the
+    #: store at all.
+    uptake: Any = None
 
     @property
     def novelty(self) -> float:
@@ -317,6 +326,24 @@ class NJPThought:
                 "focus": self.focus.to_dict() if self.focus is not None else None}
 
 
+def _confirm(triple: Any) -> str:
+    """One stored triple, said back **with its polarity**.
+
+    Separate from :meth:`NJPBrain._compose` so it can be tested directly, and because it is the
+    whole of the V.26 store defect: a confirmation that drops the negator is not a shorter
+    confirmation, it is a different claim.
+    """
+    try:
+        relation = str(getattr(triple, "predicate", "")).replace("_", " ")
+        core = f"{getattr(triple, 'subject', '')} {relation} {getattr(triple, 'object', '')}"
+        if getattr(triple, "negated", False):
+            return f"{getattr(triple, 'subject', '')} does not {relation} " \
+                   f"{getattr(triple, 'object', '')}".strip()
+        return core.strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 class NJPBrain:
     """NJP V.01 — one automaton, its organs, and the loop that grows it."""
 
@@ -355,6 +382,8 @@ class NJPBrain:
         self.intent = self._build_intent(c)
         self.ladder = self._build_ladder(c)
         self.grounder = self._build_grounder(c)
+        # After the grounder, because it reads nothing from it, and before `perceive` can run.
+        self.discourse = self._build_discourse(c)
         self.world = self._build_world(c)
         self.predictor = self._build_predictor(c)
         self.levels = self._build_levels(c)
@@ -1774,6 +1803,28 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a brain that cannot program still thinks
             return None
 
+    def _build_discourse(self, c: Any) -> Any:
+        """The organ that reads a *conversation* rather than a sentence.
+
+        Empty on day one in the same sense :meth:`_build_language` is: it holds no convention
+        until one has been demonstrated, no referent until one has been introduced, and it calls
+        nothing figurative until the store has witnessed enough to make that a judgement rather
+        than a guess. A brain that is never taught and never talked to behaves exactly as it did
+        before this organ existed.
+
+        It is handed :meth:`_kinds_of` — her own ``is_a`` store — as its kinds oracle, so what she
+        can tell about a metaphor is exactly what she has been taught about the world.
+        """
+        if not self._gate("discourse", True):
+            return None
+        try:
+            from nyxara.njp.discourse import Communicator
+            return Communicator(kinds=self._kinds_of,
+                                speaker=str(self._cfg("discourse_speaker", "Master")),
+                                addressee=str(self._cfg("discourse_addressee", "NYXARA")))
+        except Exception:  # noqa: BLE001 — a brain with no discourse organ still reads sentences
+            return None
+
     def _build_language(self, c: Any) -> Any:
         """The organ that can acquire a grammar she was not shipped with.
 
@@ -1867,6 +1918,257 @@ class NJPBrain:
         if self.language is None:
             return ""
         return self.language.say(meaning, tongue=tongue)
+
+    # ---- discourse -------------------------------------------------------- #
+    def hear_turn(self, text: str, *, speaker: Optional[str] = None) -> Any:
+        """Read one turn as part of a **conversation** and return the whole uptake.
+
+        The counterpart to :meth:`read_language`, one level out: that returns what a sentence
+        means, and this returns what somebody was doing by saying it, what its pronouns name, and
+        what it does to the claims already on the ledger. ``think`` calls this for every turn — it
+        is exposed separately so a caller can inspect the reading without spending a whole turn.
+        """
+        try:
+            if self.discourse is None:
+                from nyxara.njp.discourse import Uptake
+                return Uptake(surface=str(text or ""))
+            return self.discourse.hear(str(text or ""), speaker=speaker)
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Uptake
+            return Uptake(surface=str(text or ""))
+
+    def show_act(self, surface: str, act: str) -> None:
+        """Demonstrate that this surface does this — see
+        :meth:`~nyxara.njp.discourse.ActLearner.show`. Two demonstrations with different fillers
+        are the minimum that leaves anything behind."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show(str(surface or ""), str(act or ""))
+        except Exception:  # noqa: BLE001
+            return
+
+    def correct_act(self, surface: str, *, took_as: str, meant: str) -> bool:
+        """A communication that failed, handed back as a lesson. Returns whether the correction
+        **generalised** rather than merely fixing its own sentence."""
+        try:
+            if self.discourse is None:
+                return False
+            return bool(self.discourse.misread(str(surface or ""), took_as=str(took_as),
+                                               meant=str(meant)))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def expect_turn(self) -> Any:
+        """What she expects of the next turn, before it arrives — see
+        :class:`~nyxara.njp.discourse.Anticipation`. An organ that has heard nothing returns an
+        empty expectation, which is a different answer from a confident wrong one."""
+        try:
+            if self.discourse is None:
+                from nyxara.njp.discourse import Expectation
+                return Expectation()
+            return self.discourse.anticipation.expect()
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Expectation
+            return Expectation()
+
+    def show_change(self, first: str, second: str, verdict: str) -> None:
+        """Demonstrate what a speaker would call this pair of claims — ``updates``,
+        ``contradicts`` or ``corroborates``. What word carried the verdict is induced rather than
+        stated; see :class:`~nyxara.njp.discourse.MarkerLearner`."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_change(str(first or ""), str(second or ""), str(verdict or ""))
+        except Exception:  # noqa: BLE001
+            return
+
+    def overhear_language(self, text: str, *, language: str = "unknown") -> None:
+        """Overhear one sentence of any language, for the closed-class induction only.
+
+        Nothing is asserted from it and no meaning is attached — the counterpart of
+        :meth:`hear_language`, one level down: that feeds the affix induction and the word
+        classes, and this feeds the question of which of a language's words are its **closed
+        class** at all. See :class:`~nyxara.njp.discourse.ClosedClassLearner`.
+        """
+        try:
+            if self.discourse is not None:
+                self.discourse.vocabulary.hear(str(text or ""), language=str(language))
+        except Exception:  # noqa: BLE001
+            return
+
+    def fit_closed_class(self, known: Any, *, language: str = "en") -> Any:
+        """Fit the closed-class criterion where the answer is known, so it can be applied where
+        it is not. What transfers is the criterion, never the words."""
+        try:
+            if self.discourse is None:
+                return {}
+            return self.discourse.vocabulary.fit(known, language=language)
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def closed_class(self, language: str = "unknown") -> Any:
+        """The words that language's closed class appears to contain, or nothing if unfitted."""
+        try:
+            if self.discourse is None:
+                return set()
+            return self.discourse.vocabulary.closed(language)
+        except Exception:  # noqa: BLE001
+            return set()
+
+    def retell(self, surface: str, *, into: str, frm: Optional[str] = None) -> Any:
+        """Say one turn again in another language, and report what did **not** cross.
+
+        The claim crosses; the **act** does not, unless the target language's convention has been
+        separately demonstrated. That is the honest result and this reports it rather than hiding
+        it — an indirect request is a fact about a speech community, not about a meaning.
+        """
+        try:
+            if self.discourse is None or self.language is None:
+                from nyxara.njp.discourse import Retelling
+                return Retelling(surface=str(surface or ""), into=str(into))
+            return self.discourse.retell(str(surface or ""), into=str(into),
+                                         faculty=self.language, frm=frm)
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Retelling
+            return Retelling(surface=str(surface or ""), into=str(into))
+
+    def could_be_a_word(self, form: str, *, language: str = "spoken") -> Any:
+        """Could this be a word of that language? Phonotactics, induced from exposure — the half
+        of phonology that survives a writing system. See
+        :class:`~nyxara.njp.discourse.Phonotactics`."""
+        try:
+            if self.discourse is None:
+                from nyxara.njp.discourse import Wordform
+                return Wordform(form=str(form or ""))
+            return self.discourse.phonotactics.judge(str(form or ""), language=language)
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Wordform
+            return Wordform(form=str(form or ""))
+
+    def words_like(self, word: str, *, limit: int = 5) -> Any:
+        """The words whose company most resembles this one's. **Near**, not synonymous:
+        distribution puts ``hot`` beside ``cold`` as readily as beside ``warm``."""
+        try:
+            if self.discourse is None:
+                return []
+            return self.discourse.lexicon.near(str(word or ""), limit=limit)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def show_scale(self, surface: str, *, weaker: str, stronger: str) -> None:
+        """Demonstrate that one word sits below another on a scale, so *"some passed"* can convey
+        that not all did. Which words scale is a fact about a language's words, not about
+        implicature — see :class:`~nyxara.njp.discourse.Scale`."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_scale(str(surface or ""), weaker=str(weaker),
+                                          stronger=str(stronger))
+        except Exception:  # noqa: BLE001
+            return
+
+    def footing(self, speaker: str, other: str) -> Any:
+        """Where two speakers stand to each other, counted from who complies with whose
+        instructions and who answers whose questions — never declared, and abstaining loudly.
+
+        A reading of one transcript and **not** a claim about status in the world. Nothing in the
+        safety core reads it.
+        """
+        try:
+            if self.discourse is None:
+                from nyxara.njp.discourse import Footing
+                return Footing(speaker=str(speaker), other=str(other))
+            return self.discourse.standing.footing(str(speaker), str(other))
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Footing
+            return Footing(speaker=str(speaker), other=str(other))
+
+    def show_cause(self, surface: str, *, cause: str = "", goal: str = "") -> None:
+        """Demonstrate which clause of this sentence is the cause, or which is the purpose.
+
+        Which *word* does that is what gets induced: nothing structural separates *"A because B"*
+        from *"B so A"*, and which of them puts the cause first is a fact about English.
+        """
+        try:
+            if self.discourse is not None:
+                self.discourse.show_cause(str(surface or ""), cause=str(cause or ""),
+                                          goal=str(goal or ""))
+        except Exception:  # noqa: BLE001
+            return
+
+    def show_alternation(self, plain: str, marked: str) -> None:
+        """Demonstrate that these two sentences mean the same thing, one of them in a shape the
+        compiler cannot read — a passive, an auxiliary chain, a gapped coordinate. Where each
+        slot's filler ends up is induced from the pair rather than written down."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_alternation(str(plain or ""), str(marked or ""))
+        except Exception:  # noqa: BLE001
+            return
+
+    def show_exchange(self, first: str, second: str, relation: str) -> None:
+        """Demonstrate what the second turn is doing to the first — answering it, accepting it,
+        clarifying it. The **acts** are what is recorded, never the sentences, so one
+        demonstration of a question being answered reads any question being answered."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_exchange(str(first or ""), str(second or ""),
+                                             str(relation or ""))
+        except Exception:  # noqa: BLE001
+            return
+
+    def show_attachment(self, surface: str, site: str) -> None:
+        """Demonstrate which site a prepositional phrase attached to — ``event`` or ``object``.
+        A preposition demonstrated both ways is one this language uses both ways."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_attachment(str(surface or ""), str(site or ""))
+        except Exception:  # noqa: BLE001
+            return
+
+    def fit_reference(self, cases: Any) -> Any:
+        """Move the pronoun resolver's cue weights to whatever answers these demonstrations
+        best — see :meth:`~nyxara.njp.discourse.Reference.fit`."""
+        try:
+            if self.discourse is None:
+                return {}
+            return self.discourse.fit_reference(cases)
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def say_to(self, meaning: Any, *, audience: str = "student") -> Any:
+        """One meaning said for one hearer, parsed back before it is returned — see
+        :class:`~nyxara.njp.discourse.Register`."""
+        try:
+            if self.discourse is None:
+                from nyxara.njp.discourse import Said
+                return Said(audience=audience)
+            return self.discourse.say(meaning, audience)
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Said
+            return Said(audience=audience)
+
+    def holds(self, subject: str, relation: str) -> str:
+        """What the conversation currently says about this, or ``""`` where it says two things.
+
+        The empty string on a contested pair is the point of the ledger and is not the same answer
+        as "nothing was said": a store that returned the later claim would be the silent overwrite
+        :mod:`nyxara.njp.discourse` exists to refuse.
+        """
+        try:
+            if self.discourse is None:
+                return ""
+            return self.discourse.holds(str(subject or ""), str(relation or ""))
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def go_to_discourse_school(self, *, rounds: int = 2, seed: int = 26,
+                               subjects: Any = None) -> Any:
+        """Sit the syllabus about being talked to: acts, reference, contradiction, minds,
+        register, and the two subjects that are controls on the other nine."""
+        try:
+            from nyxara.njp.discourseschool import DiscourseSchool
+            return DiscourseSchool(seed=seed, rounds=rounds, subjects=subjects).attend(self)
+        except Exception:  # noqa: BLE001
+            return None
 
     # ---- programming ------------------------------------------------------ #
     def read_code(self, source: str) -> Any:
@@ -2975,6 +3277,19 @@ class NJPBrain:
                 # answered from it rather than from whatever happened to fire. Cheap enough to sit
                 # in every turn — the fluent surface is not consulted here (`deep` stays off),
                 # because that call is seconds, and seconds do not belong in a perceive.
+                # Heard as a *conversation* before it is read as a sentence. Two things come
+                # out of this that the grounder cannot produce for itself: a surface whose
+                # settled pronouns have been filled in, and the judgement that a sentence is not
+                # meant literally. Both have to happen before extraction, because a fact filed is
+                # a fact that outlives the turn that filed it.
+                heard = out.stimulus
+                if self.discourse is not None:
+                    try:
+                        out.uptake = self.discourse.hear(out.stimulus)
+                        heard = out.uptake.rewritten or out.stimulus
+                    except Exception:  # noqa: BLE001
+                        out.uptake = None
+
                 if self.grounder is not None:
                     try:
                         # **A sum is not a sentence about the world.** The grounder reads a
@@ -2985,11 +3300,18 @@ class NJPBrain:
                         # writing nonsense into what she reasons from. `store` is False exactly
                         # when the mathematician can close the turn, so nothing is extracted from
                         # a task — see `Grounder.ground`.
+                        # And a metaphor is not a sentence about the world either. *"The market
+                        # swallowed the shock"* was filed as ``market swallow shock`` at the same
+                        # confidence as a fact she had been taught — the V.23 store defect again,
+                        # in a shape neither the arithmetic guard nor the cognitive one covers,
+                        # because it is a well-formed statement in every respect except being
+                        # meant.
                         out.grounding = self.grounder.ground(
-                            out.stimulus, intent=intent,
+                            heard, intent=intent,
                             store=self._mathematical(out.stimulus) is None
                             and not self._is_maths_task(out.stimulus)
-                            and not self._is_cognitive_task(out.stimulus))
+                            and not self._is_cognitive_task(out.stimulus)
+                            and (out.uptake is None or out.uptake.literal))
                     except Exception:  # noqa: BLE001
                         out.grounding = None
 
@@ -3817,6 +4139,35 @@ class NJPBrain:
             if answer is not None and answer.answered:
                 return str(answer.text)[:1000]
 
+            # 1.5. Two claims that cannot both hold, or a pronoun nothing in the discourse
+            # settles. Either way she has a question rather than an answer.
+            #
+            # **Here** rather than lower down, and the position is the whole of it. Below this
+            # sits the abstention branch for a turn the grounder called a question — and it calls
+            # *"When I visited Delhi last year I was tired."* a question, on the fronted ``when``,
+            # so a contradiction she had correctly detected returned the empty string. Above it
+            # sits the grounded answer, which still wins: a question structure can actually answer
+            # is answered, never asked back.
+            #
+            # It is also said **instead of** a recalled memory rather than beside one. Reaching
+            # into the store on a turn she could not read is exactly how *"He was tired."* came
+            # back with the previous turn attached to it at confidence 0.75.
+            asked = getattr(getattr(thought, "percept", None), "uptake", None)
+            question = str(getattr(asked, "question", "") or "")
+            conflict = bool(getattr(getattr(asked, "verdict", None), "conflict", False))
+            # And **not** on a turn the grounder called a question, unless the conflict is what
+            # this is about. The reason is the one every abstention subject in this repository
+            # rests on: a control scores silence as right and *any* non-empty reply as wrong, so a
+            # clarification offered where she would have abstained is a regression on every such
+            # paper however much better it reads. A contradiction is the exception because it is
+            # the case the grounder misreads — *"When I visited Delhi last year…"* is called a
+            # question on its fronted `when` — and because a conflict is a fact about what she was
+            # told rather than a guess at what was asked.
+            if question and (conflict or not getattr(grounding, "is_question", False)):
+                said = list(getattr(grounding, "triples", None) or [])
+                confirmed = ("noted: " + "; ".join(_confirm(t) for t in said[:3])) if said else ""
+                return " — ".join(x for x in (confirmed, question) if x)[:1000]
+
             # 2. She was asked something and genuinely does not know. Say that — do not fall
             # through to recall and offer a loosely-related memory as though it were an answer.
             #
@@ -3843,6 +4194,19 @@ class NJPBrain:
             # `_recall_through_gate`, which really was dead), and a question NJP cannot ground is
             # still answered with silence rather than with the nearest thing in the store.
             if getattr(grounding, "is_question", False):
+                # 2a. The *conversation* may answer what the store cannot. A location that was
+                # stated three turns ago and revised two turns ago is not in the fact store under
+                # a relation any question frame asks for — `"the key is in the drawer"` compiles
+                # to a bare clause whose verb is `drawer` — and it is on the ledger under
+                # ``is_at``, which is where the revision was applied.
+                #
+                # Narrow on purpose: a ``where`` question, about a subject the ledger holds, and
+                # nothing else. And a contested pair answers with the dispute rather than with
+                # either claim, because those are different states and returning one of them as
+                # though it were settled is the overwrite this whole organ exists to refuse.
+                asked_where = self._answer_from_conversation(thought)
+                if asked_where:
+                    return asked_where
                 # One thing is safe to answer from memory here, and only one: a question she was
                 # taught *this exact question*. `recall_cue` is a dict lookup on the normalised
                 # question text, so it cannot return something merely near what was asked — which
@@ -3861,10 +4225,17 @@ class NJPBrain:
             bits: List[str] = []
             # 3. She was told something and it landed. Confirm what was actually understood, so a
             # misparse is visible to the Master on the turn it happens rather than three turns later.
+            #
+            # **With its polarity.** This line read `f"{t.subject} {t.predicate} {t.object}"`, and
+            # `GroundedTriple.negated` — which the compiler sets correctly and the store keeps
+            # correctly — was never in it. So *"I never visited Delhi."* came back
+            # `noted: Master visit delhi`: the one window the Master has into what was understood,
+            # showing the **opposite of what was said**. That is the `("Zorbins don't", requires,
+            # glarn)` defect of V.09 surviving in the only place nobody thought to measure, which
+            # is not the parse but the confirmation.
             triples = list(getattr(grounding, "triples", None) or [])
             if triples:
-                learned = "; ".join(f"{t.subject} {t.predicate.replace('_', ' ')} {t.object}"
-                                    for t in triples[:3])
+                learned = "; ".join(_confirm(t) for t in triples[:3])
                 bits.append(f"noted: {learned}")
             for prior, now in list(getattr(grounding, "contradictions", None) or [])[:1]:
                 bits.append(f"this contradicts what I had ({prior.object}); "
@@ -4012,6 +4383,28 @@ class NJPBrain:
                     "Abhi kuch khaas nahi kar rahi — sun rahi hoon.")
         head = "Main theek hoon Master. " if mood else "Abhi: "
         return head + "; ".join(bits[:3]) + f" — {self.turns} turns."
+
+    def _answer_from_conversation(self, thought: NJPThought) -> str:
+        """A ``where`` question answered from the discourse ledger, or ``""``."""
+        try:
+            if self.discourse is None:
+                return ""
+            from nyxara.njp.semantics import tag_tokens
+
+            uptake = getattr(getattr(thought, "percept", None), "uptake", None)
+            meaning = getattr(uptake, "meaning", None)
+            if meaning is None or meaning.kind != "question" or not meaning.subject:
+                return ""
+            words = {t.text for t in tag_tokens(thought.stimulus)}
+            if not (words & {"where", "kahan", "कहाँ"}):
+                return ""
+            subject = meaning.subject
+            held = self.discourse.holds(subject, "is_at")
+            if held:
+                return held
+            return self.discourse.ledger.dispute(subject, "is_at")
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _answer_as_taught(self, thought: NJPThought) -> str:
         """The stored answer to *this exact question*, if she was ever taught one.
@@ -4672,7 +5065,8 @@ class NJPBrain:
                             ("society", self.society),
                             ("evolution", self.evolution),
                             ("epistemic", self.epistemic), ("coding", self.coder),
-                            ("language", self.language)):
+                            ("language", self.language),
+                            ("discourse", self.discourse)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -4804,6 +5198,12 @@ class NJPBrain:
             arrow("weakness→rewire", self.evolution,
                   "no structural change has measured better than what she was written with",
                   ran=bool(getattr(self.evolution, "cognitive_rewires", 0)))
+            # V.26. Open until she has actually been *talked to*: the organ holds no convention
+            # until one is demonstrated and no referent until one is introduced, so a brain that
+            # has only ever been handed isolated sentences reports this arrow open, correctly.
+            arrow("turn→uptake", self.discourse,
+                  "no turn has been read as part of a conversation",
+                  ran=bool(getattr(self.discourse, "turn", 0)))
             arrow("↺", self.loop)
         except Exception:  # noqa: BLE001 — an unreadable organ is left out, not guessed at
             pass

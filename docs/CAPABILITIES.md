@@ -59,6 +59,7 @@ applied to the documentation itself).
 | 37 | Common Sense | `nyxara.knowledge.base` | REAL+WIRED |
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
+| 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
 | 40 | Multimodal Intelligence | `nyxara.senses.binding` | REAL+WIRED |
 | 41 | Embodied Intelligence | `nyxara.sim.embodied` + `nyxara.senses.live` | REAL+WIRED |
 | 42 | Real-time Decision Making (System 1/2) | `nyxara.mind.dual_process` | REAL+WIRED |
@@ -2618,10 +2619,764 @@ Run it: `NJPBrain.do_cognitive("...")`, `python -m nyxara.njp.corpusschool --exa
 `--verify` to re-check the grader against the corpus's own answers, or `/v1/njp/cognition`.
 
 
+
+### NJP V.26 — being talked to, which is not the same as reading a sentence
+
+`njp/semantics.py` reads a sentence into a `Meaning`. `njp/language.py` learns the grammar that
+reading needs, in languages nobody has ever spoken. Both stop at the sentence, and that boundary is
+where this package's language work has ended since V.09: a turn is compiled, grounded, and
+forgotten as an utterance. What was missing is everything that makes a sentence a *communication* —
+who said it, what they were doing by saying it, what "it" refers to, whether it can be true at the
+same time as what they said twenty turns ago, and what they believe that is not so.
+
+#### Cold, and it is worse than a gap
+
+Eight conversations put to `think()` before any of this existed.
+
+| said to her | what came back |
+|---|---|
+| `I never visited Delhi.` | **`noted: Master visit delhi`** |
+| `Can you open the window?` | `0 beliefs held with evidence, 0 open or unsupported` |
+| `Ravi met Arun.` / `He was tired.` | `noted: ravi met arun` — the previous turn, at confidence 0.75 |
+| `I never visited Delhi.` … `When I visited Delhi last year…` | both filed, in silence |
+| `Have I visited Delhi?` | nothing at all |
+| `The market swallowed the shock.` | `noted: market swallow shock`, filed as a fact |
+| key in the drawer → key now on the table → `Where is the key?` | nothing at all |
+
+**Read the first row twice.** The compiler set `negated=True`. The grounder stored `negated=True`.
+The line that tells the Master what was understood dropped the polarity, so the only window he has
+into her uptake showed **the opposite of what he said**. That is the `("Zorbins don't", requires,
+glarn)` defect of V.09 surviving in the one place nobody thought to measure — not the parse, the
+confirmation — and it had been there since V.09 shipped.
+
+#### Six organs, one discipline, and it is `language.py`'s
+
+*A lesson leaves a shape, never an answer; a shape is kept only once it has read something nobody
+demonstrated; where two readings survive, the answer is that there are two.*
+
+**1 · Speech acts are induced, not listed.** *"Can you open the window?"* is literally a question
+about ability and actually a request, and no amount of parsing the sentence finds that — it is a
+convention, so it has to be learned from being shown. A demonstration leaves the **tag skeleton**
+of the surface at four levels of abstraction, with the open class collapsed to positions, so a
+demonstration of *"Can you open the window?"* reads *"Would you send the file?"* — a sentence with
+no word in common with it. Two demonstrations at minimum and **they must differ in a filler**.
+
+A shape two demonstrations disagree about is **contested** and stops being read, which is the right
+outcome for *"Can you swim?"*: that really is an ability question, and a module that answered
+confidently either way would be inventing a convention rather than learning one. Measured: teach
+five requests and two ability questions, all minted, and `Can you {v} the {n}?`, `Could you {v} the
+{n}?` and `Can you {v}?` come back right on words that did not exist when the lesson ran, while
+`MODAL PRON + ?` — the level the two constructions share — goes contested and reads nothing.
+
+**And a misreading teaches the shape, not the sentence.** `misread()` is the Master's
+*communication failure → learning*, and its return value is the point: it says whether the
+correction **generalised**. Two corrections of `Is the X Y to you?` are examined on six sentences
+nobody corrected — 6/6 — and on two controls of a different shape, where reading them as an offer
+would be a correction that fixed one sentence by breaking a class of others.
+
+**2 · A pronoun is resolved or it is refused.** Recency and role parallelism are scores; number
+agreement and *a pronoun in object position cannot name the subject of its own clause* are filters.
+A preference that outvotes a grammatical impossibility is not a preference. *"Ravi met Arun. He was
+tired."* comes back **ambiguous, 0.63 / 0.37, with the question that would settle it**; *"Ravi met
+Arun. Arun gave him the book."* comes back **Ravi**, settled, and the thing that separates them is
+structure rather than a guess about who is likelier to be tired.
+
+*"Ravi walked home. He was tired."* is structurally identical to the ambiguous one, and only a
+world model separates them. So it is separated by one: a candidate the store says cannot literally
+fill this predicate is struck out, on the same selectional evidence organ 6 uses. **Before the
+kinds are known it stays ambiguous, and after them it resolves** — which is a capability appearing
+because something was learned, rather than because a table was written.
+
+**3 · A contradiction is not an update, and the difference is in the sentence.** *"The key is in
+the drawer"* then *"The key is now on the table"* is a world that moved. *"I never visited Delhi"*
+then *"when I visited Delhi last year"* is a speaker who cannot be right twice. What separates them
+is a **change licence** — a closed set of markers by which a speaker signals time has moved — and a
+**universal**, which is what `never` and `always` are: no later instance licenses away a universal.
+
+**Nothing is overwritten.** Both claims stay on the ledger, marked contested, and `holds()` returns
+the empty string rather than either of them — because a store that overwrites has destroyed the
+only evidence that anything was ever wrong, and *"which of these is right?"* cannot be asked from a
+record that keeps one.
+
+**Which relations are stateful is learned from the transcript.** A relation a speaker has used a
+change marker with is one where *later* differs from *wrong*, and that is evidence sitting in the
+conversation. Measured: `key in drawer` → `key now on table` is an **update**; the same pair
+without `now`, in a fresh conversation, is **new information** — the honest reading of a relation
+nobody has shown her the behaviour of; and after the marked change has been seen once, an unmarked
+reversion to the drawer is a **contradiction**.
+
+**4 · Bounded recursive belief, driven by a sentence.** `nyxara.social.tom` has been a real
+recursive BDI engine here for many versions and **nothing in this package has ever put a sentence
+into it** — it had to be driven by hand. Now a sentence drives it, and it is used rather than
+rewritten. Two properties are new. *"Ravi thinks I don't know"* stores attributed **ignorance** at
+depth two rather than the negation of anything, because an agent who holds no view and an agent who
+holds the wrong one behave differently and a test that conflated them would pass for the wrong
+reason. And **depth stops paying**: a level whose content repeats the level below it is not stored
+at all, which is the Master's *stop when additional depth has negligible value* made mechanical —
+cheaper than a depth limit and, unlike one, about the content rather than the counting.
+
+**5 · She says as much as the hearer needs, and never more than she holds.** Four audiences, four
+surfaces, one meaning, and the surface is **parsed back** before it is returned exactly as
+`Grammar.say` does: unless what comes back carries the same subject, relation, object and polarity,
+the rendering is thrown away. **This is not vocabulary simplification and it cannot be** — she has
+no dictionary and no thesaurus, and a module claiming to make words simpler would be claiming a
+resource this package does not have. What varies is *how much of what she actually holds is said*:
+the bare claim, then its condition, then its time and modality, then what she is entitled to assert
+it on. Every register is a **subset of one meaning**, so truth is preserved by construction.
+
+**6 · A sentence can be true without being literal.** *"The market swallowed the shock"* is not a
+claim about a market's digestion, and the honest way to know that is to have seen what swallows
+things. Where a relation's witnessed subjects all share a kind the new subject demonstrably lacks,
+the reading is flagged and **nothing is filed**. Where there are no witnesses, or the new subject's
+kinds are unknown, nothing is claimed — with an empty store no sentence is figurative, and that is
+the right answer rather than a shortcoming to apologise for. A module shipping a list of which
+nouns may swallow would be the ontology this package refuses everywhere else.
+
+The kinds oracle is her own `is_a` store, so what she can tell about a metaphor is exactly what she
+has been taught about the world. And a metaphor never becomes the evidence for the next one: the
+figurative judgement runs **before** the ledger, so `market` is never witnessed as a swallower.
+
+#### Two readings, and neither chosen
+
+*"I saw the man with the telescope."* The evidence that there is an ambiguity at all is in the
+compiler's own output: it has no frame for a prepositional phrase after an object, so it fuses the
+two noun phrases into one object string — `man telescope`, with `with the` silently dropped. Read
+that fusion back out and both attachment sites are there, without a parser this package does not
+have. They come back at **0.50 each**, with the question, and nothing picks a winner.
+
+Narrow on purpose: one preposition. *"I saw the man with the telescope"* is genuinely two sentences
+and everybody agrees it is; *"Ravi met Arun in the garden"* is technically two and nobody asks. A
+module that flagged every trailing prepositional phrase would turn abstention — the property this
+package spends everything else to keep — into a tic.
+
+#### The second pass: four tables that were still scripts
+
+The version above shipped, and the Master's answer to it was the same sentence he had opened with:
+*scripts mat banana, real seekho.* He was right about a specific part of it, and the audit is
+short enough to print. `discourse.py` as first written held nine module-level tables. Five are the
+closed class `semantics.py` already defends — pronouns, the copula, subordinators, time words —
+where a list **is** the honest representation, because that half of a language does not grow.
+
+The other four were not that:
+
+| shipped as a constant | what it actually was |
+|---|---|
+| `_CHANGE = {"now", "currently", "anymore", …}` | a claim that *these particular words mean the world moved*. Not grammar — **meaning**, in one language, written by hand |
+| `_UNIVERSAL_NEG = {"never"}`, `_UNIVERSAL_POS = {"always"}` | the same, for quantification over time |
+| `_MENTAL` — thirty-odd attitude verbs | documented as "closed in the sense modals are". It is not: the class takes new members, and a sentence embedding a belief with a verb nobody listed was read as a flat assertion |
+| `_AMBIGUOUS_PREP = {"with"}` | one English preposition, chosen by hand, with a docstring defending the narrowness. No measurement could ever have shown it wrong |
+
+Plus three tuned numbers in the resolver — `margin = 0.30`, parallelism `0.35`, topicality `0.15`
+— which is the same objection in numeric form: **a threshold nobody can measure wrong is a
+threshold that is not doing any work.**
+
+All four are gone, and what replaced them is the mechanism this package already had:
+
+* **`MarkerLearner`.** A demonstration is two sentences and the verdict a speaker would give them.
+  What is induced is the words that *differ* between them, in the direction the verdict points: an
+  `updates` pair credits a **licence** to what the second sentence gained, a `contradicts` pair
+  credits a **universal** to what the first sentence had and the second lost, and everything else
+  credits `none`, which is the negative evidence that does most of the work. Two demonstrations
+  minimum, differing in content, unanimous; a word demonstrated two ways is contested and never
+  consulted again. From six demonstrated verdicts it induces exactly `{"now": licence, "never":
+  universal}` — and nothing else, because both sentences of every pair contain the copula and the
+  prepositions are deliberately varied, so neither survives.
+* **Attitude verbs are read by structure.** A word introduces an attitude when somebody is named
+  in front of it and what follows is a whole **clause** — one with a predicate of its own. That is
+  the definition, and it needs no list: `reckons` and `gathers` are read correctly having never
+  been mentioned anywhere, and *"ravi opened the box in the room"* is refused, which the list
+  version got wrong in the other direction. The one thing lost is an intransitive complement,
+  because to this compiler *"the ball breaks"* and *"the box in the room"* are the same shape —
+  and refusing is the safe direction.
+* **Ambiguous prepositions are discovered from demonstrations that disagree.** A preposition
+  demonstrated both as an event modifier and as an object modifier, with different content, is one
+  the language uses both ways — which is what ambiguity *is*. `AttachLearner` is `ActLearner`'s
+  contest mechanism a third time. Untaught, nothing is flagged.
+* **The resolver's weights are fitted**, on a small deterministic grid, against demonstrations
+  whose recency is held constant so a cue has to do the work. What it finds is **not** what was
+  hand-tuned: role parallelism comes out at **zero** — the evidence does not support it at all —
+  and the work is done by topicality at 0.1 with a margin of 0.05. The 0.35 was never measured.
+
+**Untaught, all four degrade honestly rather than falling over.** No word licenses anything, so a
+polarity flip on the same object is still a contradiction (nothing had to be marked for that) and
+a second value for a relation is *new information*; no preposition is ambiguous, so nothing is
+questioned; the resolver ranks on recency alone and abstains wherever recency ties. That is what a
+listener who has never heard anybody signal a change would conclude, and it is the correct floor.
+
+#### A fifth defect, and it is the worst kind
+
+The full `tests/njp` run turned one test red that was green on the base commit — and what it found
+is not a threshold, it is a **self-confirming guard**.
+
+`test_loop_thinness.py` teaches ten birds, then ten plants, then feeds forty episodes:
+`sparrows need water`, `roses need light`. After the birds, `need` has ten witnessed subjects and
+every one of them is a bird — so `roses need light` reads as a selectional violation and the store
+guard refuses to file it. **14 of the next 20 ordinary sentences were suppressed as metaphors.**
+
+The consequence surfaced three organs away: `nyxara.njp.discover` proposes kind rules and refutes
+them against held-out episodes, and with the plant episodes never filed it had no counterexamples —
+every rule it proposed was confirmed and `refuted_total` was **0**, which is `confirmed` meaning
+`proposed` under another name.
+
+The threshold was not the problem. **Refusing to file a flagged sentence suppresses exactly the
+evidence that would show the relation is broader than its witnesses**, so the first exception is
+indistinguishable from the hundredth and no amount of counter-evidence can ever reach the guard. A
+mechanism that cannot be corrected by what it sees is not a judgement, it is a prior.
+
+So a flagged reading is now **recorded even though it is not filed**, and a kind seen violating a
+relation `min_witnesses` times stops being a violation of it. *"Roses need light"* is news, not
+metaphor. Measured after: **6 of 20** rather than 14, and `refuted_total` back to 1. The metaphor
+case is unharmed — `swallow` needs several more institutions before `institution` becomes ordinary
+for it, and a test pins both directions.
+
+#### NJP V.27 — the turn she expected
+
+The gap report the Master asked for named one mechanism as wholly absent, and it was his own
+fifth: `PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`. The word `predict` did not occur in
+`discourse.py` at all. It does now, and it is `Anticipation`.
+
+Three things are predicted about a turn **before it is looked at** — what the speaker will be
+doing, what they will be about, and what it will do to the ledger — and every one of them comes
+from counts she has kept herself. No transition table ships. An exchange where a question is
+followed by an answer teaches that; one where it is not teaches that instead; an organ that has
+heard nothing predicts nothing and says so.
+
+Two rules keep the number honest. **A prediction she declined to make scores neither way** —
+silence is not a wrong prediction. And **a prediction about a field the turn does not carry is
+not a miss**: a question has no ledger verdict, and counting that as an error would mark her wrong
+for every question in an exchange that is mostly assertions.
+
+**The prediction does work rather than only being scored.** Where the surface carries no
+convention for its shape, a confident expectation supplies the act and the reading says where it
+came from. Only into that gap — a demonstrated convention is never overridden by a habit.
+
+**And it is graded on evidence it did not produce, which took a second try.** The first version
+scored the prediction against `interpretation.intended` — the field the gap-filler had just
+written the prediction into. Measured: the control exchange, built so that every act is followed
+by two others equally often, collapsed to a single successor and reported **1.00 confidence** on
+a sequence with nothing in it to learn. That is the same self-confirming loop `Figure` was found
+to have, in a second organ, two commits apart. The act recorded is now the one the *sentence*
+carried.
+
+The subject's floor is not "she has heard nothing" — that would be a weak claim. Its control is
+an exchange of thirty-six turns built to be unlearnable, and what is asserted is that she stays
+**below the commitment floor** on it: `act accuracy 0.95` on the patterned exchange, `control
+best 0.54` against a floor of 0.70.
+
+#### NJP V.28 — a turn is a reply, and a hearer who already knows
+
+The gap report scored capability #6 at six of seventeen. The reason was not seventeen missing
+features: it was that this module read every turn **alone**. What makes a turn a clarification
+rather than an answer is the turn before it.
+
+`Exchange` induces adjacency pairs from demonstrated exchanges, over the **acts** rather than the
+sentences, so one demonstration of a question being answered reads any question being answered.
+Two demonstrations minimum, differing in fillers, unanimous, contested the moment they disagree —
+the same rule as `ActLearner`, `MarkerLearner` and `AttachLearner`, for the fourth time, on
+purpose. One discipline applied everywhere is a claim; four mechanisms would be four chances to
+get it wrong differently.
+
+**The two refusals are the point, and they pull opposite ways.** A reply she has no pairing for is
+a non-sequitur and she names what she expected instead. A turn following an act she has been shown
+*nothing* about draws no complaint at all. A module with only the first would object to every
+conversation it had not been taught; one with only the second would never object to anything.
+
+Beside it, the other half of *how much to say*. `nyxara.social.common_ground` has modelled
+given-versus-new since it was written, and **nothing in this package had ever put a sentence into
+it** — the same finding as `social.tom` in V.26, in a second organ. Now `Communicator.say`
+proposes what it says, and the hearer's next turn acknowledges it, which is Clark's mechanism run
+by the module that implements it rather than reimplemented here.
+
+```
+first  → water boil; this holds if the pressure is normal; as of today;
+         held as typical rather than certain          (18 words)
+hearer carries on                                      → grounded
+second → water boil                                    (2 words, omitted: condition, temporal,
+                                                        modality)
+```
+
+The claim itself never goes, and a **fresh hearer is still told everything** — which is the control
+that stops this being a trick rather than a capability.
+
+    exchange   0.20 -> 1.00
+    ground     floor, with its own control
+
+`ground` is a floor and says so: what the hearer already has is state the conversation puts there,
+not a convention anybody demonstrates. What it measures is that an organ which was real and
+unreachable is now real and reached.
+
+#### NJP V.29 — the same meaning, said a different way round
+
+The gap report probed the compiler and four ordinary English shapes came back broken:
+
+```
+The window was opened by Ravi.              unreadable
+Ravi has been opening the door.             unreadable
+He was tired.                               unreadable
+Ravi opened the door and Arun the window.   object = "door arun window"
+```
+
+The last one is the worst of the four. It is not a gap, it is a **wrong claim filed at the
+confidence of a right one** — a fact about nothing, in the store where facts about things go.
+
+**Detecting these shapes is structural and belongs with the closed class.** `frames_of` finds
+`NP be V PREP NP`, an auxiliary chain, and a coordinate whose second half has no verb, and it
+names no preposition: which one a language uses for the agent is a fact about that language, and
+writing `by` here would be the table V.26 spent a whole commit removing.
+
+**Reading them is not structural.** That a passive puts the patient in front and the agent after
+the preposition is a fact about English, not about the shape. A language exists where that shape
+means the opposite, and a module with the mapping written down could never be told so. So a
+demonstration is two sentences that mean the same thing — one the compiler reads, one it does not
+— and what is induced is where each slot's filler turned up in the reading that already existed:
+
+```
+shown:  "Ravi opened the window."  ≡  "The window was opened by Ravi."   (×3, minted)
+learnt: be-prep  →  left: object,  verb: relation,  right: subject
+read:   "The barrel was carried by Meera."  →  meera carry barrel
+untaught:                                   →  nothing
+```
+
+A gapped coordinate is read as **two** claims, because it is two. Three shapes need no mapping
+because no role moves in them — a copula with a predicate, a location, a possession — and those
+are read structurally, **as a fallback and never an override**: put ahead of the compiler,
+`_predication` read *"When I visited Delhi last year I was tired."* as a claim about `tired` and
+lost the claim the speaker actually made inside the fronted clause.
+
+Reported speech came free with it. *"Ravi said that he was tired"* was unreadable because its
+complement was, and `_attitude` requires a complement that is a whole clause; with the copular
+predication readable, the attitude is found and the belief is stored.
+
+**Two defects the measurement found in this change set.** A learned mapping had to *outrank* the
+compiler rather than only fill in for it — a fallback that fired on `unreadable` alone would never
+have been reached for the gapped coordinate, which is the shape that needed it most, because the
+compiler reads that one happily and wrongly. And a guard against filing claims about pronouns
+dropped **every claim the Master made about himself**: first and second person are resolved but
+deliberately not substituted into the surface (that broke a Hinglish question in V.26), so the
+ledger has to name them itself. *"I never visited Delhi."* stopped reaching the ledger at all, and
+the contradiction two turns later had nothing to contradict.
+
+    alternations   0.30 -> 1.00
+
+#### NJP V.30 — why, and what for
+
+The gap report scored the Master's semantic anchor at six of eleven. Entity, relation, time,
+belief, uncertainty and — through `is_at` — space were reachable. **Cause**, **goal** and the
+**event-versus-state** distinction were not.
+
+**Cause is the one worth dwelling on.** Nothing structural separates *"A because B"* from *"B so
+A"*: both are two clauses with a word between them. Which of them puts the cause first is a fact
+about English, and a module with `{"because": right, "so": left}` written down could never be told
+otherwise. So it is shown instead — a sentence and which of its clauses is the cause — and the
+role of the word at the split is induced at the usual terms. Both wordings of one fact then land
+on the same cause, which is the property worth having and the one the exam checks.
+
+**Purpose** is the same mechanism over an infinitival tail. *"Ravi went to the shop to buy bread"*
+has two prepositions and only one introduces a purpose; the difference is structural, a determiner
+between the preposition and the noun. The goal clause has no subject of its own, so the main
+clause's is put back before it can read at all.
+
+**Occurrence is read off behaviour, not off any word.** A relation a speaker has marked a change
+on is a state; one carrying several live values for one subject is an event. And the control: until
+she has seen a marked change *somewhere*, an unmarked state and a repeated event look identical and
+she says so rather than guessing. Measured without that guard, a location that had moved once came
+back an `event`.
+
+**Two defects the measurement found, and both are the same defect.** `the` was induced as a causal
+connective: it splits *"devi lit | the | lamp because the room was dark"* into two halves that both
+read, and it produced a cause of `lamp because the room was dark`. A determiner is not a
+connective, and constraining the candidates over the closed class is where that belongs. And the
+winner was the **leftmost** split rather than the best-supported one — which is the rule
+`semantics.py` and `compile.py` both state, broken in a third file.
+
+```
+anchor 0.23 -> 1.00
+because -> cause-after    so -> cause-before    to -> goal-after
+"Devi lit the lamp because the room was dark."
+  -> agent devi, relation lit, cause "the room was dark"
+"The room was dark so devi lit the lamp."
+  -> the same anchor
+```
+
+#### NJP V.31 — the closed class, found rather than typed
+
+The gap report scored multilinguality at two of seven: 242 closed-class words, 197 Latin and 45
+Devanagari, and **zero** for Gujarati, Spanish, Arabic, Chinese and French. Closing that by typing
+five more lists would be five more of exactly what V.26 spent a commit removing.
+
+`semantics.py` argues, correctly, that the closed class is the half of a language that does not
+grow and that a list is the honest representation of it. What it does not argue — because it cannot
+— is that the list must be **written by hand for every language**. The closed class has a
+distributional signature, and it took two tries to state correctly:
+
+| score | English F1 | precision on an overheard language | recall |
+|---|---|---|---|
+| frequency | 1.00 | **0.01** | 1.00 |
+| breadth | 0.86 | **0.04** | 1.00 |
+| breadth × frequency | 0.86 | **1.00** | **1.00** |
+
+Breadth alone measures *small class*, not *closed class*: a language with 120 verb types and 300
+noun types gives its verbs wide distributions too, and 101 of them came back "closed". Frequency
+alone is worse. It is the **product** — a closed word is both very frequent and stands beside
+almost anything, and a content word is neither.
+
+**The cut is fitted where the answer is known and applied where it is not.** The lesson is exposure
+to English, whose closed class this package ships; the exam is a language minted *after* the lesson
+that she has only overheard, with no meaning attached and nothing asserted from it. What transfers
+is the **criterion**, never the words — the same claim `tongue` makes one level down, and the only
+kind of cross-language transfer this module has been willing to make anywhere. Unfitted, she
+claims nothing.
+
+Beside it, translation at the communication level. `LanguageFaculty.translate` carries the roles,
+the polarity, the tense and the mood and verifies by reading its own output back. `Retelling`
+reports what it carried **and what it did not**: the act does not cross, because an indirect
+request is a convention of a speech community rather than a property of a meaning. The `retell`
+subject scores that negative result rather than hiding it — a run where the act silently came
+through would fail.
+
+**Two defects in the exam, both mine, and both the same shape.** The post-test looked its language
+block up by prefix and found the **pre-test's**, checking this sitting's answer against a different
+dialect. And the block name was keyed on the mint's own counter, which two sittings both reach, so
+three separately minted dialects were poured into one language — where every closed form was
+correctly found, and precision read 0.33 because twelve of them were "wrong" for the one dialect
+being asked about. The exam was merging languages; the learner was right both times.
+
+    vocabulary   0.50 -> 1.00
+    retell       a floor, and it scores the act NOT crossing
+
+#### NJP V.32 — the last four tiers, and teaching against the failures
+
+The gap report scored the Master's ladder at five of ten and the training loop at five of nine.
+The five missing rungs are here.
+
+**Tier 6, adversarial wording**, is the one that found a defect. Five demonstrations of *"Can you
+{v} the {n}?"* and then *"Can you **really** {v} the {n}?"* — one inserted adverb — read as an
+ability question. A convention is kept as a tag skeleton, and inserting one closed-class token
+moved the sentence off every level that had support. The fix is a fifth level, `bare`: the tag
+sequence **with the adverbs dropped**, sitting between `tags` and `frame`. An adverb is freely
+insertable and does not change what a construction is — and if it ever does for some construction,
+two demonstrations that disagree contest that level and the more specific ones decide, which is
+what every level here is for.
+
+**Tier 7, cross-domain transfer**, is nearly free, and *nearly free* is exactly the kind of claim
+that has to be measured rather than assumed. Demonstrations drawn entirely from one field of words
+(`kettle`, `ladle`, `pantry`) read a sentence drawn entirely from another (`crucible`, `bellows`,
+`anvil`) sharing no word. The control is the other direction: familiar words in a shape nobody
+demonstrated stay unread.
+
+**Tier 9, a wholly unseen combination.** A sentence that is passive *and* causal at once, when one
+of those was taught and the other was not. The right answer is **partial**: read the half there is
+evidence for, leave the rest alone. This found the second defect — the passive frame's agent slot
+swallowed the causal clause and returned `ravi because the wind rose`, a phrase filed as a person.
+A subordinator starts a new clause, and the frame now stops there.
+
+**Tier 10, stating her own approach.** `Communicator.strategy` names which of her organs a turn
+calls for, before any of it is done. Every entry is decided by something in the sentence, so it can
+be wrong and the paper can say so. Half the items are turns needing nothing special, where the
+right answer is the **empty** list — a module that named organs for every sentence would pass the
+other half and fail these.
+
+**And the stage the training loop was missing.** `School` now hands each lesson the previous
+sitting's misses. `Retraining` reads the construction out of them and demonstrates *those*: six
+constructions with six different skeletons, two demonstrated on the first round, and a second round
+that teaches the four that failed rather than repeating itself.
+
+```
+retraining   0.00 -> 1.00     "6 constructions, every one of them missed last time"
+adversarial  1.00 (after the `bare` level; 0.50 before)
+crossdomain  1.00
+unseen       1.00 (after the frame stops at a subordinator; 0.50 before)
+method       1.00
+```
+
+The bank had to be rebuilt for that measurement to mean anything. Six *modals* over one skeleton
+are covered from any two by the generalisation levels, so the first round scored 1.00 and there was
+nothing for a targeted round to be targeted at. Six different skeletons are separable, and the exam
+names the construction in each item so the next lesson can read the failures back out.
+
+#### NJP V.33 — where two speakers stand, and what a turn conveys without saying it
+
+The gap report left the Master's sixth test half answered: *meaning depends on speaker, listener,
+relationship and goal*, and the module knew who was speaking and had **nothing whatever** to say
+about how the two stood to each other.
+
+Two things in a transcript bear on that and both were already being tracked: **who complies with
+whose instructions**, and **who answers whose questions**. Neither is a word anybody says, so
+neither can be faked by phrasing, and both are counted rather than judged.
+
+**Half the paper is abstention, and it is the half that decides whether this is a reading or a
+prejudice.** An exchange with the traffic running both ways settles nothing — two colleagues who
+each answer the other are exactly as informative as strangers. One exchange is not a relationship.
+And two speakers with nothing between them report nothing at all.
+
+It is a reading of **one transcript** and not a claim about status in the world. A transcript where
+the Master happens to answer three of her questions is not evidence that she outranks him, which is
+why it is reported rather than acted on and why nothing in the safety core reads it.
+
+Beside it, **scalar implicature**. `social.dialogue` has had a regular expression for it since it
+was written, and that is exactly the objection V.26 answered: `some` being weaker than `all` is a
+fact about English *words*, not about implicature, and a module that ships the pair cannot be told
+about a language that scales differently or about a scale English has and nobody listed. A scale
+must be demonstrated in **two different sentences** before it is kept.
+
+**And an implicature is reported and never filed.** *"Some of the barrels leaked"* then *"all of
+the barrels leaked"* is a cancellation, not a contradiction — a store that had filed the
+implicature as a claim would have made it one, and a test asserts the ledger stays clean.
+
+    standing      a floor, and half its paper is abstention
+    implicature   0.50 -> 1.00     scales {'some': 'all', 'warm': 'hot'}
+
+#### NJP V.34 — a word nobody glossed
+
+The gap report named the Master's fourth test as unanswered: *invent a construction that was never
+in training, and she should infer its function from context*. Everything in this package learns
+from a **demonstration** — somebody says *this surface does this* — and that is not what the test
+asks for.
+
+`Induction` demonstrates nothing. She is exposed to conversations carrying a particle minted after
+the lesson was written, and its function comes from the **acts of the turns it appears in**. That
+is not a trick; it is what a function is. A particle that only ever appears in turns that get
+answered is a question marker, and nothing about that fact lives in the particle.
+
+```
+overheard: "zik the thing3 moved?"   ×24, never glossed, never demonstrated
+           "The thing3 moved."       ×24
+           "The item7 rose."         ×24
+inferred:  zik → polar-question, 24 of 24, confidence 1.00
+```
+
+**Four filters, and every one was put there by a measurement that failed without it.**
+
+| filter | what it stops |
+|---|---|
+| the distribution must **concentrate** | a word in every kind of turn marks nothing |
+| a **minimum** of turns | one sighting is not a function |
+| a word a reading **accounts for** is content | a corpus where each verb was used in one kind of turn reported four verbs as markers |
+| a marker **keeps company** with many words | `thing3` shares its turns with three words; the particle with thirty-three |
+
+The third took two tries. Struck off on a **single** occurrence, a particle lived or died on
+whether any one of its twenty-four sentences happened to parse — two of four minted particles were
+killed that way, and which two depended on the draw. It is a share now, not an occurrence.
+
+**And a fifth thing, which is a refusal rather than a filter.** In a transcript where every turn is
+an assertion, *every* word "marks assertions" — true of the corpus and empty of content. A function
+is a **contrast**, and with no contrast in the transcript she reports nothing at all.
+
+The honest limit: the content filter works on sentences the compiler can read. In a language wholly
+unreadable to it, a content word confined to one kind of turn cannot be told from a marker by
+distribution alone. The claim is that she infers a function from context in a language she can
+partly read — which is the situation the test describes.
+
+    inferred   a floor, and three of its six items are refusals
+
+#### NJP V.35 — and the defect that had broken Hindi since V.09
+
+Three of the gap report's remaining lines are closed here, and measuring the third found something
+much worse than the line itself.
+
+**Phonotactics.** The Master's first list opens with phonetics and phonology, and this package is
+text: no signal, no spectrogram, no articulation. What survives a writing system is which
+*sequences* a language permits, and that is induced from the words she has heard. A form built of
+sequences the language uses is possible; one built of its own letters in an order it never uses is
+refused with the offending pair named; and a form of letters it does not have at all is **foreign**,
+which is a different finding and must not be confused with the second.
+
+**A lexicon without a dictionary.** The flattest line in the report was that this package has no
+lexical semantics: no dictionary, no thesaurus, kinds only where somebody taught an `is_a`. A
+dictionary is not the only way to have lexical relations. From three hundred sentences, a noun's
+nearest neighbours are nouns and a verb's are verbs, from nothing but who keeps company with whom.
+It is *near*, not *synonymous* — distribution puts `hot` beside `cold` as readily as beside `warm`
+— so it is reported as neighbours with scores and never as a definition.
+
+**And the closed-class criterion, on languages people speak.** V.31 measured it on *minted*
+languages, and a drawn dialect has the distribution its generator gave it. `nyxara/njp/tongues.py`
+carries ordinary sentences of Spanish, French and Hindi with each language's closed class kept
+beside them as an answer key that is never given to her.
+
+```
+es   precision 0.87   recall 0.46
+fr   precision 0.94   recall 0.53
+hi   precision 0.89   recall 0.29
+```
+
+Precision is scored and recall is only reported: these are a few dozen sentences each, and a
+function word appearing twice cannot show breadth. Precision is not bounded that way — calling a
+content word closed is a mistake at any corpus size. Chinese is absent and the reason is stated
+rather than skipped: it is written without spaces, every organ here tokenises on them, and scoring
+characters would be a number with nothing behind it.
+
+##### The Hindi run came back at precision 0.05, and the words it "found" were single consonants
+
+`semantics.py`'s word pattern is `[^\W_]+`. Python's `\w` is alphanumerics, and **a Devanagari
+vowel sign is neither**: `category('\u0941') == 'Mn'` and `'\u0941'.isalnum()` is `False`. So the
+tokeniser **shattered every Indic word at every matra**:
+
+```
+कुत्ता पार्क में दौड़ता है   →   ['क', 'त', 'त', 'प', 'र', 'क', 'म', 'द', 'ड', 'त', 'ह']
+मेरा नाम जय है              →   ['म', 'र', 'न', 'म', 'जय', 'ह']
+```
+
+This module ships **45 Devanagari closed-class words** and this package has claimed Hindi since
+V.09. Almost none of those words can ever have matched, because almost every Hindi word carries a
+mark; only the ones built of bare consonants — `यह`, `जय` — survived. It never raised, never failed
+a test, and never showed up as anything but a reading that came back `unreadable` — which this
+package treats as an honest answer, so a total failure and a principled abstention were
+indistinguishable.
+
+The pattern now carries the combining marks that belong to a word. English is untouched — `h2o`,
+`covid19`, `don't`, `3.14` all tokenise exactly as before, and a test pins each.
+
+```
+hi   precision 0.05  ->  0.89
+```
+
+    sounds     0.67 -> 1.00
+    lexicon    0.00 -> 1.00
+    tongues    0.00 -> 1.00
+
+#### The syllabus, and what a floor is worth
+
+`python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
+
+```
+  subject            cold  after    gain  taught  verdict
+  acts               0.42   1.00   +0.58       7  LEARNED
+  transfer           0.25   1.00   +0.75       4  LEARNED
+  repair             0.25   1.00   +0.75       4  LEARNED
+  figurative         0.50   1.00   +0.50       3  LEARNED
+  attachment         0.50   1.00   +0.50       7  LEARNED
+  anticipation       0.50   1.00   +0.50      18  LEARNED
+  exchange           0.20   1.00   +0.80       4  LEARNED
+  alternations       0.30   1.00   +0.70      10  LEARNED
+  anchor             0.23   1.00   +0.77       6  LEARNED
+  vocabulary         0.50   1.00   +0.50    4000  LEARNED
+  tongues            0.00   1.00   +1.00    4000  LEARNED
+  sounds             0.67   1.00   +0.33     120  LEARNED
+  lexicon            0.00   1.00   +1.00     600  LEARNED
+  adversarial        0.50   1.00   +0.50       5  (fixed by the `bare` level)
+  crossdomain        1.00   1.00   +0.00       5  already
+  unseen             0.50   1.00   +0.50       0  (fixed at the subordinator)
+  method             1.00   1.00   +0.00       0  already
+  retraining         0.00   1.00   +1.00      12  LEARNED
+  inferred           1.00   1.00   +0.00       0  already (three of six items are refusals)
+  standing           1.00   1.00   +0.00       0  already (half its paper is abstention)
+  implicature        0.50   1.00   +0.50       4  LEARNED
+  reference          0.80   1.00   +0.20       9  LEARNED
+  contradiction      0.75   1.00   +0.25      10  LEARNED
+  memory             0.50   1.00   +0.50      10  LEARNED
+  minds              1.00   1.00   +0.00       0  already
+  register           1.00   1.00   +0.00       0  already
+  ground             1.00   1.00   +0.00       0  already
+  retell             1.00   1.00   +0.00       0  already
+  tongue             0.50   1.00   +0.50       3  LEARNED
+  wiring             1.00   1.00   +0.00       0  already
+
+  mastered      30/30 subjects
+  learned       19 subject(s) moved by teaching
+  overall       253/253 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+
+  ── teacher off, fresh items, seed 27 ──
+  overall       253/253 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+```
+
+**Four of those floors did not exist before the second pass.** `reference`, `contradiction`,
+`memory` and `attachment` all read **1.00 cold** in the first version, and that was not her
+knowing anything — it was the module holding the answer. They are 0.80, 0.75, 0.50 and 0.50 now,
+and the gain is the measurement. Nine of twelve subjects move by teaching.
+
+**The three that remain floors are honest ones.** `minds` and `register` are mechanisms rather
+than conventions — there is nothing to demonstrate — and `wiring` measures whether the organ is
+reachable from a turn. They are printed with `already` beside them exactly as `school.Arithmetic`
+and `corpusschool`'s thirteen doing subjects are, and what they are worth is what those are worth:
+an organ that quietly stops working shows up here on the first run rather than three versions later
+as an unexplained dip.
+
+**One more contamination, found by the same audit.** `memory` and `contradiction` are two
+questions about one organ, so whichever sat second inherited the other's lesson and reported a
+floor of 1.00 — the `transfer` / `acts` defect again. `memory` now sits its paper with a
+communicator this syllabus has not taught, which costs the shared-student property it did not
+need and makes both floors real.
+
+**And `tongue` asserts the opposite of the usual transfer claim.** An indirect request is a fact
+about a speech community, not about language in general, and a school that rewarded an English
+convention for firing on a Hinglish sentence would be rewarding exactly the wrong generalisation.
+So what is measured is that the **mechanism** carries — the same class learns a Hinglish convention
+from Hinglish demonstrations with nothing changed — and the **convention** does not, asserted by a
+control in `tests/njp/test_discourseschool.py`.
+
+#### Four defects the measurement found in this change set
+
+An organ measured in isolation reports on the organ. Every one of these was found by running it
+through `think()` or through the school, and none was visible before.
+
+| defect | what it did |
+|---|---|
+| **the exam's own control passed on its target** | `wiring` checks that a denial is confirmed *as a denial*, and it was written `"not" in reply`. The confirmation it exists to catch begins with the word **`noted`**. Every item in the paper passed, on a brain that had the defect. A control its own target satisfies is not a control |
+| **resolving the first person broke a Hinglish question** | substituting settled pronouns into the surface turned *"mera naam kya hai?"* into *"Master naam kya hai?"*, which `grounding.py`'s Hinglish frames do not match — and a question she had answered for many versions came back empty. Nothing about reference resolution needed it: the gain is entirely in the third person, where the antecedent is genuinely elsewhere in the conversation |
+| **English writes its expletive with a pronoun** | with `it` substituted, *"The key is in the drawer. It rained today."* filed **`key rain`** as a fact about the world — a new confident error introduced by a fix for confident errors. `it` is now resolved and reported and never substituted; `he`, `she` and `they` have no expletive use |
+| **a contradiction was detected and then discarded** | `grounding.py` reads *"When I visited Delhi last year…"* as a **question**, on the fronted `when`, and `_compose` abstains on a question it cannot ground. The conflict was correctly found, correctly kept, and returned as the empty string. The clarification now sits above that branch and below the grounded answer, so a question structure can answer is still answered and never asked back |
+
+Two more were in the exam rather than in the code, and they are worth as much: a minted plural
+ending `-us` is a Latin singular to any shape rule, so one item in twelve failed every sitting
+measuring the exam's own vocabulary rather than her number agreement — the same defect `Mint` has
+on record having had once before, in digits; and `transfer` shared a construction with `acts`,
+which made its floor 1.00 — not a transfer measurement but a report that the measurement was taken
+too late.
+
+#### After
+
+| said to her | what comes back now |
+|---|---|
+| `I never visited Delhi.` | `noted: Master does not visit delhi` |
+| `When I visited Delhi last year I was tired.` | `you told me i never visit delhi, and also i visit delhi — which of those holds?` |
+| `Ravi met Arun.` / `He was tired.` | `when you say 'he', do you mean ravi or arun?` |
+| `The key is in the drawer.` … `now on the table.` / `Where is the key?` | `table` |
+| the same, with an unmarked reversion, **after the markers are taught** | `you told me key is at table, and also key is at drawer — which of those holds?` |
+| the same, **untaught** | `drawer` — nothing has shown her that a speaker can signal a change |
+| `I saw the man with the telescope.`, **after `with` is demonstrated both ways** | `did i saw the man using the telescope, or does the man have the telescope?` |
+| the same, **untaught** | `noted: Master saw man telescope` |
+| `The market swallowed the shock.` (with the kinds taught) | flagged figurative; **nothing filed** |
+
+The untaught rows are not a regression — they are the point. A fresh `NJPBrain` starts knowing no
+conventions, no markers, no ambiguous prepositions and no cue weights, and `go_to_discourse_school()`
+or the `show_*` methods are how it comes to. Before the second pass those three rows read the same
+whether anything had been taught or not, which is exactly what it means for a capability to have
+been shipped rather than learned.
+
+#### What is NOT claimed
+
+There is no discourse parser here and no rhetorical structure theory. A referent is one token,
+inheriting `language.MAX_SPAN`'s problem. Attitude verbs are a list — a closed class in the sense
+modals are — and a sentence that embeds a belief without one is read as a flat assertion. The
+ledger keys on `subject`/`relation` as the compiler produced them, so two wordings of one relation
+that the grounder's alias table would unify are two relations here. Attachment ambiguity is read
+for **one** preposition. `Who was tired?` after an unresolved `he` is still silence, which is
+correct and is not an answer.
+
+**The closed-class tables that remain are still tables**, and they are: the pronoun sets, the
+copula, the factive subordinators, the time words. `semantics.py` argues that case and this module
+inherits the argument — that half of a language is a few hundred words and changes over centuries.
+It is not the same defence as the four that were removed, and if any of them turns out to carry a
+*semantic* claim rather than a grammatical one, it belongs in a learner too.
+
+**Relationship is not modelled.** The speaker and the hearer are identified and a convention is
+learned per shape; who is senior to whom, what is owed, and what may be asked of whom do not enter
+the reading, so the *"meaning depends on speaker, listener, relationship, goal"* half of social
+inference is one identifier deep and no further. `nyxara.social.dialogue` and
+`nyxara.social.common_ground` hold hand-written machinery for some of that and are still not
+driven by `njp/` — `social.tom` is the one this change set connected, and connecting the other two
+is the obvious next piece rather than a claim being made here.
+
+And nothing in this module decides truth: it reports that two claims cannot both hold, and stops.
+
+Run it: `NJPBrain.hear_turn("...")`, `show_act`, `correct_act`, `say_to`, `holds`,
+`go_to_discourse_school()`, `python -m nyxara.njp.discourseschool`, or `/v1/njp/discourse`.
+
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
-`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, and `/{organ}` — so growth and self-rewriting are observable
+`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, `/discourse`, and `/{organ}` — so growth and self-rewriting are observable
 from outside the process,
 not merely asserted in a docstring. On the console: `/njp`, and `/njp think` prints the synapse
 count before and after the turn, which is the claim this whole package has to earn.

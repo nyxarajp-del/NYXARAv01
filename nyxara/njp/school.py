@@ -1748,6 +1748,14 @@ class School:
             if result.mastered and result.rounds:
                 break
             try:
+                # What the last sitting actually got wrong, handed to the lesson. Subjects that
+                # do not read it are unaffected; one that does can teach against the failures
+                # instead of repeating itself, which is the difference between a second round and
+                # a **targeted** one. See `discourseschool.Retraining`.
+                try:
+                    subject.missed = tuple(result.misses)
+                except Exception:  # noqa: BLE001
+                    pass
                 lesson = subject.teach(brain, self._mint(index, 1, round_no), coder=coder)
                 result.taught += lesson.items
                 result.note = lesson.note
