@@ -2803,6 +2803,32 @@ a second value for a relation is *new information*; no preposition is ambiguous,
 questioned; the resolver ranks on recency alone and abstains wherever recency ties. That is what a
 listener who has never heard anybody signal a change would conclude, and it is the correct floor.
 
+#### A fifth defect, and it is the worst kind
+
+The full `tests/njp` run turned one test red that was green on the base commit — and what it found
+is not a threshold, it is a **self-confirming guard**.
+
+`test_loop_thinness.py` teaches ten birds, then ten plants, then feeds forty episodes:
+`sparrows need water`, `roses need light`. After the birds, `need` has ten witnessed subjects and
+every one of them is a bird — so `roses need light` reads as a selectional violation and the store
+guard refuses to file it. **14 of the next 20 ordinary sentences were suppressed as metaphors.**
+
+The consequence surfaced three organs away: `nyxara.njp.discover` proposes kind rules and refutes
+them against held-out episodes, and with the plant episodes never filed it had no counterexamples —
+every rule it proposed was confirmed and `refuted_total` was **0**, which is `confirmed` meaning
+`proposed` under another name.
+
+The threshold was not the problem. **Refusing to file a flagged sentence suppresses exactly the
+evidence that would show the relation is broader than its witnesses**, so the first exception is
+indistinguishable from the hundredth and no amount of counter-evidence can ever reach the guard. A
+mechanism that cannot be corrected by what it sees is not a judgement, it is a prior.
+
+So a flagged reading is now **recorded even though it is not filed**, and a kind seen violating a
+relation `min_witnesses` times stops being a violation of it. *"Roses need light"* is news, not
+metaphor. Measured after: **6 of 20** rather than 14, and `refuted_total` back to 1. The metaphor
+case is unharmed — `swallow` needs several more institutions before `institution` becomes ordinary
+for it, and a test pins both directions.
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`

@@ -641,3 +641,44 @@ def test_a_location_is_answered_from_the_conversation_and_a_dispute_is_not():
     untaught.think("The key is now on the table.")
     untaught.think("The key is in the drawer.")
     assert "which of those holds" not in untaught.think("Where is the key?").answer
+
+
+def test_the_figurative_guard_can_be_corrected_by_evidence():
+    """A guard that refuses to file its own counter-evidence can never be wrong.
+
+    Ten birds witnessed for `need`, and the first sentence about a plant needing light looks
+    exactly like a metaphor. It is not — it is news. Measured before this was fixed: 14 of 20
+    ordinary plant sentences suppressed, and `nyxara.njp.discover` three organs away reporting
+    every kind rule confirmed and none refuted, because it never saw a counterexample.
+    """
+    kinds = {name: ["bird"] for name in ("sparrow", "crow", "robin", "eagle")}
+    kinds.update({name: ["plant"] for name in ("rose", "tulip", "fern", "daisy", "oak")})
+    figure = Figure(kinds=lambda name: kinds.get(str(name).lower(), []))
+    for bird in ("sparrow", "crow", "robin", "eagle"):
+        figure.witness("need", bird)
+
+    flagged = []
+    for plant in ("rose", "tulip", "fern", "daisy", "oak"):
+        judged = figure.judge(compile_meaning(f"{plant} need light"))
+        figure.note_exception(judged)
+        flagged.append(judged.figurative)
+
+    # The first few are flagged; once the kind has turned up often enough it is ordinary.
+    assert flagged[0] and flagged[1]
+    assert not flagged[-1]
+    assert figure.exceptions["need"]["plant"]
+
+
+def test_a_metaphor_stays_a_metaphor_until_the_kind_is_established():
+    kinds = {"wolf": ["animal"], "dog": ["animal"], "bear": ["animal"],
+             "market": ["institution"], "fund": ["institution"]}
+    figure = Figure(kinds=lambda name: kinds.get(str(name).lower(), []))
+    for animal in ("wolf", "dog", "bear"):
+        figure.witness("swallow", animal)
+
+    first = figure.judge(compile_meaning("The market swallowed the shock."))
+    figure.note_exception(first)
+    assert first.figurative
+    second = figure.judge(compile_meaning("The fund swallowed the loss."))
+    figure.note_exception(second)
+    assert second.figurative          # one other institution is not yet a pattern

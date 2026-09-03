@@ -1860,6 +1860,19 @@ class Figure:
     is the right answer rather than a shortcoming. A module that shipped a list of which nouns may
     swallow would be the ontology this package refuses everywhere else.
 
+    **And the guard must be correctable, which the first version of it was not.** Refusing to file
+    a flagged sentence suppresses exactly the evidence that would show the relation is broader than
+    its witnesses, so the first exception is indistinguishable from the hundredth and no amount of
+    counter-evidence can ever reach it. Measured, that reached three organs away: ten birds
+    witnessed for ``need``, then **14 of the next 20 ordinary sentences about plants needing
+    light** were suppressed as metaphors, :mod:`nyxara.njp.discover` never saw a
+    counterexample,
+    and every kind rule it proposed was confirmed and none refuted. So a flagged reading is
+    **recorded** (:meth:`note_exception`) even though it is not filed, and a kind seen violating
+    a relation :attr:`min_witnesses` times stops being a violation of it. *"Roses need light"* is
+    news, not metaphor; *"the market swallowed the shock"* stays metaphor until several more
+    institutions swallow things.
+
     ``kinds`` is injected rather than imported: the caller decides where a kind comes from, and
     :class:`~nyxara.njp.brain.NJPBrain` hands it its own ``is_a`` store.
     """
@@ -1874,6 +1887,9 @@ class Figure:
         if min_witnesses is not None:
             self.min_witnesses = max(2, int(min_witnesses))
         self.witnesses: Dict[str, List[str]] = {}
+        #: ``relation → kind → {subject, …}`` — the subjects already flagged as violating a
+        #: relation, so the guard can be corrected by evidence instead of confirming itself.
+        self.exceptions: Dict[str, Dict[str, Set[str]]] = {}
         self.flagged = 0
 
     def witness(self, relation: str, subject: str) -> None:
@@ -1927,6 +1943,18 @@ class Figure:
             if shared & mine:
                 out.why = f"{subject!r} is a {sorted(shared & mine)[0]}, as every witness is"
                 return out
+            # A kind that keeps turning up as a violation is not a violation. It is the language
+            # being broader than the witnesses so far, and *"roses need light"* is news rather
+            # than metaphor. Below the threshold a reading is flagged; at or above it the kind is
+            # ordinary for this relation and stays ordinary.
+            known = self.exceptions.get(relation, {})
+            for kind in sorted(mine):
+                already = known.get(kind, set()) - {subject}
+                if len(already) >= self.min_witnesses:
+                    out.why = (f"{len(already)} other subjects of kind {kind!r} have taken "
+                               f"{relation!r} already — the relation is broader than its "
+                               f"witnesses rather than being stretched")
+                    return out
             out.figurative = True
             out.violated = sorted(shared)[0]
             out.why = (f"every one of {len(seen)} witnessed subjects of {relation!r} is a "
@@ -1935,6 +1963,22 @@ class Figure:
             return out
         except Exception:  # noqa: BLE001
             return out
+
+    def note_exception(self, judged: Figurative) -> None:
+        """Record a flagged reading, so the guard can be corrected by evidence.
+
+        Deliberately separate from :meth:`judge`, which stays pure so
+        :meth:`Communicator.figurative` remains the read-only store guard it is documented as. A
+        sentence is counted once, by the caller that actually heard it.
+        """
+        try:
+            if not judged.figurative or not judged.subject:
+                return
+            for kind in self._kinds(judged.subject):
+                bucket = self.exceptions.setdefault(judged.relation, {}).setdefault(kind, set())
+                bucket.add(judged.subject)
+        except Exception:  # noqa: BLE001
+            return
 
     def plausible(self, name: str, relation: str) -> bool:
         """Could this name literally fill the subject of this relation, on the evidence?
@@ -1964,7 +2008,9 @@ class Figure:
 
     def stats(self) -> Dict[str, Any]:
         return {"relations": len(self.witnesses), "flagged": self.flagged,
-                "witnesses": sum(len(v) for v in self.witnesses.values())}
+                "witnesses": sum(len(v) for v in self.witnesses.values()),
+                "exceptions": {r: {k: len(v) for k, v in kinds.items()}
+                               for r, kinds in self.exceptions.items()}}
 
 
 # --------------------------------------------------------------------------- #
@@ -2233,6 +2279,7 @@ class Communicator:
                            if out.rewritten != out.surface else first)
             out.interpretation = self.acts.read(out.surface, meaning=out.meaning)
             out.figurative = self.figure.judge(out.meaning)
+            self.figure.note_exception(out.figurative)
             out.readings = attachment(out.rewritten, out.meaning, learner=self.attach)
             literal_assertion = (out.interpretation.intended in ("assertion", "exclamation")
                                  or out.interpretation.literal == "assertion")
