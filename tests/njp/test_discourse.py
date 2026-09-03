@@ -1283,3 +1283,15 @@ def test_an_implicature_is_cancellable_and_never_reaches_the_ledger():
     voice.hear("Some of the barrels leaked.")
     voice.hear("All of the barrels leaked.")
     assert not any(claim.contested for claim in voice.ledger.claims)
+
+
+def test_the_discourse_exports_do_not_shadow_the_organs_that_had_the_names_first():
+    """`nyxara.njp.Ledger` resolved to the claim ledger for seven commits."""
+    import nyxara.njp as package
+    from nyxara.njp.ledger import Ledger as ErrorLedger
+    from nyxara.njp.soulsync import Anticipation as SoulAnticipation
+
+    assert package.Ledger is ErrorLedger
+    assert package.Anticipation is SoulAnticipation
+    assert package.ClaimLedger is Ledger
+    assert package.TurnAnticipation.__module__ == "nyxara.njp.discourse"
