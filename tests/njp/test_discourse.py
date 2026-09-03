@@ -682,3 +682,94 @@ def test_a_metaphor_stays_a_metaphor_until_the_kind_is_established():
     second = figure.judge(compile_meaning("The fund swallowed the loss."))
     figure.note_exception(second)
     assert second.figurative          # one other institution is not yet a pattern
+
+
+# --------------------------------------------------------------------------- #
+# 9 · language as prediction
+# --------------------------------------------------------------------------- #
+
+CYCLE = ("What is the {a}?", "The {a} is the {b}.", "Open the {b}.")
+
+
+def _expose(voice, turns, mint=None):
+    counter = [0]
+
+    def word():
+        counter[0] += 1
+        return f"w{counter[0]}"
+
+    for index in range(turns):
+        voice.hear(CYCLE[index % 3].format(a=word(), b=word()))
+    return voice
+
+
+def test_an_organ_that_has_heard_nothing_predicts_nothing():
+    """Silence is not a wrong prediction, and it must not be scored as one."""
+    voice = Communicator()
+    expected = voice.anticipation.expect()
+    assert expected.empty
+    got = voice.hear("The seal is in the vault.")
+    assert got.surprise is not None
+    assert got.surprise.predicted == 0
+    assert got.surprise.error == 0.0
+
+
+def test_what_follows_what_is_counted_rather_than_shipped():
+    voice = _expose(Communicator(), 18)
+    expected = voice.anticipation.expect()
+    assert expected.act == "question"          # the cycle's next step, from counts alone
+    assert expected.act_confidence == 1.0
+    assert voice.anticipation.accuracy("act") > 0.9
+
+
+def test_an_exchange_with_nothing_to_learn_is_not_committed_to():
+    """Every act followed by two others equally often. The floor is what stops a guess."""
+    voice = Communicator()
+    for first, second in ((0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1)):
+        for index in range(3):
+            voice.hear(CYCLE[first].format(a=f"x{first}{second}{index}", b="y"))
+            voice.hear(CYCLE[second].format(a=f"z{first}{second}{index}", b="q"))
+    assert voice.anticipation.expect().act_confidence < voice.anticipation.floor
+
+
+def test_a_prediction_is_graded_by_evidence_it_did_not_produce():
+    """The gap-filler writes the predicted act onto the reading; scoring that would be circular.
+
+    Measured with the loop closed: the control exchange's act distribution collapsed to a single
+    successor and reported 1.00 confidence on a sequence built to be unpredictable.
+    """
+    voice = _expose(Communicator(), 18)
+    last = voice.anticipation.last_act
+    assert voice.anticipation.expect().act == "question"    # what it would have supplied
+    before = {act: dict(counts) for act, counts in voice.anticipation.after_act.items()}
+    # A sentence whose shape carries no convention, on a turn where the expectation is confident
+    # and says something else.
+    voice.hear("Open the gate.")
+    after = voice.anticipation.after_act
+    # `command` -- what the sentence said -- was recorded; `question`, what the expectation would
+    # have supplied, was not.
+    assert after[last]["command"] == before.get(last, {}).get("command", 0) + 1
+    assert after[last].get("question", 0) == before.get(last, {}).get("question", 0)
+
+
+def test_a_confident_expectation_fills_a_gap_and_never_overrides_a_convention():
+    voice = _expose(Communicator(), 18)
+    voice.show("Can you open the window?", "request")
+    voice.show("Could you shut the gate?", "request")
+    # A demonstrated convention wins over any habit, however strong the habit.
+    read = voice.acts.read("Would you send the file?")
+    assert read.intended == "request" and read.level == "tags"
+
+
+def test_the_counts_survive_a_new_conversation_and_the_position_does_not():
+    """What follows a question is a fact about the language; what was just said is not."""
+    voice = _expose(Communicator(), 18)
+    mid = voice.anticipation.expect().act
+    voice.reset()
+    assert voice.anticipation.last_act == ""
+    assert voice.anticipation.after_act            # the counts are untouched
+    # And she still knows how an exchange of this kind *opens*, which is real knowledge and a
+    # different prediction from the one she was making mid-exchange.
+    opening = voice.anticipation.expect()
+    assert opening.act == "question"
+    assert opening.act != mid or mid == "question"

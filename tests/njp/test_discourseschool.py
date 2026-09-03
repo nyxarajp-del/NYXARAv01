@@ -42,7 +42,8 @@ def test_every_subject_is_mastered_and_the_taught_ones_moved(taught):
     _brain, transcript = taught
     assert not transcript.failing, [r.subject for r in transcript.failing]
     moved = {r.subject for r in transcript.learned}
-    assert {"acts", "transfer", "repair", "figurative", "tongue"} <= moved
+    assert {"acts", "transfer", "repair", "figurative", "attachment", "anticipation",
+            "reference", "contradiction", "memory", "tongue"} <= moved
 
 
 def test_the_taught_subjects_have_a_real_floor(taught):
@@ -53,7 +54,7 @@ def test_the_taught_subjects_have_a_real_floor(taught):
     """
     _brain, transcript = taught
     floors = {r.subject: r.pre.accuracy for r in transcript.results}
-    for subject in ("acts", "transfer", "repair", "figurative", "attachment",
+    for subject in ("acts", "transfer", "repair", "figurative", "attachment", "anticipation",
                     "reference", "contradiction", "memory", "tongue"):
         assert floors[subject] < 0.9, f"{subject} floor {floors[subject]}"
 
@@ -164,10 +165,10 @@ def test_the_attachment_lesson_finds_one_preposition_and_not_the_other():
     assert voice.attach.ambiguous == {"with"}
 
 
-def test_the_syllabus_is_twelve_subjects_with_unique_ids():
+def test_the_syllabus_is_thirteen_subjects_with_unique_ids():
     made = [factory() for factory in SUBJECTS]
-    assert len(made) == 12
-    assert len({subject.id for subject in made}) == 12
+    assert len(made) == 13
+    assert len({subject.id for subject in made}) == 13
     assert all(isinstance(subject, DiscourseSubject) for subject in made)
 
 
@@ -192,3 +193,15 @@ class _Deaf:
 class _Reply:
     def __init__(self, answer: str) -> None:
         self.answer = answer
+
+
+def test_the_anticipation_control_is_built_to_be_unlearnable():
+    """Its floor is not "she has heard nothing" — it is "she has heard a great deal that does
+    not repeat", which is the stronger claim and the one worth making."""
+    from nyxara.njp.discourseschool import Anticipating
+
+    subject = Anticipating()
+    subject.teach(_Holder(Communicator()), Mint(random.Random(21)))
+    assert subject.student.anticipation.accuracy("act") > 0.9
+    assert subject.control.anticipation.turns >= 30
+    assert subject._commitment(subject.control) < subject.control.anticipation.floor

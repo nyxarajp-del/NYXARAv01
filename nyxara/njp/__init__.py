@@ -351,6 +351,7 @@ from nyxara.njp.corpussolver import CorpusReading, CorpusSolver
 # entry point.
 from nyxara.njp.discourse import (
     ActLearner,
+    Anticipation,
     Claim,
     Communicator,
     Figure,
@@ -360,7 +361,9 @@ from nyxara.njp.discourse import (
     Readings,
     Reference,
     Register,
+    Expectation,
     Resolution,
+    Surprise,
     Uptake,
     Verdict as ClaimVerdict,
 )
@@ -490,8 +493,9 @@ __all__ = [
     "Constraint", "Expr", "Problem", "SolvedProblem", "Solver",
     "CorpusReading", "CorpusRecord", "CorpusSolver", "CorpusVerdict", "verify_corpus_answer",
     # NJP V.26 — what was meant, and by whom (njp/discourse.py)
-    "ActLearner", "Claim", "ClaimVerdict", "Communicator", "Figure", "Interpretation",
-    "Ledger", "Minds", "Readings", "Reference", "Register", "Resolution", "Uptake",
+    "ActLearner", "Anticipation", "Claim", "ClaimVerdict", "Communicator", "Expectation",
+    "Figure", "Interpretation", "Ledger", "Minds", "Readings", "Reference", "Register",
+    "Resolution", "Surprise", "Uptake",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions

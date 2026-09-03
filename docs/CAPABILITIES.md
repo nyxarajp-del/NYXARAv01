@@ -2829,6 +2829,40 @@ metaphor. Measured after: **6 of 20** rather than 14, and `refuted_total` back t
 case is unharmed — `swallow` needs several more institutions before `institution` becomes ordinary
 for it, and a test pins both directions.
 
+#### NJP V.27 — the turn she expected
+
+The gap report the Master asked for named one mechanism as wholly absent, and it was his own
+fifth: `PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`. The word `predict` did not occur in
+`discourse.py` at all. It does now, and it is `Anticipation`.
+
+Three things are predicted about a turn **before it is looked at** — what the speaker will be
+doing, what they will be about, and what it will do to the ledger — and every one of them comes
+from counts she has kept herself. No transition table ships. An exchange where a question is
+followed by an answer teaches that; one where it is not teaches that instead; an organ that has
+heard nothing predicts nothing and says so.
+
+Two rules keep the number honest. **A prediction she declined to make scores neither way** —
+silence is not a wrong prediction. And **a prediction about a field the turn does not carry is
+not a miss**: a question has no ledger verdict, and counting that as an error would mark her wrong
+for every question in an exchange that is mostly assertions.
+
+**The prediction does work rather than only being scored.** Where the surface carries no
+convention for its shape, a confident expectation supplies the act and the reading says where it
+came from. Only into that gap — a demonstrated convention is never overridden by a habit.
+
+**And it is graded on evidence it did not produce, which took a second try.** The first version
+scored the prediction against `interpretation.intended` — the field the gap-filler had just
+written the prediction into. Measured: the control exchange, built so that every act is followed
+by two others equally often, collapsed to a single successor and reported **1.00 confidence** on
+a sequence with nothing in it to learn. That is the same self-confirming loop `Figure` was found
+to have, in a second organ, two commits apart. The act recorded is now the one the *sentence*
+carried.
+
+The subject's floor is not "she has heard nothing" — that would be a weak claim. Its control is
+an exchange of thirty-six turns built to be unlearnable, and what is asserted is that she stays
+**below the commitment floor** on it: `act accuracy 0.95` on the patterned exchange, `control
+best 0.54` against a floor of 0.70.
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -2840,6 +2874,7 @@ for it, and a test pins both directions.
   repair             0.25   1.00   +0.75       4  LEARNED
   figurative         0.50   1.00   +0.50       3  LEARNED
   attachment         0.50   1.00   +0.50       7  LEARNED
+  anticipation       0.50   1.00   +0.50      18  LEARNED
   reference          0.80   1.00   +0.20       9  LEARNED
   contradiction      0.75   1.00   +0.25      10  LEARNED
   memory             0.50   1.00   +0.50      10  LEARNED
@@ -2848,12 +2883,12 @@ for it, and a test pins both directions.
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      12/12 subjects
-  learned       9 subject(s) moved by teaching
-  overall       111/111 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  mastered      13/13 subjects
+  learned       10 subject(s) moved by teaching
+  overall       121/121 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       111/111 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       121/121 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
 **Four of those floors did not exist before the second pass.** `reference`, `contradiction`,

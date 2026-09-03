@@ -34,8 +34,8 @@ four is now a subject on the report card with a floor, a lesson and a gain. The 
 — the pronouns, the copula, the factive subordinators, the time words — are the closed class
 :mod:`nyxara.njp.semantics` already defends, where a list is the honest representation.
 
-Six organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather than a
-new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
+Eight organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather than
+a new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
 something nobody demonstrated; where two readings survive the answer is that there are two.**
 
 **1 · Speech acts are induced, not listed** (:class:`ActLearner`). *"Can you open the window?"* is
@@ -107,7 +107,25 @@ lacks, the reading is flagged figurative and nothing is filed. Where there are n
 the new subject's kinds are unknown, **nothing is claimed** — with an empty store no sentence is
 figurative, and that is the correct answer rather than a limitation to apologise for.
 
-**7 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
+**7 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
+The Master's fifth deep mechanism — ``PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`` — and
+this module did not have it at all. Three things are predicted about a turn before it is looked
+at: what the speaker will be *doing*, what they will be *about*, and what it will do to the
+ledger. Everything is predicted from **counts she has kept herself**: no transition table ships,
+an exchange where a question is followed by an answer teaches that, and an organ that has heard
+nothing predicts nothing and says so. A prediction she declined to make scores neither way, and
+one about a field the turn does not carry — a question has no ledger verdict — is not a miss.
+
+**And the prediction does work rather than only being scored.** Where the surface carries no
+convention for its shape, a confident expectation supplies the act, and the reading says so.
+That is deliberately allowed **only** into a gap: a convention that was actually demonstrated is
+never overridden by a habit. It is also graded on evidence it did not produce — the act recorded
+is the one the *sentence* carried, never the one the expectation supplied, because scoring a
+prediction against a reading it wrote is the same self-confirming loop :class:`Figure` was found
+to have. Measured with that loop closed: the control exchange's act distribution collapsed to one
+successor and reported 1.00 confidence on a sequence built to be unpredictable.
+
+**8 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
 with the telescope."* The evidence that there is an ambiguity at all is in
 :mod:`nyxara.njp.semantics`'s own output: it has no frame for a prepositional phrase after an
 object, so it fuses the two noun phrases into one object string — ``man telescope``, with ``with
@@ -139,6 +157,7 @@ from nyxara.njp.semantics import _lemma as _lemma_of
 __all__ = [
     "GAP", "MORE", "LEVELS", "REGISTERS", "LICENCE", "UNIVERSAL",
     "Readings", "attachment", "AttachLearner", "Marker", "MarkerLearner",
+    "Anticipation", "Expectation", "Surprise",
     "free_words", "clause_proposition",
     "shapes_of", "fillers_of", "literal_act",
     "Act", "Interpretation", "ActLearner",
@@ -2143,6 +2162,202 @@ def attachment(surface: str, meaning: Optional[Meaning] = None, *,
 
 
 # --------------------------------------------------------------------------- #
+# 8 · language as prediction — expect the turn, then be corrected by it
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class Expectation:
+    """What she expects of a turn **before** it arrives, and how strongly."""
+
+    act: str = ""
+    act_confidence: float = 0.0
+    #: ``subject|relation`` she expects the turn to be about.
+    topic: str = ""
+    topic_confidence: float = 0.0
+    #: ``new`` · ``corroborates`` · ``updates`` · ``contradicts``
+    verdict: str = ""
+    verdict_confidence: float = 0.0
+    why: str = ""
+
+    @property
+    def empty(self) -> bool:
+        return not (self.act or self.topic or self.verdict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"act": self.act, "act_confidence": round(self.act_confidence, 4),
+                "topic": self.topic, "topic_confidence": round(self.topic_confidence, 4),
+                "verdict": self.verdict,
+                "verdict_confidence": round(self.verdict_confidence, 4), "why": self.why}
+
+
+@dataclass
+class Surprise:
+    """What the turn actually was, scored against what was expected."""
+
+    act: bool = False
+    topic: bool = False
+    verdict: bool = False
+    #: 0.0 when everything predicted was right, 1.0 when nothing was. An expectation that was
+    #: **not made** scores neither a hit nor a miss — silence is not a wrong prediction, and
+    #: counting it as one would make an untaught organ look confidently wrong instead of quiet.
+    error: float = 0.0
+    predicted: int = 0
+    news: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"act": self.act, "topic": self.topic, "verdict": self.verdict,
+                "error": round(self.error, 4), "predicted": self.predicted, "news": self.news}
+
+
+class Anticipation:
+    """The turn she expected, the turn that came, and the difference between them.
+
+    The Master's fifth deep mechanism, and the one this module did not have at all::
+
+        PREDICTION → OBSERVATION → ERROR → MODEL UPDATE
+
+    Everything predicted here is predicted from **counts she has kept herself**. No transition
+    table ships: an exchange where a question is followed by an answer teaches that, an exchange
+    where it is not teaches that instead, and an organ that has heard nothing predicts nothing and
+    says so. The three things worth predicting about a turn before it arrives are what the speaker
+    will be *doing* (the act), what they will be *about* (the topic), and what it will do to the
+    ledger (the verdict) — and each is scored separately, because getting the act right while
+    getting the topic wrong is a different state from getting both right.
+
+    **A prediction that is never wrong is not a prediction.** :attr:`Surprise.error` is the
+    fraction of what she committed to that reality refused, and it is reported on every turn
+    rather than only when it is low. An expectation she declined to make scores neither way.
+
+    **And the prediction does work rather than only being scored.** Where the surface carries no
+    convention for its shape — no demonstration has ever been given for that skeleton — a
+    confident expectation supplies the act instead, and the reading says so
+    (:attr:`Interpretation.why`). That is top-down evidence filling a gap bottom-up evidence
+    cannot, which is the whole point of predicting; it is deliberately allowed **only** into a
+    gap, so a convention that was actually demonstrated is never overridden by a habit.
+    """
+
+    #: How sure an expectation must be before it is allowed to supply an act the surface did not.
+    #: Below it the expectation is still reported and still scored — it simply does not act.
+    floor = 0.7
+
+    def __init__(self, *, floor: Optional[float] = None) -> None:
+        if floor is not None:
+            self.floor = float(floor)
+        self.after_act: Dict[str, Dict[str, int]] = {}
+        self.after_verdict: Dict[str, Dict[str, int]] = {}
+        self.topic_stay = 0
+        self.topic_switch = 0
+        self.turns = 0
+        self.committed = 0
+        self.hits: Dict[str, int] = {"act": 0, "topic": 0, "verdict": 0}
+        self.misses: Dict[str, int] = {"act": 0, "topic": 0, "verdict": 0}
+        self.last_act = ""
+        self.last_topic = ""
+        self.last_verdict = ""
+
+    # -- predicting ---------------------------------------------------------- #
+    @staticmethod
+    def _best(counts: Dict[str, int]) -> Tuple[str, float]:
+        total = sum(counts.values())
+        if not total:
+            return "", 0.0
+        name = max(sorted(counts), key=lambda k: counts[k])
+        return name, counts[name] / total
+
+    def expect(self) -> Expectation:
+        """What the next turn probably is, from what has followed this kind of turn before."""
+        out = Expectation()
+        try:
+            act, confidence = self._best(self.after_act.get(self.last_act, {}))
+            if act:
+                out.act, out.act_confidence = act, confidence
+            verdict, sure = self._best(self.after_verdict.get(self.last_verdict, {}))
+            if verdict:
+                out.verdict, out.verdict_confidence = verdict, sure
+            seen = self.topic_stay + self.topic_switch
+            if seen and self.last_topic and self.topic_stay >= self.topic_switch:
+                out.topic = self.last_topic
+                out.topic_confidence = self.topic_stay / seen
+            out.why = (f"after {self.last_act or 'nothing'}, "
+                       f"over {self.turns} turns of this exchange")
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    # -- being corrected ----------------------------------------------------- #
+    def observe(self, expected: Optional[Expectation], *, act: str, topic: str,
+                verdict: str) -> Surprise:
+        """Score the expectation against the turn, then fold the turn into the counts."""
+        out = Surprise()
+        try:
+            if expected is not None and not expected.empty:
+                checks = (("act", expected.act, act), ("topic", expected.topic, topic),
+                          ("verdict", expected.verdict, verdict))
+                wrong: List[str] = []
+                for name, guess, truth in checks:
+                    if not guess:
+                        continue
+                    if not truth:
+                        # The turn had no such field at all — a question carries no ledger
+                        # verdict. A prediction about something that did not occur is neither a
+                        # hit nor a miss, and counting it as a miss would mark her wrong for
+                        # every question in an exchange that is mostly assertions.
+                        continue
+                    out.predicted += 1
+                    if guess == truth:
+                        setattr(out, name, True)
+                        self.hits[name] += 1
+                    else:
+                        self.misses[name] += 1
+                        wrong.append(f"{name}: expected {guess!r}, heard {truth!r}")
+                if out.predicted:
+                    self.committed += 1
+                    hit = sum(1 for name in ("act", "topic", "verdict") if getattr(out, name))
+                    out.error = 1.0 - (hit / out.predicted)
+                    out.news = "; ".join(wrong)
+            # The update, and it happens whether or not anything was predicted — a turn nobody
+            # expected is still the evidence the next expectation is made from.
+            self.turns += 1
+            if act:
+                self.after_act.setdefault(self.last_act, {})
+                self.after_act[self.last_act][act] = \
+                    self.after_act[self.last_act].get(act, 0) + 1
+                self.last_act = act
+            if verdict:
+                self.after_verdict.setdefault(self.last_verdict, {})
+                self.after_verdict[self.last_verdict][verdict] = \
+                    self.after_verdict[self.last_verdict].get(verdict, 0) + 1
+                self.last_verdict = verdict
+            if topic:
+                if self.last_topic:
+                    if topic == self.last_topic:
+                        self.topic_stay += 1
+                    else:
+                        self.topic_switch += 1
+                self.last_topic = topic
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    def reset(self) -> None:
+        """A new conversation. The **counts survive** and the position in the exchange does not:
+        what follows a question is a fact about the language, and what was just said is not."""
+        self.last_act = self.last_topic = self.last_verdict = ""
+
+    def accuracy(self, name: str = "act") -> float:
+        hit, miss = self.hits.get(name, 0), self.misses.get(name, 0)
+        return hit / (hit + miss) if (hit + miss) else 0.0
+
+    def stats(self) -> Dict[str, Any]:
+        return {"turns": self.turns, "committed": self.committed,
+                "hits": dict(self.hits), "misses": dict(self.misses),
+                "act_accuracy": round(self.accuracy("act"), 4),
+                "topic_accuracy": round(self.accuracy("topic"), 4),
+                "verdict_accuracy": round(self.accuracy("verdict"), 4),
+                "topic_stay": self.topic_stay, "topic_switch": self.topic_switch}
+
+
+# --------------------------------------------------------------------------- #
 # the whole turn
 # --------------------------------------------------------------------------- #
 
@@ -2164,6 +2379,12 @@ class Uptake:
     #: The two readings of a prepositional attachment, when there are two — see
     #: :func:`attachment`.
     readings: Optional[Readings] = None
+    #: What she expected of this turn **before** hearing it, and what the turn did to that
+    #: expectation — see :class:`Anticipation`. ``expected`` is made from the exchange so far and
+    #: never from this sentence; ``surprise`` is the only field on an uptake that is about her
+    #: rather than about the turn.
+    expected: Optional[Expectation] = None
+    surprise: Optional[Surprise] = None
     #: The one thing worth asking back, or ``""``. Ordered by what blocks understanding hardest:
     #: an act nobody can read, then a referent nothing settles, then two claims that cannot both
     #: hold.
@@ -2197,6 +2418,10 @@ class Uptake:
             out["figurative"] = self.figurative.to_dict()
         if self.readings is not None and self.readings.ambiguous:
             out["readings"] = self.readings.to_dict()
+        if self.expected is not None and not self.expected.empty:
+            out["expected"] = self.expected.to_dict()
+        if self.surprise is not None and self.surprise.predicted:
+            out["surprise"] = self.surprise.to_dict()
         if self.question:
             out["question"] = self.question
         return out
@@ -2226,6 +2451,9 @@ class Communicator:
         #: Which prepositions attach two ways. Discovered from demonstrations that disagree,
         #: empty until then — see :class:`AttachLearner`.
         self.attach = AttachLearner()
+        #: What she expects of a turn before it arrives, learned from what has actually
+        #: followed what — see :class:`Anticipation`.
+        self.anticipation = Anticipation()
         self.reference = Reference(speaker=speaker, addressee=addressee)
         self.ledger = Ledger()
         self.minds = Minds(speaker=speaker)
@@ -2272,6 +2500,9 @@ class Communicator:
         try:
             self.turn += 1
             out.turn = self.reference.turn = self.turn
+            # **Before** the sentence is looked at. An expectation formed after reading it would
+            # be a description rather than a prediction, and could never be wrong.
+            out.expected = self.anticipation.expect()
             first = compile_meaning(out.surface)
             out.rewritten, out.resolutions = self.reference.rewrite(
                 out.surface, meaning=first, turn=self.turn)
@@ -2293,6 +2524,36 @@ class Communicator:
                 out.verdict = Verdict(kind="none", why="read as non-literal; nothing filed")
             if out.meaning is not None:
                 self.reference.introduce(out.meaning, turn=self.turn)
+            # What the **sentence** said, kept before the expectation is allowed to touch it.
+            # Scoring a prediction against a reading the prediction itself supplied is a
+            # self-fulfilling prophecy: measured, it collapsed the control exchange's act
+            # distribution to a single successor and reported 1.00 confidence on an exchange
+            # built to be unpredictable. A prediction must be graded by evidence it did not
+            # produce.
+            heard_act = out.interpretation.intended if out.interpretation is not None else ""
+
+            # The prediction does work rather than only being scored: where no convention has
+            # ever been demonstrated for this shape, a confident expectation supplies the act.
+            # Only into that gap — a demonstrated convention is never overridden by a habit.
+            if (out.interpretation is not None and not out.interpretation.support
+                    and out.expected.act
+                    and out.expected.act_confidence >= self.anticipation.floor
+                    and out.expected.act != out.interpretation.intended):
+                out.interpretation.intended = out.expected.act
+                out.interpretation.confidence = float(out.expected.act_confidence)
+                out.interpretation.level = "expected"
+                out.interpretation.why = (
+                    f"no convention demonstrated for this shape; taken from the exchange, "
+                    f"where {out.expected.act!r} follows {self.anticipation.last_act or 'this'} "
+                    f"{out.expected.act_confidence:.0%} of the time")
+
+            claim = out.verdict.claim if out.verdict is not None else None
+            out.surprise = self.anticipation.observe(
+                out.expected,
+                act=heard_act,
+                topic=f"{claim.subject}|{claim.relation}" if claim is not None else "",
+                verdict=out.verdict.kind if out.verdict is not None else "")
+
             out.question = self._question(out)
             self.history.append(out)
             if len(self.history) > self.max_history:
@@ -2337,6 +2598,7 @@ class Communicator:
         self.reference.plausible = self.figure.plausible
         self.ledger = Ledger()
         self.minds = Minds(speaker=self.speaker)
+        self.anticipation.reset()
         self.turn = 0
         self.history = []
 
@@ -2360,6 +2622,7 @@ class Communicator:
 
     def stats(self) -> Dict[str, Any]:
         return {"turns": self.turn, "acts": self.acts.stats(),
+                "anticipation": self.anticipation.stats(),
                 "markers": self.markers.stats(), "attach": self.attach.stats(),
                 "reference": self.reference.stats(), "ledger": self.ledger.stats(),
                 "minds": self.minds.stats(), "register": self.register.stats(),

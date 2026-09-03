@@ -1958,6 +1958,19 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return False
 
+    def expect_turn(self) -> Any:
+        """What she expects of the next turn, before it arrives — see
+        :class:`~nyxara.njp.discourse.Anticipation`. An organ that has heard nothing returns an
+        empty expectation, which is a different answer from a confident wrong one."""
+        try:
+            if self.discourse is None:
+                from nyxara.njp.discourse import Expectation
+                return Expectation()
+            return self.discourse.anticipation.expect()
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Expectation
+            return Expectation()
+
     def show_change(self, first: str, second: str, verdict: str) -> None:
         """Demonstrate what a speaker would call this pair of claims — ``updates``,
         ``contradicts`` or ``corroborates``. What word carried the verdict is induced rather than

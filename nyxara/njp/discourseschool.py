@@ -59,7 +59,7 @@ from nyxara.njp.semantics import compile_meaning
 __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
     "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
-    "Tongue", "Wiring", "DiscourseSchool", "SUBJECTS", "main",
+    "Anticipating", "Tongue", "Wiring", "DiscourseSchool", "SUBJECTS", "main",
 ]
 
 
@@ -677,6 +677,98 @@ class RegisterSubject(DiscourseSubject):
         return score, misses
 
 
+class Anticipating(DiscourseSubject):
+    """The turn she expected, scored before it arrived.
+
+    The Master's fifth deep mechanism, and the one nothing in this package measured. Half the
+    paper is a patterned exchange — question, answer, instruction, repeating — where after enough
+    of it she should be able to say what comes next. **The other half is the control, and it is
+    the half that decides whether this is a capability or a habit**: an exchange whose acts follow
+    each other evenly gives her nothing to predict from, and committing to a guess there is worse
+    than saying nothing. Confidence below the floor scores as right on those items.
+
+    Its student is private, for the reason :class:`LongMemory`'s is: every other subject in the
+    syllabus talks to the shared communicator, and an exchange counter that had heard all of them
+    would be predicting from the syllabus rather than from a conversation.
+    """
+
+    id = "anticipation"
+    title = "the turn she expected"
+    teaches = "what follows what, counted from the exchange rather than shipped as a table"
+    items = 10
+
+    #: Question, answer, instruction. Three acts rather than two, so a right answer cannot be got
+    #: by alternating, and the same three the control shuffles.
+    CYCLE = ("What is the {a}?", "The {a} is the {b}.", "Open the {b}.")
+    WANT = ("question", "assertion", "command")
+
+    #: Where in the cycle this student's exchange currently stands. Carried across sittings
+    #: because the exchange is.
+    _step = 0
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    @property
+    def control(self) -> Communicator:
+        found = getattr(self, "_flat", None)
+        if found is None:
+            found = Communicator()
+            self._flat = found               # noqa: attribute defined outside __init__
+        return found
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.student
+        for _ in range(6):
+            for step, surface in enumerate(self.CYCLE):
+                voice.hear(surface.format(a=mint.word(), b=mint.word()))
+                self._step = (step + 1) % len(self.CYCLE)   # noqa: attribute outside __init__
+        # And the control's exposure, which is deliberately unlearnable: every act is followed by
+        # two different acts equally often, so nothing reaches the floor. Built here rather than
+        # left empty because "she predicts nothing having heard nothing" is a weaker claim than
+        # "she predicts nothing having heard a great deal that does not repeat".
+        flat = self.control
+        for first, second in ((0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1)):
+            for _ in range(3):
+                flat.hear(self.CYCLE[first].format(a=mint.word(), b=mint.word()))
+                flat.hear(self.CYCLE[second].format(a=mint.word(), b=mint.word()))
+        return Taught(18, f"act accuracy {voice.anticipation.accuracy('act'):.2f} "
+                          f"on the patterned exchange, "
+                          f"control best {self._commitment(flat):.2f}")
+
+    @staticmethod
+    def _commitment(voice: Communicator) -> float:
+        return float(voice.anticipation.expect().act_confidence)
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice, flat = self.student, self.control
+        score, misses = Score(), []
+        floor = voice.anticipation.floor
+        # Continued from wherever the exchange actually stands, not restarted at the top of the
+        # cycle. Restarting cost exactly one item on the retention run — the paper asked "what
+        # follows an assertion" and then said a question, which is not the cycle she was taught
+        # and not a fact about her.
+        for _ in range(5):
+            expected = voice.anticipation.expect()
+            said = expected.act if expected.act_confidence >= floor else ""
+            step = self._step
+            self._step = (step + 1) % len(self.CYCLE)   # noqa: attribute outside __init__
+            voice.hear(self.CYCLE[step].format(a=mint.word(), b=mint.word()))
+            self.mark(score, misses, got=said, want=self.WANT[step],
+                      item=f"after {self.WANT[(step - 1) % 3]} → ?", silence="")
+        for index in range(5):
+            got = self._commitment(flat)
+            self.mark(score, misses, got=(got < floor), want=True,
+                      item=f"unpatterned exchange, commitment {got:.2f}")
+            flat.hear(self.CYCLE[index % len(self.CYCLE)].format(a=mint.word(), b=mint.word()))
+        return score, misses
+
+
 class Attachment(DiscourseSubject):
     """*"I saw the man with the telescope."* — and which prepositions do that is not shipped.
 
@@ -824,7 +916,7 @@ class Wiring(DiscourseSubject):
 #: The syllabus, in the order it is sat. Conventions first, because the mechanisms behind them do
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
-    Acts, Transfer, Repair, FigurativeSubject, Attachment,
+    Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating,
     ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject,
     Tongue, Wiring,
 )
