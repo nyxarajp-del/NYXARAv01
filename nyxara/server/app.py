@@ -1444,6 +1444,27 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         got = brain.hear_turn(req.stimulus)
         return got.to_dict() if hasattr(got, "to_dict") else {"surface": req.stimulus}
 
+    @app.post("/v1/njp/explain", dependencies=auth)
+    def njp_explain(req: NyxThinkRequest) -> dict:
+        """A *why* or a *how*, answered by walking the fact store rather than reading it.
+
+        Returns the whole walk — every chain with its nodes, its gloss, its confidence and its
+        weakest link, or a procedure's steps with **every order** its prerequisites allow. Stateless
+        and read-only: it composes facts she was already told and writes nothing back.
+
+        ``{"explained": false}`` for a sentence that is not one of these questions, which is not an
+        error — it is how a caller learns to send it to ``/v1/njp/think`` instead.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "explainer", None) is None:
+            return _off("EXPLAIN_ENABLED")
+        got = brain.explain(req.stimulus)
+        if got is None:
+            return {"explained": False, "why": "not a why or how question"}
+        out = got.to_dict()
+        out["explained"] = bool(getattr(got, "answered", False))
+        return out
+
     @app.post("/v1/njp/recall", dependencies=auth)
     def njp_recall(req: NyxThinkRequest) -> dict:
         """Content-addressed recall. No token window is consulted."""

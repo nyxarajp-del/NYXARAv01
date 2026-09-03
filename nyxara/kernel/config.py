@@ -2506,6 +2506,7 @@ class NJPConfig(BaseModel):
     mathsolver_enabled: bool = True     # problems she has not seen (njp/mathsolver.py)
     corpussolver_enabled: bool = True   # an exam she did not write (njp/corpussolver.py)
     discourse_enabled: bool = True      # what was meant, and by whom (njp/discourse.py)
+    explain_enabled: bool = True        # what, how and why (njp/explain.py)
     learner_enabled: bool = True        # the Cognitive Learning Core (njp/core.py)
 
     # --- NJP V.06: the cortex, and the two organs that keep it honest --- #

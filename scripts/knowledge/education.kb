@@ -1,0 +1,53 @@
+# education.kb — teaching and learning, written around what causes learning rather than what a
+# school contains.
+#
+# The domain matters to this package for a reason beyond coverage: `njp/school.py` measures her by
+# pre-test, teaching and post-test on held-out items, which is this subject applied to herself.
+
+education | is_a=the process of teaching and learning | purpose=passing on knowledge, skills and ways of thinking | has_kind=formal education | has_kind=informal education
+formal education | is_a=education | means=teaching organised into institutions, stages and qualifications
+informal education | is_a=education | means=learning outside any institution
+pedagogy | is_a=the theory and practice of teaching | purpose=deciding how to teach so that learning happens
+curriculum | is_a=what is to be taught and in what order | purpose=making sure the important things are covered and built on
+syllabus | is_a=the content of one course | purpose=telling a learner what will be covered
+lesson | is_a=one unit of teaching | has_part=objective | has_part=activity | has_part=check for understanding
+learning objective | is_a=statement of what a learner should be able to do afterwards | purpose=making it possible to tell whether the lesson worked
+scaffolding | is_a=teaching technique | purpose=supporting a learner through what they cannot yet do alone | causes=independence when the support is withdrawn gradually
+zone of proximal development | is_a=idea | means=the gap between what a learner can do alone and what they can do with help | purpose=showing where teaching has most effect
+differentiation | is_a=teaching technique | purpose=adapting a lesson to learners at different points | requires=knowing where each learner is
+formative assessment | is_a=assessment | purpose=finding out what a learner has not yet grasped while there is still time to act | causes=teaching being changed mid course
+summative assessment | is_a=assessment | purpose=recording what a learner has achieved at the end
+diagnostic assessment | is_a=assessment | purpose=finding out what a learner already knows before teaching begins | causes=teaching not repeating what is known
+feedback | purpose=telling a learner what to do differently next time | causes=improvement when specific and timely | causes=no improvement when it is only a grade
+rubric | is_a=a statement of what each level of work looks like | purpose=making marking consistent and expectations visible
+retrieval practice | is_a=study technique | purpose=strengthening memory by recalling rather than rereading | causes=better long term retention
+spaced practice | is_a=study technique | purpose=spreading study over time | causes=better retention than the same time massed together
+interleaving | is_a=study technique | means=mixing different kinds of problem in one session | causes=better discrimination between problem types | causes=study feeling harder while working better
+elaboration | is_a=study technique | means=explaining how and why something works in your own words | causes=deeper understanding
+worked example | is_a=teaching device | purpose=showing the steps of a solution before asking for one | causes=less cognitive load for a novice
+cognitive load | is_a=how much a learner must hold in mind at once | causes=learning failing when it exceeds working memory | requires=managing by breaking material into steps
+prior knowledge | is_a=what a learner already knows | purpose=being what new learning attaches to | causes=misconceptions persisting when it is wrong and unexamined
+misconception | is_a=a wrong belief that makes sense to the learner | causes=new teaching being reinterpreted to fit it | requires=being surfaced before it can be corrected
+transfer | is_a=using what was learned in one setting in another | purpose=being the point of teaching | occurs_when=the underlying structure is understood rather than the surface
+rote learning | is_a=learning by repetition without understanding | causes=recall without transfer
+mastery learning | is_a=approach | purpose=letting a learner move on only once they have understood | requires=assessment that is diagnostic
+motivation | purpose=sustaining effort through difficulty in learning
+growth mindset | is_a=belief that ability can be developed | causes=persistence after failure@0.7
+self regulation | is_a=ability to plan, monitor and adjust your own learning | purpose=letting a learner continue without a teacher
+metacognition | purpose=letting a learner notice what they do not understand
+inclusive education | is_a=approach | purpose=teaching all learners together with the support each needs | requires=adapting materials and assessment
+special educational needs | is_a=needs requiring additional support | purpose=naming what must be provided for a learner to access the curriculum
+literacy | is_a=the ability to read and write | purpose=giving access to everything taught in writing | causes=better outcomes across every other subject
+numeracy | is_a=the ability to use numbers confidently | purpose=letting a person handle quantity in daily life and work
+phonics | is_a=method of teaching reading | purpose=teaching the relation between letters and sounds | causes=children being able to read words they have never seen
+teacher | is_a=person whose work is teaching | purpose=arranging conditions in which learning happens | requires=subject knowledge | requires=knowledge of how the subject is misunderstood
+professional development | is_a=continued training for teachers | purpose=improving practice after qualification
+school | purpose=educating children in groups | has_part=curriculum
+university | is_a=institution | purpose=teaching at an advanced level and producing research | has_part=faculty | has_part=department | has_part=library
+degree | is_a=qualification awarded by a university | purpose=certifying a level of study
+vocational education | is_a=education | purpose=preparing a person for a particular occupation
+apprenticeship | is_a=vocational education | means=learning a trade while working under someone skilled | causes=skills that are hard to teach in a classroom
+lifelong learning | is_a=continuing to learn through life | purpose=keeping up when work and knowledge change
+distance learning | is_a=education at a distance from the teacher | purpose=reaching learners who cannot attend | requires=self regulation | causes=higher dropout without support
+educational inequality | is_a=condition | occurs_when=resources and expectations differ by where a child is born | causes=differences in attainment that are not differences in ability
+dropout | is_a=leaving education before completing it | occurs_when=cost, distance or discouragement outweigh the perceived benefit | causes=narrower opportunities later

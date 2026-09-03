@@ -60,6 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39c | Explanation (the other two questions a person asks. She answered **what**, and *why* and *how* were not weak in her, they were absent — no relation in any graph is called "why", so an explanation is a **path** and had to be walked. Mechanistic why backwards along production, teleological why forwards along purpose, and never one for the other; a mechanism from parts crossed with what they do; and a procedure's **order derived from its prerequisites**, never told — with every order returned where the telling left two steps free. Over all 42 of the Master's domains, 14 of which had no source file at all) | `nyxara.njp.explain` + `nyxara.njp.explainread` + `nyxara.njp.explainschool` + `scripts/knowledge/*.kb` | NEW |
 | 40 | Multimodal Intelligence | `nyxara.senses.binding` | REAL+WIRED |
 | 41 | Embodied Intelligence | `nyxara.sim.embodied` + `nyxara.senses.live` | REAL+WIRED |
 | 42 | Real-time Decision Making (System 1/2) | `nyxara.mind.dual_process` | REAL+WIRED |
@@ -3373,10 +3374,170 @@ Run it: `NJPBrain.hear_turn("...")`, `show_act`, `correct_act`, `say_to`, `holds
 `go_to_discourse_school()`, `python -m nyxara.njp.discourseschool`, or `/v1/njp/discourse`.
 
 
+#### NJP V.36 — what, how and why
+
+Measured cold, on the shipped world corpus, before a line of `njp/explain.py` existed:
+
+```
+what is force                    'physical quantity'
+what is a mammal                 'vertebrate'
+what causes rain                 'cloud'
+why does water boil              ''
+why does an object accelerate    ''
+how does a plant make food       ''
+how does photosynthesis work     ''
+how do you boil an egg           ''
+```
+
+Three of eight. She answered **what**, and she answered a *named* one-hop relation. The two
+questions a person actually asks about the world were not weak in her, they were absent.
+
+That was not a corpus gap. The store held `cooling causes condensation`, `condensation causes
+cloud` and `cloud causes rain` all three. The gap is that *why* and *how* are **not relations** —
+there is no edge in any graph labelled "why". An explanation is a **path**, and a path has to be
+walked.
+
+**Why is two questions and they must not be confused.** Mechanistic *why* walks **backwards** along
+production, so *why does rain happen* is not `cloud`; it is `moist air rises and cools → cloud →
+rain`, facts she was told separately and a chain nobody wrote down. Teleological *why* walks
+**forwards** along `purpose`, and up through `is_a` only when the thing itself carries none. A fuse
+is caused by a factory and is for breaking the circuit, and only one of those answers *what is a
+fuse for*. A third strand is kept third rather than folded into *because*: `requires` is an
+**enabling condition**, glossed *"it needs"* and never *"because"* — fire requires oxygen; oxygen
+did not cause the fire, and rendering a requirement as a cause is how an explanation becomes false
+while every fact in it stays true.
+
+**How is also two.** *How does X work* is a mechanism — X's parts crossed with what each of them
+does. *How do you X* is a procedure, and the procedure is where the real claim is.
+
+##### The order is derived, never told
+
+A procedure in `scripts/knowledge/procedures.kb` states **which** steps it has (`has_step`) and, on
+each step, **what that step needs** (`requires`). It never states a sequence. The sequence is
+computed by a topological walk, every time, and three properties of it are decisions:
+
+* **Where the prerequisites leave two steps free, the answer is every order they allow.** Beating
+  the eggs and heating the pan are genuinely either way round. `Plan.orders` holds them all and
+  `Plan.determined` says whether there was one — the same rule this package has applied to two
+  parses of a sentence since V.13: *where two readings survive, the answer is that there are two.*
+  Baking bread has five admissible orders; voting has six; boiling an egg has one.
+* **A prerequisite cycle is reported as a cycle**, not as a sequence with one edge quietly dropped.
+* **A step named as a prerequisite but never listed as a step** is a hole in the telling and is
+  named in `Plan.dangling` rather than treated as already done.
+
+The steps in the source file are written in the order they were thought of, and a test shuffles
+them and demands the same answer back.
+
+##### The corpus: fourteen domains that did not exist
+
+Fifteen of the Master's forty-two domains had no source file at all. Now written and measured:
+**programming, engineering, government & civics, psychology, sociology, literature, music,
+business, agriculture, architecture, education, organizations, events** — and **procedures**, the
+forty-second, which is where the ordering derivation gets something to derive from. 48 files became
+62; 13,755 facts became 15,847. Every one of the 225 claims that duplicated an existing file was
+removed rather than left to be deduplicated on load.
+
+##### What it measures
+
+Seven papers, 300 items each, each defined by what makes its items unseen:
+
+```
+paper          asked  right  wrong  silent   score
+why_chain        300    291      9       0   0.970
+why_purpose       11     11      0       0   1.000
+mechanism        300    300      0       0   1.000
+procedure         18     18      0       0   1.000
+minted           120    120      0       0   1.000
+direction        300    297      3       0   0.990
+abstention       300    297      3     297   0.990   (silence is the pass)
+
+952/962 = 0.990 over the papers that reward answering
+```
+
+`why_chain` holds out the shortcut: `A causes B` and `B causes T` are stated, `A causes T` is not,
+and reaching **B** — the fact she was told — scores nothing. `minted` invents a procedure out of
+nonsense words with a random prerequisite graph and grades it against a **brute-force enumeration
+over permutations**, which is deliberately not the algorithm under test; grading a topological sort
+against itself would pass whatever it did. `abstention` is half nonsense topics and half **real
+subjects asked for a relation they do not carry**, which is where the confabulation risk actually
+lives.
+
+There is also a per-domain block over all forty-two. Read its two halves differently: `what`/`why`/
+`how` are *coverage* and saturate at 1.00, which says the corpus reaches every domain and says
+nothing about difficulty; `held` is the held-out papers restricted to that domain's own subjects,
+and that is the number that falls — psychology 0.93, sociology 0.95, events 0.96.
+
+##### Four defects the measurement found, three of them in the exam
+
+**Three of the seven papers could not fail.** `direction` asked only *what is X for*, and the
+grammar reads *for* as `sense="for"`, so the forbidden causes were unreachable by construction — an
+acceptance test for one line of dispatch, presented as a paper about a confusion. It now asks both
+directions, each the other's control, and a walk with the two senses **swapped** — the failure
+worth catching, invisible when only one direction is asked — fails all of it.
+
+**A gold answer is every answer that would be right.** `mechanism` emitted one item per part and
+graded each against that one part. The digestive system has eight parts, the walk returns six
+chains, and an item asking for the small intestine scored her wrong for having answered with the
+liver and the stomach. That is `njp/general.py`'s own rule, broken in a file whose docstring quotes
+it. Cost: 0.14.
+
+**The exam asked for something no walk should produce.** The per-domain sweep counted forward
+`causes` as material for a *why* about the subject. `max planck causes quantum theory` is material
+for *why did quantum theory happen*; it says nothing about why Planck happened. The `people` domain
+reported 0.00 with four subjects, every one a scientist whose only causal edge points away from
+them.
+
+**And `0.00` meant two things.** `geography` read 0.00 on *why* because no geography subject has a
+causal edge; `people` read 0.00 because four did and she answered none. Opposite findings, shown
+identically. Not asked is now a dash.
+
+##### And two in her
+
+**The confidence floor was a depth bound in disguise.** A chain was pruned on its *decayed product*,
+which falls with length — so the floor's effective depth depended on how confident the source
+corpus happened to be. The shipped corpus states facts at 0.85 and reached three hops; the same
+three facts ingested without stated confidences land at 0.6, and `0.6² × 0.85² = 0.26` is under the
+floor, so `cooling → condensation → cloud → rain` returned `cloud`. **The feature was off for any
+corpus that was not confident enough, and nothing said so.** `MAX_DEPTH` now bounds length and the
+floor judges the chain's **weakest link**, which is a question about the claims rather than about
+how many of them there are. `why_chain` moved 0.755 → 0.970.
+
+**A walk composes across a homonym.** Asked *how does the heart work*, she answered `heart → atrium
+→ bringing daylight into the middle of a deep plan`. Every edge is a fact she was correctly told: a
+heart has an atrium, and an atrium — the tall space in a building — is for bringing daylight into a
+deep plan. The store keys facts on their **surface spelling**, so the heart's chamber and the
+building's courtyard are one node. Fifteen thousand facts held that invisibly, because only a path
+can expose it.
+
+The detector written for it does not detect homonymy, and saying so is more useful than the
+detector. Two `is_a` objects neither of which is an ancestor of the other, sharing no word, fires on
+**261 of 4,230 subjects, 6.2%** — and reading them settles it: Einstein is a *physicist* and a
+*nobel laureate*; a bat is a *mammal* and a *nocturnal animal*. One thing under two descriptions is
+the ordinary case. Used as a confidence penalty it cost `nitrogen fixation → soil fertility → higher
+yield`, a correct derivation, while the number it was meant to improve stood still. It survives as a
+**tie-break and nothing else**: among chains of the same kind and length, one through a many-kinded
+node ranks last. Enough to have fixed the heart; unable to remove a chain. Separating the two
+atriums needs a store keyed on something other than spelling, and that is a limit of this store,
+named rather than tuned away.
+
+##### Reachable from English, not only from Python
+
+`njp/general.py` records `inheritance` at 400/400 with **every one of them arriving through the
+derivation ladder and none through English** — a real capability no sentence reached. The walk and
+its question grammar were written together so that could not repeat, and every paper here goes
+through the grammar. The `has_step` split closes the same fault one layer down: `_KIND_PREDICATE`
+read "the steps of X are A, B, C" and **wrote** `has_step`, while the question pattern for "what are
+the steps of X" **asked for** `has_part`. Both halves worked and disagreed about the name, which is
+the hardest version of that fault to see.
+
+Run it: `NJPBrain.explain("why does rain happen?")`, `why`, `how`, `how_to`,
+`refresh_explanations`, or `python -m nyxara.njp.explainschool`.
+
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
-`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, `/discourse`, and `/{organ}` — so growth and self-rewriting are observable
+`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, `/discourse`, `/explain`, and `/{organ}` — so growth and self-rewriting are observable
 from outside the process,
 not merely asserted in a docstring. On the console: `/njp`, and `/njp think` prints the synapse
 count before and after the turn, which is the claim this whole package has to earn.

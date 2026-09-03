@@ -1,0 +1,75 @@
+# psychology.kb — mind and behaviour, written for the causal questions rather than the names.
+#
+# `mind.kb` holds the concepts; this holds the findings and the mechanisms — what produces a
+# behaviour, what a process is for, and what goes wrong when it fails.
+
+psychology | is_a=study of mind and behaviour | has_kind=behavioural psychology
+cognitive psychology | purpose=studying how people perceive, remember and reason
+developmental psychology | purpose=studying how the mind changes across a life
+clinical psychology | purpose=understanding and treating mental distress
+social psychology | purpose=studying how people are changed by other people
+
+# --- perception and attention -------------------------------------------------------------------- #
+perception | is_a=mental process | purpose=building a usable model of the world from the senses | requires=sensory input | requires=prior expectation | causes=seeing what is expected when the input is ambiguous
+attention | is_a=mental process | purpose=selecting what to process out of far more than can be processed | causes=inattentional blindness | has_property=limited in capacity
+inattentional blindness | is_a=phenomenon | occurs_when=attention is fully occupied elsewhere | causes=an obvious event going unnoticed
+perceptual constancy | is_a=phenomenon | means=seeing an object as the same size and colour under different conditions | purpose=keeping the world stable as the image on the retina changes
+optical illusion | occurs_when=the assumptions perception uses are violated | purpose=showing what those assumptions are
+
+# --- memory ---------------------------------------------------------------------------------------- #
+memory | is_a=mental process | purpose=carrying information forward in time | has_kind=long term memory
+working memory | purpose=holding and manipulating what is needed right now | has_property=holds only a few items | causes=errors when overloaded
+long term memory | purpose=storing what is learned for later | has_property=effectively unlimited
+episodic memory | means=memory for events you lived through
+semantic memory | means=memory for facts detached from when you learned them
+encoding | is_a=stage of memory | purpose=turning an experience into a trace that can be stored | requires=attention
+consolidation | is_a=process | purpose=making a new memory durable | requires=sleep | occurs_when=a memory is replayed after learning
+retrieval | is_a=stage of memory | purpose=bringing a stored memory back
+forgetting | causes=loss of access to a memory | occurs_when=retrieval cues are absent | occurs_when=similar memories interfere
+interference | is_a=cause of forgetting | occurs_when=similar memories compete at retrieval
+spacing effect | is_a=finding | means=that study spread over time is remembered better than the same study massed | causes=better long term retention
+testing effect | is_a=finding | means=that retrieving something strengthens it more than rereading it | purpose=explaining why practice tests work
+reconstructive memory | is_a=finding | means=that remembering rebuilds an event rather than replaying it | causes=false memories | causes=unreliable eyewitness testimony
+
+# --- learning ----------------------------------------------------------------------------------------- #
+classical conditioning | is_a=form of learning | occurs_when=a neutral stimulus repeatedly precedes a meaningful one | causes=a response to the signal alone
+operant conditioning | is_a=form of learning | means=learning from the consequences of an action | causes=behaviour that is reinforced becoming more frequent
+reinforcement | is_a=consequence that makes a behaviour more likely | purpose=strengthening a behaviour | has_kind=positive reinforcement | has_kind=negative reinforcement
+punishment | is_a=consequence that makes a behaviour less likely | causes=suppression of the behaviour while the punisher is present | causes=avoidance of the punisher@0.7
+extinction | is_a=process | occurs_when=a learned signal stops being followed by its consequence | causes=the learned response fading
+observational learning | is_a=form of learning | means=learning by watching someone else | requires=a model | causes=behaviour spreading without anyone being taught
+
+# --- thinking and its systematic errors --------------------------------------------------------------- #
+heuristic | is_a=mental shortcut | purpose=deciding quickly with limited information | causes=cognitive bias
+cognitive bias | is_a=systematic error in reasoning | occurs_when=a heuristic is applied where it does not fit
+confirmation bias | means=seeking and weighting evidence that fits what is already believed | causes=beliefs surviving evidence against them
+availability heuristic | is_a=heuristic | means=judging how likely something is by how easily an example comes to mind | causes=overestimating vivid and recent risks
+anchoring | means=staying close to the first number considered | causes=estimates being pulled by an irrelevant starting point
+hindsight bias | means=believing after the fact that the outcome was predictable | causes=underrating how uncertain a decision was
+fundamental attribution error | is_a=cognitive bias | means=explaining others by their character and yourself by your situation
+loss aversion | is_a=finding | means=that a loss hurts more than an equal gain pleases | causes=avoiding risk when framed as a loss
+framing effect | is_a=finding | means=that the same choice is made differently depending on how it is described
+dunning kruger effect | is_a=finding | means=that low skill and low awareness of that lack of skill go together
+metacognition | is_a=mental process | means=thinking about your own thinking | purpose=noticing when you do not understand | causes=better study choices
+
+# --- motivation, emotion, and distress -------------------------------------------------------------- #
+motivation | is_a=what moves behaviour towards a goal
+intrinsic motivation | means=doing something because the activity itself is rewarding | causes=more persistence
+extrinsic motivation | means=doing something for a reward outside the activity | causes=behaviour stopping when the reward stops@0.7
+emotion | is_a=mental and bodily response to something significant | purpose=preparing the body to act | has_part=appraisal | has_part=bodily change | has_part=feeling
+stress | is_a=response to demand that exceeds resources | causes=raised cortisol | causes=impaired working memory | causes=poor sleep | occurs_when=demands outstrip control
+chronic stress | is_a=stress that does not let up | causes=weakened immunity | causes=cardiovascular disease@0.7
+anxiety | is_a=response to anticipated threat | purpose=preparing for danger | causes=avoidance | causes=impaired concentration when severe
+depression | is_a=mental health condition | causes=loss of interest | causes=low mood | causes=disturbed sleep | requires=treatment when persistent
+cognitive behavioural therapy | is_a=treatment | purpose=changing the thoughts and behaviours that maintain distress | causes=reduced symptoms in anxiety and depression
+placebo effect | occurs_when=a person expects a treatment to work | causes=real improvement in symptoms | purpose=explaining why trials need a control group
+resilience | is_a=capacity to recover from adversity | requires=social support | causes=better outcomes after stress
+
+# --- people together ------------------------------------------------------------------------------- #
+conformity | is_a=changing behaviour to match a group | occurs_when=the group is unanimous | causes=people agreeing with an answer they can see is wrong
+obedience | is_a=following an instruction from an authority | causes=actions people would not take alone
+bystander effect | is_a=finding | means=that help is less likely when more people are present | occurs_when=responsibility is spread across a crowd
+groupthink | is_a=failure of group decision making | occurs_when=agreement matters more than accuracy | causes=alternatives never being considered
+in group bias | is_a=cognitive bias | means=favouring people seen as part of your own group
+attachment | is_a=bond between a child and a caregiver | purpose=keeping a helpless infant close to protection | causes=a secure base for exploring
+theory of mind | is_a=ability | means=understanding that others have beliefs different from your own | purpose=predicting what someone else will do | occurs_when=a child is around four years old

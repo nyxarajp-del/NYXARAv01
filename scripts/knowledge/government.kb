@@ -1,0 +1,57 @@
+# government.kb — how states are organised and why the parts are separated.
+#
+# `law.kb` covers what law is; this covers who makes it, who applies it, and what stops any one
+# of them from doing all three.
+
+government | is_a=system by which a state is governed | purpose=making and enforcing collective decisions
+state | is_a=political community with a territory and a government | has_part=sovereignty
+sovereignty | is_a=supreme authority within a territory | purpose=deciding who has the final word
+constitution | is_a=founding law of a state | purpose=setting out how power is held and limited | causes=limits on what a government may do
+separation of powers | purpose=stopping one body from making, applying and judging the law | causes=checks and balances | requires=an independent judiciary
+checks and balances | is_a=arrangement | purpose=letting each branch limit the others | causes=slower decisions | causes=harder abuse of power
+rule of law | means=that everyone including the government is subject to the law | purpose=protecting people from arbitrary power
+legislature | purpose=making laws
+executive | purpose=carrying out the laws | has_part=head of government | has_part=civil service
+judiciary | purpose=applying the law to disputes | requires=independence from the executive
+parliament | purpose=debating and passing laws | has_part=upper house | has_part=lower house
+bill | is_a=proposed law | purpose=putting a change before the legislature
+act | is_a=bill that has been passed | purpose=stating the law in force
+veto | is_a=power to reject a decision | purpose=blocking a law the executive opposes | causes=a bill failing unless the legislature overrides it
+cabinet | is_a=group of senior ministers | purpose=directing the departments of the executive
+civil service | is_a=permanent staff of the state | purpose=carrying out policy whichever party is in office | has_property=politically neutral
+bureaucracy | is_a=organisation of officials by rules and offices | purpose=applying the same rule to everyone | causes=predictability | causes=slowness@0.7
+
+# --- forms of government ------------------------------------------------------------------------ #
+democracy | is_a=form of government | means=rule by the people | requires=free elections | requires=freedom of speech | has_kind=direct democracy | has_kind=representative democracy
+representative democracy | is_a=democracy | means=people elect others to decide on their behalf
+republic | is_a=form of government | means=a state whose head is not a monarch
+monarchy | is_a=form of government | means=rule by a hereditary head of state
+constitutional monarchy | is_a=monarchy | means=a monarch whose powers are limited by a constitution
+autocracy | is_a=form of government | means=rule by one person with unchecked power | causes=no lawful way to remove the ruler
+oligarchy | is_a=form of government | means=rule by a small group
+federalism | is_a=arrangement | purpose=letting regions differ while the state holds together
+unitary state | means=one in which the central government holds the power
+devolution | is_a=transfer of powers to a regional body | purpose=bringing decisions closer to those affected
+
+# --- taking part --------------------------------------------------------------------------------- #
+citizenship | is_a=membership of a state | purpose=carrying rights and duties | causes=the right to vote
+election | is_a=procedure | purpose=choosing who holds office | requires=a register of voters | requires=a secret ballot
+suffrage | is_a=the right to vote | purpose=giving each citizen a share in the decision
+secret ballot | is_a=practice | purpose=stopping voters from being pressured | causes=a freer choice
+constituency | is_a=area that elects a representative | purpose=tying a representative to a place
+first past the post | is_a=voting system | means=the candidate with most votes wins | causes=large parties winning more seats than their share of votes
+proportional representation | is_a=voting system | purpose=matching seats to votes | causes=coalition governments being common
+coalition | is_a=government formed by more than one party
+political party | purpose=contesting elections around a shared programme
+opposition | is_a=parties not in government | purpose=scrutinising the government
+manifesto | is_a=statement of what a party would do in office | purpose=letting voters choose between programmes
+census | is_a=count of a population | purpose=planning services and drawing constituencies | occurs_when=a government needs a full picture of who lives where
+public policy | is_a=course of action chosen by a government | purpose=addressing a public problem
+tax | is_a=compulsory payment to the state | purpose=paying for public goods | causes=reduced private spending
+public good | purpose=serving everyone whether or not they paid | causes=free riding when left to the market
+local government | is_a=government of a town or region | purpose=running services close to where people live
+referendum | is_a=vote of the whole electorate on one question | purpose=deciding an issue directly
+judicial review | is_a=procedure | purpose=testing whether a government action was lawful | requires=an independent court
+ombudsman | is_a=official
+freedom of information | is_a=right | purpose=letting citizens see what the state is doing | causes=accountability
+corruption | is_a=misuse of public office for private gain | causes=loss of trust in government | causes=money not reaching what it was meant for | occurs_when=oversight is weak

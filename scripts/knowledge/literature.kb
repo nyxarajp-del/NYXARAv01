@@ -1,0 +1,56 @@
+# literature.kb — what writing does, and by what means.
+#
+# `arts.kb` covers the arts broadly and `language.kb` the linguistic machinery. This covers the
+# forms, the devices, and — the part a fact store usually loses — what each device is *for*.
+
+literature | is_a=written work valued as art | purpose=representing experience in language | has_kind=prose
+poetry | purpose=compressing meaning through sound and form | has_part=metre | has_part=imagery
+prose | is_a=literature | means=writing in ordinary sentences rather than verse | has_kind=novel | has_kind=short story | has_kind=essay
+drama | purpose=being performed rather than read | has_part=stage direction
+novel | is_a=prose | means=an extended fictional narrative | has_part=point of view
+short story | is_a=prose | purpose=achieving a single effect in one sitting
+essay | is_a=prose | purpose=working out a thought in public
+epic | is_a=poetry | means=a long narrative poem about heroic deeds
+sonnet | is_a=poetry | means=a poem of fourteen lines | has_property=a turn of thought near the end
+haiku | is_a=poetry | means=a very short poem in three lines | purpose=fixing one moment
+tragedy | purpose=showing a person destroyed by a flaw or a fate | has_part=hamartia | causes=catharsis in the audience
+comedy | purpose=ending in reconciliation rather than in loss
+satire | is_a=form | purpose=attacking a folly by exaggerating it | requires=a shared target the reader recognises
+allegory | is_a=form | means=a story whose surface stands for something else throughout
+fable | is_a=short story with a moral | purpose=teaching by an example that is not human
+myth | is_a=traditional story | purpose=explaining an origin or a practice within a culture
+
+# --- the machinery ------------------------------------------------------------------------------ #
+plot | is_a=the arrangement of events in a narrative | purpose=making one event follow from another rather than merely after it | has_part=exposition | has_part=rising action | has_part=climax | has_part=resolution
+conflict | is_a=opposition that drives a narrative | purpose=giving the events a direction | has_kind=internal conflict | has_kind=external conflict
+character | is_a=a person in a narrative | has_kind=protagonist | has_kind=antagonist | has_kind=foil
+protagonist | means=the one whose choices the story follows
+foil | is_a=character | purpose=showing another character more clearly by contrast
+point of view | is_a=the position from which a story is told | purpose=deciding what the reader can know | has_kind=first person | has_kind=third person limited | has_kind=omniscient
+unreliable narrator | is_a=point of view | means=a narrator the reader has reason to doubt | causes=the reader reading against the telling
+setting | is_a=where and when a narrative takes place | purpose=constraining what can happen
+theme | is_a=the idea a work keeps returning to | means=what the work is about beneath what happens in it
+tone | is_a=the attitude a work takes to its subject
+motif | is_a=a recurring image or idea | purpose=binding a work together by repetition
+symbol | is_a=a thing that stands for an idea | purpose=carrying meaning that is not stated
+imagery | is_a=language that appeals to the senses | purpose=making a scene present rather than described
+metaphor | purpose=carrying the structure of one idea onto another
+simile | means=a comparison made with like or as
+personification | is_a=figure of speech | means=giving human qualities to something that is not human
+irony | means=saying one thing while the situation says another | has_kind=verbal irony | has_kind=dramatic irony | has_kind=situational irony
+dramatic irony | is_a=irony | occurs_when=the audience knows what a character does not | causes=tension
+foreshadowing | is_a=technique | purpose=preparing the reader for what is to come | causes=an ending feeling earned rather than arbitrary
+flashback | is_a=technique | purpose=giving the reader a past event where it now matters
+in medias res | is_a=technique | means=beginning in the middle of the action | purpose=engaging the reader before explaining
+stream of consciousness | is_a=technique | purpose=rendering thought as it runs rather than as it is reported
+metre | is_a=the regular rhythm of a line of verse | purpose=giving a poem a pulse | has_kind=iambic pentameter
+iambic pentameter | is_a=metre | means=five pairs of an unstressed then a stressed syllable
+rhyme | is_a=matching sounds at the ends of lines | purpose=binding lines together and aiding memory
+alliteration | is_a=repetition of an initial consonant sound | purpose=drawing lines together by sound
+free verse | is_a=poetry without regular metre or rhyme | purpose=letting the form follow the sense
+enjambment | is_a=running a sentence past the end of a line | causes=a pull across the line break
+catharsis | is_a=effect on an audience | means=the release of pity and fear | occurs_when=a tragedy reaches its end
+canon | is_a=the set of works a culture treats as central | causes=some works being taught and others forgotten
+literary criticism | is_a=activity | purpose=arguing about what a work means and how it works | requires=close reading
+close reading | is_a=method | purpose=basing a claim about a work on its exact words | requires=the text itself
+genre | is_a=a category of work with shared conventions | purpose=setting the reader's expectations | causes=a work being read against what its kind usually does

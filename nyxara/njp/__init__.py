@@ -346,6 +346,25 @@ from nyxara.njp.mathsolver import Solution as SolvedProblem
 # `NJPBrain.sit_corpus_exam` are its in-process entry points.
 from nyxara.njp.corpus import CorpusRecord, CorpusVerdict, verify_corpus_answer
 from nyxara.njp.corpussolver import CorpusReading, CorpusSolver
+# The explanation organ. `nyxara.njp.explainschool` is kept out for the same reason
+# `discourseschool` is: it carries a `__main__` and is an examination rather than a faculty.
+#
+# `Explanation` is aliased, and the alias is why this comment exists. The namespace check that
+# V.34 paid seven commits to learn was run before these five names went in, and it caught one:
+# `nyxara.njp.predictive.Explanation` — the account a predictive model gives of a surprise — was
+# already here, imported further down, and would have silently won the collision. Same word, two
+# organs, both entitled to it; the export list is the wrong place to settle that, so the newer one
+# takes a qualified name here and keeps its own where it lives. `ClaimLedger`, `TurnAnticipation`
+# and `TurnSurprise` above are the same decision made three times before.
+from nyxara.njp.explain import (
+    Chain,
+    Explainer,
+    Explanation as CausalExplanation,
+    Plan,
+    Step,
+)
+from nyxara.njp.explainread import read_explanation_question
+
 # The communication organ is imported; `nyxara.njp.discourseschool` carries a `__main__` and is
 # kept out for the reason `corpusschool` is — `NJPBrain.go_to_discourse_school` is its in-process
 # entry point.
@@ -507,6 +526,8 @@ __all__ = [
     "ActLearner", "Alternation", "TurnAnticipation", "Claim", "ClaimVerdict", "ClosedClassLearner", "Communicator", "Connective", "Expectation",
     "Exchange", "Figure", "Footing", "Induction", "Interpretation", "ClaimLedger", "Link", "Minds", "Readings", "Reference",
     "Register", "Reply", "Resolution", "Retelling", "Scale", "Standing", "TurnSurprise", "Uptake",
+    # NJP V.36 — what, how and why (njp/explain.py)
+    "Chain", "Explainer", "CausalExplanation", "Plan", "Step", "read_explanation_question",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions

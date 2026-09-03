@@ -1,0 +1,48 @@
+# sociology.kb — how people in groups produce patterns none of them chose.
+#
+# `society.kb` names the institutions. This is about the mechanisms: what a norm does, how a role
+# constrains, why inequality persists once it exists.
+
+sociology | is_a=study of society and social behaviour | purpose=explaining patterns that hold across many people rather than the choices of one
+social structure | is_a=the arrangement of roles and institutions in a society | causes=behaviour patterns that outlast the individuals in them
+social norm | is_a=shared expectation about how to behave | purpose=making other people predictable | causes=sanction when broken | occurs_when=a behaviour is repeated and expected
+sanction | is_a=response to breaking or keeping a norm | purpose=enforcing the norm | has_kind=formal sanction | has_kind=informal sanction
+role | is_a=set of expectations attached to a position | purpose=telling a person what is required of them here | causes=role conflict when two roles demand opposite things
+status | is_a=social position | means=the position a person holds in a social structure | has_kind=ascribed status | has_kind=achieved status
+ascribed status | is_a=status | means=one a person is born into
+achieved status | is_a=status | means=one a person attains
+socialisation | is_a=process | purpose=teaching a person the norms and roles of their society | occurs_when=a child grows up among others | causes=norms feeling natural rather than chosen
+institution | is_a=durable pattern of rules and roles | purpose=organising a recurring part of social life | has_kind=family | has_kind=school | has_kind=religion | has_kind=market | has_kind=state
+culture | means=the shared meanings, practices and objects of a group | causes=members interpreting the same event alike | requires=transmission across generations
+subculture | is_a=culture within a larger culture | occurs_when=a group's practices diverge from the mainstream
+social capital | is_a=the value of a person's network of relationships | purpose=giving access to help, information and opportunity | causes=advantage that is invisible in a list of qualifications
+social mobility | is_a=movement between social positions | purpose=measuring how open a society is | requires=access to education | requires=jobs that reward skill
+social stratification | is_a=arrangement of people in ranked layers | causes=unequal access to resources | has_kind=class | has_kind=caste
+class | is_a=stratum defined by economic position | causes=differences in health and life expectancy
+inequality | is_a=unequal distribution of resources | causes=differences in life chances | occurs_when=advantage can be passed to the next generation
+cumulative advantage | is_a=mechanism | means=that a small early advantage compounds into a large later one | causes=inequality persisting without anyone intending it
+discrimination | is_a=treating people differently because of a group they belong to | causes=unequal outcomes | causes=exclusion from opportunity
+prejudice | is_a=judgement about a person based on their group | causes=discrimination
+stereotype | means=a simplified belief about what members of a group are like | causes=prejudice | occurs_when=a group is known mostly at a distance
+stigma | is_a=mark that discredits a person in the eyes of others | causes=concealment | causes=withdrawal from help seeking
+social exclusion | is_a=being shut out of ordinary participation | causes=poor health | causes=poverty deepening
+urbanisation | is_a=the movement of population into cities | causes=growth of cities | occurs_when=work concentrates in cities
+migration | is_a=movement of people to live elsewhere | occurs_when=conditions elsewhere are better or conditions at home are unbearable | causes=change in both the place left and the place arrived at
+demography | is_a=study of populations | purpose=describing how a population changes | has_part=birth rate | has_part=death rate | has_part=migration
+ageing population | is_a=demographic change | occurs_when=birth rates fall and life expectancy rises | causes=fewer workers per retired person | causes=pressure on pensions and health care
+family | is_a=institution | purpose=raising children and pooling resources | has_kind=extended family
+gender role | is_a=role assigned on the basis of gender | causes=different expectations for the same behaviour | occurs_when=socialisation treats children differently by gender
+division of labour | is_a=arrangement | means=different people specialising in different tasks | causes=greater output | causes=dependence between specialists
+solidarity | is_a=the bond that holds a group together | has_kind=mechanical solidarity | has_kind=organic solidarity
+anomie | is_a=condition | means=a state in which shared norms have broken down | occurs_when=society changes faster than its norms | causes=disorientation
+alienation | is_a=condition | means=feeling separated from your work, its product, or other people | occurs_when=work is fragmented and controlled by others
+collective behaviour | is_a=behaviour of people acting together outside institutions | has_kind=crowd | has_kind=moral panic | has_kind=social movement
+moral panic | is_a=collective behaviour | occurs_when=a group is portrayed as a threat out of proportion to the evidence | causes=demands for control
+social movement | is_a=organised collective effort to change something | requires=a shared grievance | requires=resources and organisation | causes=change in law or in norms
+bureaucratisation | is_a=process | causes=decisions being made by rule rather than by person | causes=predictability | causes=impersonal treatment
+globalisation | is_a=process | means=the increasing interconnection of places through trade, travel and communication | causes=cultural exchange | causes=local industries facing distant competition
+network effect | is_a=mechanism | occurs_when=a thing becomes more useful as more people use it | causes=a few platforms coming to dominate
+self fulfilling prophecy | is_a=mechanism | occurs_when=a belief about a situation changes behaviour so as to make the belief true | causes=expectations producing the outcome they predicted
+qualitative research | is_a=method | purpose=understanding meaning and process in depth | requires=interviews or observation
+quantitative research | is_a=method | purpose=measuring how widespread a pattern is | requires=a sample that represents the population
+sampling bias | is_a=error | occurs_when=the sample is not representative of the population | causes=conclusions that do not generalise

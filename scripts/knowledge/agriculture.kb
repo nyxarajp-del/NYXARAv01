@@ -1,0 +1,59 @@
+# agriculture.kb — growing food, and the causal chains that decide whether it works.
+#
+# `plants.kb` covers botany and `food.kb` covers what is eaten. This is the practice: soil, water,
+# pests, and the reasons a yield rises or collapses.
+
+agriculture | is_a=practice of growing crops and raising animals for food and materials | purpose=feeding a population | requires=land | requires=labour | has_kind=arable farming | has_kind=pastoral farming | has_kind=mixed farming
+arable farming | is_a=agriculture | means=growing crops on ploughed land
+pastoral farming | is_a=agriculture | means=raising grazing animals
+subsistence farming | is_a=agriculture | means=growing mainly to feed the farmer's own household
+commercial farming | is_a=agriculture | means=growing mainly for sale
+crop | is_a=plant grown for food or material | has_kind=pulse | has_kind=oilseed
+cereal | purpose=providing the bulk of dietary energy
+pulse | is_a=crop | purpose=providing protein | causes=nitrogen being added to the soil | has_kind=lentil | has_kind=chickpea | has_kind=bean
+cash crop | purpose=being sold rather than eaten by the grower | has_kind=coffee
+
+# --- soil ---------------------------------------------------------------------------------------- #
+soil | is_a=the layer of weathered rock and organic matter plants grow in | has_part=mineral particles | has_part=organic matter | has_part=water | has_part=air | has_part=soil organisms
+soil fertility | is_a=the soil's capacity to supply nutrients | requires=soil organisms
+humus | is_a=decomposed organic matter in soil | purpose=holding water and nutrients | causes=better soil structure
+soil structure | is_a=how soil particles are grouped | purpose=letting roots, water and air move through | causes=poor drainage when destroyed
+soil erosion | is_a=loss of topsoil | occurs_when=soil is left bare and exposed to rain or wind | causes=falling yield | causes=silting of rivers | requires=nothing holding the soil in place
+soil compaction | is_a=condition | occurs_when=heavy machinery is driven over wet soil | causes=roots being unable to penetrate | causes=water pooling on the surface
+salinisation | is_a=build up of salt in soil | occurs_when=irrigation water evaporates and leaves its salts behind | causes=land becoming unusable | occurs_when=drainage is poor
+nutrient depletion | is_a=condition | occurs_when=the same crop takes the same nutrients year after year | causes=falling yield | requires=nothing being returned to the soil
+nitrogen fixation | purpose=turning air nitrogen into a form plants can use | requires=rhizobium bacteria | occurs_when=a legume is grown | causes=nitrogen being added to the soil
+
+# --- what a crop needs ----------------------------------------------------------------------------- #
+germination | occurs_when=a seed has water, warmth and air | causes=a seedling emerging
+irrigation | purpose=supplying water where rain is not enough | causes=higher and more reliable yield | causes=salinisation when drainage is poor | has_kind=drip irrigation | has_kind=canal irrigation | has_kind=sprinkler irrigation
+drip irrigation | is_a=irrigation | purpose=delivering water directly to the root | causes=much less water being used | causes=less weed growth between rows
+fertiliser | is_a=material added to soil | purpose=supplying nutrients a crop needs | causes=runoff of nutrients into water when overapplied
+manure | purpose=returning nutrients and organic matter to the soil | causes=better soil structure
+compost | purpose=turning plant waste into a soil improver | requires=decomposition
+eutrophication | occurs_when=nutrients run off into a lake or river | causes=oxygen being used up as the algae decay | causes=fish dying
+pesticide | is_a=chemical used to kill pests | purpose=protecting a crop from being eaten | causes=resistant pests when overused | causes=harm to pollinators@0.6
+herbicide | is_a=chemical used to kill weeds | purpose=stopping weeds competing with the crop
+pest resistance | is_a=condition | occurs_when=the same pesticide is used repeatedly | causes=the pesticide ceasing to work
+integrated pest management | is_a=practice | purpose=controlling pests with the least chemical use | requires=monitoring pest numbers | causes=slower development of resistance
+pollination | is_a=process | purpose=transferring pollen so a plant can set seed | requires=pollinators or wind | causes=fruit and seed forming
+pollinator | is_a=animal that carries pollen | purpose=enabling many crops to fruit
+
+# --- how land is managed ----------------------------------------------------------------------------- #
+crop rotation | means=growing different crops on the same field in successive seasons | purpose=breaking pest cycles and restoring nutrients | causes=better soil fertility
+monoculture | purpose=simplifying planting and harvest | causes=pests spreading easily | causes=nutrient depletion
+fallow | is_a=practice | means=leaving land uncropped for a season | purpose=letting soil recover moisture and nutrients
+tillage | is_a=practice | means=turning the soil before planting | purpose=loosening soil and burying weeds | causes=erosion when overdone
+no till farming | is_a=practice | purpose=planting without ploughing | causes=less erosion | causes=more organic matter retained
+terracing | is_a=practice | purpose=farming a slope without losing soil | causes=less runoff | occurs_when=land is steep
+agroforestry | is_a=practice | means=growing trees among crops | purpose=holding soil and providing shade and fuel | causes=less erosion
+greenhouse | is_a=structure | purpose=growing plants in a controlled climate | causes=a longer growing season
+harvest | purpose=gathering a crop when it is ready
+storage | is_a=activity | purpose=keeping a harvest until it is needed | requires=dryness | requires=protection from pests | causes=loss when either fails
+food security | means=that everyone has reliable access to enough safe food
+famine | is_a=extreme scarcity of food | occurs_when=production fails and distribution cannot make it up | causes=displacement of people
+livestock | is_a=animals raised for food, fibre or work | requires=fodder | requires=water
+fodder | is_a=food grown for livestock | purpose=feeding animals through the year
+overgrazing | is_a=condition | occurs_when=more animals graze than the land can support | causes=loss of plant cover | causes=soil erosion
+green revolution | is_a=historical change in agriculture | means=the spread of high yielding varieties, fertiliser and irrigation | causes=a large rise in cereal yields | causes=greater dependence on inputs and water
+organic farming | is_a=practice | purpose=growing without synthetic fertiliser or pesticide | causes=lower yield per hectare@0.7 | causes=less chemical runoff
