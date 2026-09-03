@@ -1207,3 +1207,79 @@ def test_she_can_say_what_a_turn_will_take_and_when_it_takes_nothing():
     assert voice.strategy("The barrel was opened by Kiran.") == ("alternation", "ledger")
     assert voice.strategy("He carried the barrel.") == ("reference", "ledger")
     assert voice.strategy("What is the barrel?") == ()
+
+
+# --------------------------------------------------------------------------- #
+# 15 · standing, and what a turn conveys without saying it
+# --------------------------------------------------------------------------- #
+
+def _instructing(voice, chief="chief", hand="hand", rounds=4):
+    for index in range(rounds):
+        voice.hear(f"Open the thing{index}.", speaker=chief)
+        voice.hear(f"The thing{index} is open.", speaker=hand)
+    return voice
+
+
+def _taught_accept(voice):
+    for what in ("gate", "lock", "vault"):
+        voice.show_exchange(f"Open the {what}.", f"The {what} is open.", "accept")
+    return voice
+
+
+def test_who_defers_to_whom_is_counted_rather_than_declared():
+    voice = _instructing(_taught_accept(Communicator()))
+    assert voice.standing.footing("chief", "hand").lean > 0.5
+    assert voice.standing.footing("hand", "chief").lean < -0.5
+    assert voice.standing.footing("chief", "hand").settled
+
+
+def test_an_exchange_running_both_ways_settles_nothing():
+    """Two colleagues who each answer the other are exactly as informative as strangers."""
+    voice = _taught_accept(Communicator())
+    for index in range(3):
+        voice.hear(f"Open the a{index}.", speaker="one")
+        voice.hear(f"The a{index} is open.", speaker="two")
+        voice.hear(f"Open the b{index}.", speaker="two")
+        voice.hear(f"The b{index} is open.", speaker="one")
+    assert not voice.standing.footing("one", "two").settled
+
+
+def test_one_exchange_is_not_a_relationship():
+    voice = _taught_accept(Communicator())
+    voice.hear("Open the crate.", speaker="one")
+    voice.hear("The crate is open.", speaker="two")
+    got = voice.standing.footing("two", "one")
+    assert not got.settled
+
+
+def test_nothing_between_two_speakers_reports_nothing():
+    got = Communicator().standing.footing("a", "b")
+    assert not got.settled and got.lean == 0.0
+    assert "nothing has passed between them" in got.why
+
+
+def test_which_words_form_a_scale_is_learned():
+    voice = Communicator()
+    assert voice.scale.read("Some of the guards passed.") is None
+    voice.show_scale("Some of the guards passed.", weaker="some", stronger="all")
+    voice.show_scale("Some of the crates arrived.", weaker="some", stronger="all")
+    got = voice.scale.read("Some of the barrels leaked.")
+    assert got is not None and got.text == "not all"
+    assert voice.scale.read("The barrels leaked.") is None
+
+
+def test_one_sentence_does_not_establish_a_scale():
+    voice = Communicator()
+    voice.show_scale("Some of the guards passed.", weaker="some", stronger="all")
+    assert voice.scale.read("Some of the barrels leaked.") is None
+
+
+def test_an_implicature_is_cancellable_and_never_reaches_the_ledger():
+    """*"Some passed, in fact all did"* is not a contradiction, and a store that filed the
+    implicature would have made it one."""
+    voice = Communicator()
+    voice.show_scale("Some of the guards passed.", weaker="some", stronger="all")
+    voice.show_scale("Some of the crates arrived.", weaker="some", stronger="all")
+    voice.hear("Some of the barrels leaked.")
+    voice.hear("All of the barrels leaked.")
+    assert not any(claim.contested for claim in voice.ledger.claims)

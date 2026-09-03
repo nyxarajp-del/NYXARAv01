@@ -61,8 +61,8 @@ __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
     "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
     "Anticipating", "ExchangeSubject", "Alternations", "Anchor", "Vocabulary", "Retell",
-    "Adversarial", "CrossDomain", "Unseen", "Method", "Retraining", "Grounded", "Tongue",
-    "Wiring",
+    "StandingSubject", "Implicature", "Adversarial", "CrossDomain", "Unseen", "Method",
+    "Retraining", "Grounded", "Tongue", "Wiring",
     "DiscourseSchool", "SUBJECTS", "main",
 ]
 
@@ -759,6 +759,122 @@ class Alternations(DiscourseSubject):
         who, what = mint.word(), mint.word()
         self.mark(score, misses, got=voice.alternation.read(f"{who} opened the {what}."),
                   want=None, item="an active sentence reaches no mapping", silence=object())
+        return score, misses
+
+
+class StandingSubject(DiscourseSubject):
+    """Who defers to whom, and the two conversations that must not produce an answer.
+
+    The relationship half of the Master's sixth test. Two things in a transcript bear on it and
+    both are counted rather than judged: who complies with whose instructions, and who answers
+    whose questions. Neither is a word anybody says, so neither can be faked by phrasing.
+
+    **Half the paper is abstention**, and it is the half that decides whether this is a reading or
+    a prejudice. A conversation with the traffic running both ways has no settled footing, and one
+    with almost nothing in it has none either — reporting a lean on those would be inventing a
+    hierarchy out of a conversation.
+    """
+
+    id = "standing"
+    title = "who defers to whom"
+    teaches = "nothing beyond the exchange pairs — the footing is counted, not demonstrated"
+    items = 8
+
+    def _fresh(self, mint: Mint) -> Communicator:
+        voice = Communicator()
+        for _ in range(2):
+            what, state = mint.word(), mint.word()
+            voice.show_exchange(f"Open the {what}.", f"The {what} is {state}.", "accept")
+        return voice
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        score, misses = Score(), []
+        for _ in range(2):                       # one gives instructions, one carries them out
+            voice = self._fresh(mint)
+            for _ in range(4):
+                what, state = mint.word(), mint.word()
+                voice.hear(f"Open the {what}.", speaker="chief")
+                voice.hear(f"The {what} is {state}.", speaker="hand")
+            self.mark(score, misses, got=voice.standing.footing("chief", "hand").lean > 0.5,
+                      want=True, item="the one whose instructions are carried out")
+            self.mark(score, misses, got=voice.standing.footing("hand", "chief").lean < -0.5,
+                      want=True, item="and the one who carries them out")
+        for _ in range(2):                       # traffic both ways: no footing
+            voice = self._fresh(mint)
+            for _ in range(3):
+                what, state = mint.word(), mint.word()
+                voice.hear(f"Open the {what}.", speaker="one")
+                voice.hear(f"The {what} is {state}.", speaker="two")
+                other, mark = mint.word(), mint.word()
+                voice.hear(f"Open the {other}.", speaker="two")
+                voice.hear(f"The {other} is {mark}.", speaker="one")
+            self.mark(score, misses, got=voice.standing.footing("one", "two").settled,
+                      want=False, item="an exchange running both ways settles nothing")
+        for _ in range(2):                       # and almost nothing said at all
+            voice = self._fresh(mint)
+            what, state = mint.word(), mint.word()
+            voice.hear(f"Open the {what}.", speaker="one")
+            voice.hear(f"The {what} is {state}.", speaker="two")
+            self.mark(score, misses, got=voice.standing.footing("two", "one").settled,
+                      want=False, item="one exchange is not a relationship")
+        return score, misses
+
+
+class Implicature(DiscourseSubject):
+    """*"Some of them passed"* conveys that not all did, and which words scale is learned.
+
+    ``social.dialogue`` has had a regular expression for this since it was written. Which words
+    form a scale is a fact about a language's **words**, not about implicature, and a module that
+    ships the pair cannot be told about a language that scales differently.
+
+    Two halves. The implicature is drawn on a sentence sharing no content with any lesson — and it
+    **never reaches the ledger**, because an implicature is cancellable: *"some passed, in fact
+    all did"* is not a contradiction, and a store that had filed it would have made it one.
+    """
+
+    id = "implicature"
+    title = "what a turn conveys without saying it"
+    teaches = "which words sit below which on a scale"
+    items = 8
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.student
+        for _ in range(2):
+            voice.show_scale(f"Some of the {mint.word()} passed.", weaker="some", stronger="all")
+            voice.show_scale(f"The {mint.word()} was warm.", weaker="warm", stronger="hot")
+        return Taught(4, f"scales {voice.scale.stats()['scales']}")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.student
+        score, misses = Score(), []
+        for _ in range(2):
+            got = voice.scale.read(f"Some of the {mint.word()} leaked.")
+            self.mark(score, misses, got=(got.text if got else ""), want="not all",
+                      item="some → not all", silence="")
+        for _ in range(2):
+            got = voice.scale.read(f"The {mint.word()} was warm.")
+            self.mark(score, misses, got=(got.text if got else ""), want="not hot",
+                      item="warm → not hot", silence="")
+        for _ in range(2):                       # a word on no scale implies nothing
+            self.mark(score, misses, got=voice.scale.read(f"The {mint.word()} arrived."),
+                      want=None, item="a word on no scale", silence=object())
+        # And the load-bearing half: an implicature is not a claim.
+        for _ in range(2):
+            fresh = Communicator()
+            fresh.scale = voice.scale
+            what = mint.word()
+            fresh.hear(f"Some of the {what} passed.")
+            fresh.hear(f"All of the {what} passed.")
+            self.mark(score, misses, got=any(c.contested for c in fresh.ledger.claims),
+                      want=False, item="cancelling an implicature is not a contradiction")
         return score, misses
 
 
@@ -1567,8 +1683,8 @@ class Wiring(DiscourseSubject):
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
     Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating, ExchangeSubject,
-    Alternations, Anchor, Vocabulary, Retell, Adversarial, CrossDomain, Unseen, Method,
-    Retraining,
+    Alternations, Anchor, Vocabulary, Retell, StandingSubject, Implicature,
+    Adversarial, CrossDomain, Unseen, Method, Retraining,
     ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject, Grounded,
     Tongue, Wiring,
 )

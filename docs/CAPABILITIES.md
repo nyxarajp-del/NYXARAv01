@@ -3094,6 +3094,38 @@ are covered from any two by the generalisation levels, so the first round scored
 nothing for a targeted round to be targeted at. Six different skeletons are separable, and the exam
 names the construction in each item so the next lesson can read the failures back out.
 
+#### NJP V.33 — where two speakers stand, and what a turn conveys without saying it
+
+The gap report left the Master's sixth test half answered: *meaning depends on speaker, listener,
+relationship and goal*, and the module knew who was speaking and had **nothing whatever** to say
+about how the two stood to each other.
+
+Two things in a transcript bear on that and both were already being tracked: **who complies with
+whose instructions**, and **who answers whose questions**. Neither is a word anybody says, so
+neither can be faked by phrasing, and both are counted rather than judged.
+
+**Half the paper is abstention, and it is the half that decides whether this is a reading or a
+prejudice.** An exchange with the traffic running both ways settles nothing — two colleagues who
+each answer the other are exactly as informative as strangers. One exchange is not a relationship.
+And two speakers with nothing between them report nothing at all.
+
+It is a reading of **one transcript** and not a claim about status in the world. A transcript where
+the Master happens to answer three of her questions is not evidence that she outranks him, which is
+why it is reported rather than acted on and why nothing in the safety core reads it.
+
+Beside it, **scalar implicature**. `social.dialogue` has had a regular expression for it since it
+was written, and that is exactly the objection V.26 answered: `some` being weaker than `all` is a
+fact about English *words*, not about implicature, and a module that ships the pair cannot be told
+about a language that scales differently or about a scale English has and nobody listed. A scale
+must be demonstrated in **two different sentences** before it is kept.
+
+**And an implicature is reported and never filed.** *"Some of the barrels leaked"* then *"all of
+the barrels leaked"* is a cancellation, not a contradiction — a store that had filed the
+implicature as a claim would have made it one, and a test asserts the ledger stays clean.
+
+    standing      a floor, and half its paper is abstention
+    implicature   0.50 -> 1.00     scales {'some': 'all', 'warm': 'hot'}
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -3115,6 +3147,8 @@ names the construction in each item so the next lesson can read the failures bac
   unseen             0.50   1.00   +0.50       0  (fixed at the subordinator)
   method             1.00   1.00   +0.00       0  already
   retraining         0.00   1.00   +1.00      12  LEARNED
+  standing           1.00   1.00   +0.00       0  already (half its paper is abstention)
+  implicature        0.50   1.00   +0.50       4  LEARNED
   reference          0.80   1.00   +0.20       9  LEARNED
   contradiction      0.75   1.00   +0.25      10  LEARNED
   memory             0.50   1.00   +0.50      10  LEARNED
@@ -3125,12 +3159,12 @@ names the construction in each item so the next lesson can read the failures bac
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      24/24 subjects
-  learned       15 subject(s) moved by teaching
-  overall       209/209 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  mastered      26/26 subjects
+  learned       16 subject(s) moved by teaching
+  overall       225/225 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       209/209 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       225/225 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
 **Four of those floors did not exist before the second pass.** `reference`, `contradiction`,

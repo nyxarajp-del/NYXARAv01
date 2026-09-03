@@ -34,7 +34,7 @@ four is now a subject on the report card with a floor, a lesson and a gain. The 
 — the pronouns, the copula, the factive subordinators, the time words — are the closed class
 :mod:`nyxara.njp.semantics` already defends, where a list is the honest representation.
 
-Thirteen organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather
+Fifteen organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather
 than a new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
 something nobody demonstrated; where two readings survive the answer is that there are two.**
 
@@ -107,7 +107,24 @@ lacks, the reading is flagged figurative and nothing is filed. Where there are n
 the new subject's kinds are unknown, **nothing is claimed** — with an empty store no sentence is
 figurative, and that is the correct answer rather than a limitation to apologise for.
 
-**7 · Which of a language's words are its closed class, found rather than typed**
+**7 · Where two speakers stand to each other, and what a turn conveys without saying it**
+(:class:`Standing`, :class:`Scale`). The Master's sixth test says meaning depends on speaker,
+listener, **relationship** and goal, and the relationship was the half this module could not
+touch. Two things in a transcript bear on it and both were already tracked: who complies with
+whose instructions, and who answers whose questions. Neither is a word anybody says, so neither
+can be faked by phrasing, and both are counted rather than judged. **It abstains loudly** — an
+exchange running both ways settles nothing, and one exchange is not a relationship. It is a
+reading of one transcript and not a claim about status in the world, which is why nothing in the
+safety core reads it.
+
+Beside it, scalar implicature, and it is here rather than left to
+:mod:`nyxara.social.dialogue`'s regular expression for the reason everything else was rebuilt in
+V.26: ``some`` being weaker than ``all`` is a fact about English **words**, not about
+implicature. A scale must be demonstrated in two different sentences before it is kept, and the
+implicature is **reported and never filed** — *"some passed, in fact all did"* is not a
+contradiction, and a store that had filed it would have made it one.
+
+**8 · Which of a language's words are its closed class, found rather than typed**
 (:class:`ClosedClassLearner`). :mod:`nyxara.njp.semantics` argues that the closed class is the
 half of a language that does not grow and that a list of it is honest. It does not argue — because
 it cannot — that the list should be **hand-written for every language**: 242 words, 197 Latin and
@@ -117,13 +134,13 @@ verb of a language with few verbs; *frequency* alone is worse. It is the product
 fitted where the answer is known — English — and applied to a language she has only overheard, and
 what transfers is the **criterion**, never the words. Unfitted she claims nothing.
 
-**8 · And a translation carries what it can, and says what it cannot** (:class:`Retelling`).
+**9 · And a translation carries what it can, and says what it cannot** (:class:`Retelling`).
 :meth:`~nyxara.njp.language.LanguageFaculty.translate` carries the roles, the polarity, the tense
 and the mood, verified by reading its own output back. The **act** does not cross, and this reports
 that rather than hiding it: an indirect request is a convention of a speech community, and a
 community that has not been shown one does not have it.
 
-**9 · Why, and what for** (:class:`Connective`). The Master's anchor names eleven slots and six
+**10 · Why, and what for** (:class:`Connective`). The Master's anchor names eleven slots and six
 were reachable — entity, relation, time, belief, uncertainty, and space through ``is_at``. The
 three that were not are here. **Cause** is the interesting one: nothing structural separates
 *"A because B"* from *"B so A"*, both being two clauses with a word between, and which of them
@@ -142,7 +159,7 @@ was dark``. And the winner is the **best-supported** candidate rather than the l
 the rule :mod:`nyxara.njp.semantics` and :mod:`nyxara.njp.compile` both state and which this
 class was breaking.
 
-**10 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
+**11 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
 shapes came back unreadable or worse: *"The window was opened by Ravi."*, *"Ravi has been opening
 the door."*, *"He was tired."* and *"Ravi opened the door and Arun the window."* — the last of
 which had a **wrong** reading rather than none, a single claim whose object was ``door arun
@@ -160,7 +177,7 @@ is what *"He was tired."* is. **As a fallback and never an override** — put ah
 it read *"When I visited Delhi last year I was tired."* as a claim about ``tired`` and lost the
 claim the speaker actually made.
 
-**11 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
+**12 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
 :mod:`nyxara.social.common_ground`). The Master listed seventeen things a conversation does and
 eleven of them were unreachable, for one reason: this module read every turn **alone**. What makes
 a turn a clarification rather than an answer is the turn before it. So adjacency pairs are induced
@@ -175,7 +192,7 @@ says and the hearer's next turn acknowledges it, which is Clark's mechanism run 
 implements it. Measured: the same meaning to the same hearer, eighteen words the first time and
 two the second, with the claim itself unchanged — and a fresh hearer still told everything.
 
-**12 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
+**13 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
 The Master's fifth deep mechanism — ``PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`` — and
 this module did not have it at all. Three things are predicted about a turn before it is looked
 at: what the speaker will be *doing*, what they will be *about*, and what it will do to the
@@ -193,7 +210,7 @@ prediction against a reading it wrote is the same self-confirming loop :class:`F
 to have. Measured with that loop closed: the control exchange's act distribution collapsed to one
 successor and reported 1.00 confidence on a sequence built to be unpredictable.
 
-**13 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
+**14 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
 with the telescope."* The evidence that there is an ambiguity at all is in
 :mod:`nyxara.njp.semantics`'s own output: it has no frame for a prepositional phrase after an
 object, so it fuses the two noun phrases into one object string — ``man telescope``, with ``with
@@ -226,6 +243,7 @@ __all__ = [
     "GAP", "MORE", "LEVELS", "REGISTERS", "LICENCE", "UNIVERSAL",
     "Readings", "attachment", "AttachLearner", "Marker", "MarkerLearner",
     "Anticipation", "Expectation", "Surprise", "Exchange", "Pair", "Reply",
+    "Standing", "Footing", "Scale", "Implied",
     "Alternation", "Frame", "Mapping", "frames_of",
     "Connective", "Link", "CAUSE_BEFORE", "CAUSE_AFTER", "GOAL_AFTER",
     "ClosedClassLearner", "Retelling",
@@ -2325,7 +2343,193 @@ def attachment(surface: str, meaning: Optional[Meaning] = None, *,
 
 
 # --------------------------------------------------------------------------- #
-# 8 · the closed class, found rather than shipped
+# 8 · standing — who defers to whom, read off the transcript
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class Footing:
+    """Where two speakers stand to each other, and on what evidence."""
+
+    speaker: str = ""
+    other: str = ""
+    #: Positive when ``speaker`` is the one deferred **to**, negative when they defer.
+    lean: float = 0.0
+    complied: int = 0
+    was_complied_with: int = 0
+    answered: int = 0
+    was_answered: int = 0
+    why: str = ""
+
+    @property
+    def settled(self) -> bool:
+        return abs(self.lean) >= 0.34 and (self.complied + self.was_complied_with
+                                           + self.answered + self.was_answered) >= 3
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"speaker": self.speaker, "other": self.other, "lean": round(self.lean, 4),
+                "settled": self.settled, "complied": self.complied,
+                "was_complied_with": self.was_complied_with, "answered": self.answered,
+                "was_answered": self.was_answered, "why": self.why}
+
+
+class Standing:
+    """Who defers to whom — **counted from the exchange**, never declared.
+
+    The Master's sixth test says meaning depends on speaker, listener, *relationship* and goal,
+    and the relationship was the half of it this module could not touch: it knew who was speaking
+    and had nothing whatever to say about how the two stood to each other.
+
+    Two things in a transcript bear on that and both are already tracked. **Who complies with
+    whose instructions**: one party issues a command and the other's next turn accepts it. And
+    **who answers whose questions**. Neither is a word anybody says, so neither can be faked by
+    phrasing, and both are counted rather than judged.
+
+    **It abstains loudly.** A pair with too little between them, or with the traffic running both
+    ways, has no settled footing and :attr:`Footing.settled` says so. Two colleagues who each
+    answer the other are exactly as informative as strangers, and reporting a lean there would be
+    inventing a hierarchy out of a conversation.
+
+    What it is **not**: a claim about status in the world. It is a reading of one transcript, and
+    a transcript where the Master happens to answer three of her questions is not evidence that
+    she outranks him. That is why it is reported rather than acted on anywhere except
+    :meth:`Register.say`, and why nothing in the safety core reads it at all.
+    """
+
+    def __init__(self) -> None:
+        self.complied: Dict[Tuple[str, str], int] = {}
+        self.answered: Dict[Tuple[str, str], int] = {}
+        self.turns = 0
+
+    def observe(self, *, speaker: str, act: str, before_speaker: str, before_act: str,
+                relation: str = "") -> None:
+        """One turn, in the light of the one before it."""
+        try:
+            self.turns += 1
+            speaker, before_speaker = str(speaker or ""), str(before_speaker or "")
+            if not speaker or not before_speaker or speaker == before_speaker:
+                return
+            key = (speaker, before_speaker)
+            if before_act in ("command", "request") and (
+                    relation == "accept" or act in ("assertion", "exclamation")):
+                self.complied[key] = self.complied.get(key, 0) + 1
+            if before_act in ("question", "polar-question", "ability-question",
+                              "willingness-question") and act == "assertion":
+                self.answered[key] = self.answered.get(key, 0) + 1
+        except Exception:  # noqa: BLE001
+            return
+
+    def footing(self, speaker: str, other: str) -> Footing:
+        """How ``speaker`` stands to ``other``, or a footing that says it does not know."""
+        out = Footing(speaker=str(speaker), other=str(other))
+        try:
+            here, there = (out.speaker, out.other), (out.other, out.speaker)
+            out.complied = self.complied.get(here, 0)
+            out.was_complied_with = self.complied.get(there, 0)
+            out.answered = self.answered.get(here, 0)
+            out.was_answered = self.answered.get(there, 0)
+            mine = out.complied + out.answered
+            theirs = out.was_complied_with + out.was_answered
+            total = mine + theirs
+            if not total:
+                out.why = "nothing has passed between them that bears on it"
+                return out
+            # Positive when the *other* does the complying and the answering.
+            out.lean = (theirs - mine) / total
+            out.why = (f"{theirs} turns of theirs against {mine} of this speaker's, "
+                       f"over {total}")
+            if not out.settled:
+                out.why += " — not enough, or running both ways"
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    def stats(self) -> Dict[str, Any]:
+        return {"turns": self.turns,
+                "complied": {f"{a}→{b}": n for (a, b), n in self.complied.items()},
+                "answered": {f"{a}→{b}": n for (a, b), n in self.answered.items()}}
+
+
+@dataclass
+class Implied:
+    """What a turn conveyed without saying it."""
+
+    kind: str = ""              # ``scalar``
+    trigger: str = ""
+    stronger: str = ""
+    text: str = ""
+    why: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"kind": self.kind, "trigger": self.trigger, "stronger": self.stronger,
+                "text": self.text, "why": self.why}
+
+
+class Scale:
+    """*"Some of them passed"* conveys that not all did — and **which words form a scale is
+    learned**.
+
+    Grice's scalar implicature, and the reason it is here rather than in
+    :mod:`nyxara.social.dialogue` — which has had a regular expression for it since it was
+    written — is the same reason everything else in this module was rebuilt in V.26: ``some``
+    being weaker than ``all`` is a fact about English words, not about implicature, and a module
+    that ships the pair cannot be told about a language that scales differently or about a scale
+    English has and nobody listed.
+
+    A demonstration is a pair — this word is weaker than that one — and it must be given in **two
+    different sentences** before it is kept, so a scale is a fact about the language rather than
+    about one utterance. Untaught, nothing is implied by anything.
+
+    The implicature is **cancellable and is not a claim.** It is reported on the uptake and never
+    reaches the ledger: *"some of them passed, in fact all of them"* is not a contradiction, and a
+    store that had filed the implicature as a fact would have made it one.
+    """
+
+    min_support = 2
+
+    def __init__(self, *, min_support: Optional[int] = None) -> None:
+        if min_support is not None:
+            self.min_support = max(1, int(min_support))
+        self.seen: Dict[Tuple[str, str], Set[Tuple[str, ...]]] = {}
+        self.kept: Dict[str, str] = {}
+        self.shown = 0
+
+    def show(self, surface: str, *, weaker: str, stronger: str) -> None:
+        """Demonstrate that this sentence's ``weaker`` word sits below ``stronger`` on a scale."""
+        try:
+            weaker, stronger = str(weaker).lower().strip(), str(stronger).lower().strip()
+            if not weaker or not stronger or weaker == stronger:
+                return
+            signature = tuple(sorted(t.text for t in tag_tokens(surface)
+                                     if t.tag == Tag.WORD))
+            self.seen.setdefault((weaker, stronger), set()).add(signature)
+            self.shown += 1
+            self.kept = {pair[0]: pair[1] for pair, sigs in self.seen.items()
+                         if len(sigs) >= self.min_support}
+        except Exception:  # noqa: BLE001
+            return
+
+    def read(self, surface: str) -> Optional[Implied]:
+        """The implicature this turn carries, or ``None``."""
+        try:
+            for token in tag_tokens(surface):
+                stronger = self.kept.get(token.text)
+                if not stronger:
+                    continue
+                return Implied(kind="scalar", trigger=token.text, stronger=stronger,
+                               text=f"not {stronger}",
+                               why=f"{token.text!r} was shown sitting below {stronger!r}; "
+                                   f"saying the weaker one conveys that the stronger does not "
+                                   f"hold, and is cancellable")
+            return None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def stats(self) -> Dict[str, Any]:
+        return {"shown": self.shown, "scales": dict(self.kept)}
+
+
+# --------------------------------------------------------------------------- #
+# 10 · the closed class, found rather than shipped
 # --------------------------------------------------------------------------- #
 
 class ClosedClassLearner:
@@ -3329,6 +3533,10 @@ class Uptake:
     #: What this turn is doing to the one before it, and whether that is something she has ever
     #: been shown following such a turn — see :class:`Exchange`.
     reply: Optional[Reply] = None
+    #: Where this turn's speaker stands to the one before them — see :class:`Standing`.
+    footing: Optional[Footing] = None
+    #: What the turn conveyed without saying it — see :class:`Scale`. Reported, never filed.
+    implied: Optional[Implied] = None
     #: The one thing worth asking back, or ``""``. Ordered by what blocks understanding hardest:
     #: an act nobody can read, then a referent nothing settles, then two claims that cannot both
     #: hold.
@@ -3412,6 +3620,10 @@ class Uptake:
             out["surprise"] = self.surprise.to_dict()
         if self.reply is not None and (self.reply.relation or not self.reply.fits):
             out["reply"] = self.reply.to_dict()
+        if self.footing is not None and self.footing.settled:
+            out["footing"] = self.footing.to_dict()
+        if self.implied is not None:
+            out["implied"] = self.implied.to_dict()
         if self.question:
             out["question"] = self.question
         return out
@@ -3453,6 +3665,10 @@ class Communicator:
         self.anticipation = Anticipation()
         #: What counts as a reply to what — see :class:`Exchange`.
         self.exchange = Exchange()
+        #: Who defers to whom, counted from the exchange — see :class:`Standing`.
+        self.standing = Standing()
+        #: Which words sit below which on a scale — see :class:`Scale`.
+        self.scale = Scale()
         #: What both parties have taken as established. Driven from :meth:`hear`, which is the
         #: thing :mod:`nyxara.social.common_ground` has never had: it has been a real model of
         #: given-versus-new since it was written and nothing in this package could put a sentence
@@ -3502,6 +3718,10 @@ class Communicator:
         """Demonstrate that these two sentences mean the same thing, one of them in a shape the
         compiler cannot read — see :meth:`Alternation.show`."""
         self.alternation.show(plain, marked)
+
+    def show_scale(self, surface: str, *, weaker: str, stronger: str) -> None:
+        """Demonstrate that one word sits below another on a scale — see :meth:`Scale.show`."""
+        self.scale.show(surface, weaker=weaker, stronger=stronger)
 
     def show_exchange(self, first: str, second: str, relation: str) -> None:
         """Demonstrate what the second turn is doing to the first — see :meth:`Exchange.show`.
@@ -3553,6 +3773,7 @@ class Communicator:
             # room was dark"* asserts that Devi lit the lamp; the other clause is the reason, and
             # reading the whole sentence as one claim gave an agent of
             # ``devi lit the lamp because the room`` — a phrase, filed as a thing.
+            out.implied = self.scale.read(out.rewritten)
             out.link = self.connective.read(out.rewritten)
             asserted = out.rewritten
             if out.link is not None and out.link.effect:
@@ -3649,6 +3870,12 @@ class Communicator:
                     and out.interpretation is not None:
                 out.reply = self.exchange.read(before.interpretation.intended,
                                                out.interpretation.intended)
+                self.standing.observe(
+                    speaker=out.speaker, act=out.interpretation.intended,
+                    before_speaker=before.speaker,
+                    before_act=before.interpretation.intended,
+                    relation=out.reply.relation if out.reply is not None else "")
+                out.footing = self.standing.footing(out.speaker, before.speaker)
 
             # What the conversation has taken as established, which is what decides how much of a
             # thing needs saying next time — see :meth:`Register.say`.
@@ -3874,7 +4101,9 @@ class Communicator:
                 "alternation": self.alternation.stats(),
                 "connective": self.connective.stats(),
                 "vocabulary": self.vocabulary.stats(),
-                "exchange": self.exchange.stats(), "ground": ground,
+                "exchange": self.exchange.stats(), "standing": self.standing.stats(),
+                "scale": self.scale.stats(),
+                "ground": ground,
                 "anticipation": self.anticipation.stats(),
                 "markers": self.markers.stats(), "attach": self.attach.stats(),
                 "reference": self.reference.stats(), "ledger": self.ledger.stats(),

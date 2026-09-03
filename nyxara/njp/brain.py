@@ -2031,6 +2031,33 @@ class NJPBrain:
             from nyxara.njp.discourse import Retelling
             return Retelling(surface=str(surface or ""), into=str(into))
 
+    def show_scale(self, surface: str, *, weaker: str, stronger: str) -> None:
+        """Demonstrate that one word sits below another on a scale, so *"some passed"* can convey
+        that not all did. Which words scale is a fact about a language's words, not about
+        implicature — see :class:`~nyxara.njp.discourse.Scale`."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_scale(str(surface or ""), weaker=str(weaker),
+                                          stronger=str(stronger))
+        except Exception:  # noqa: BLE001
+            return
+
+    def footing(self, speaker: str, other: str) -> Any:
+        """Where two speakers stand to each other, counted from who complies with whose
+        instructions and who answers whose questions — never declared, and abstaining loudly.
+
+        A reading of one transcript and **not** a claim about status in the world. Nothing in the
+        safety core reads it.
+        """
+        try:
+            if self.discourse is None:
+                from nyxara.njp.discourse import Footing
+                return Footing(speaker=str(speaker), other=str(other))
+            return self.discourse.standing.footing(str(speaker), str(other))
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Footing
+            return Footing(speaker=str(speaker), other=str(other))
+
     def show_cause(self, surface: str, *, cause: str = "", goal: str = "") -> None:
         """Demonstrate which clause of this sentence is the cause, or which is the purpose.
 
