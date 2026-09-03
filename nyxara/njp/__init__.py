@@ -374,6 +374,15 @@ from nyxara.njp.predator import (
     Predator,
     Survival,
 )
+# `Structure` and `Pattern` are aliased for the reason `CausalExplanation` was: the namespace was
+# checked before these went in. `Observation` is free, `Surgeon` and `Fusion` are free.
+from nyxara.njp.surgery import (
+    Observation,
+    Structure as CausalStructure,
+    Surgeon,
+    Verdict as StructureVerdict,
+)
+from nyxara.njp.fusion import Abstraction, Analogy, Fusion, Pattern as ShapePattern
 
 # The communication organ is imported; `nyxara.njp.discourseschool` carries a `__main__` and is
 # kept out for the reason `corpusschool` is — `NJPBrain.go_to_discourse_school` is its in-process
@@ -541,6 +550,9 @@ __all__ = [
     # NJP V.38/V.39 — the question form induced, and the predator over explanations
     "Asking", "QuestionCue", "QuestionFrame",
     "Predator", "ExplanationAttack", "Survival",
+    # NJP V.40 — rival structures, and the same shape in two subjects
+    "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
+    "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions

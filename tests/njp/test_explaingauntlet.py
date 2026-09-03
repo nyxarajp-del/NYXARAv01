@@ -23,11 +23,19 @@ def gauntlet():
 # Nothing here comes from the corpus
 # --------------------------------------------------------------------------- #
 def test_every_world_is_minted_and_holds_only_its_own_item(gauntlet):
-    """A shared store means an item's trap can be defused by an unrelated edge."""
+    """A shared store means an item's trap can be defused by an unrelated edge.
+
+    ``surgery`` is the one paper with an empty world, and that is not an oversight: its item is a
+    hidden structure plus observations **derived** from it, so a fact store would be the answer
+    sitting beside the question. Its truth lives in ``payload``.
+    """
     for attack in ATTACKS:
         for item in gauntlet.items(attack):
+            if attack == "surgery":
+                assert item.world.facts_list == [] and item.payload
+                continue
             assert item.world.facts_list, attack
-            assert len(item.world.facts_list) <= 12, attack
+            assert len(item.world.facts_list) <= 16, attack
 
 
 def test_no_entity_in_the_gauntlet_is_in_the_shipped_corpus(gauntlet):
@@ -39,6 +47,8 @@ def test_no_entity_in_the_gauntlet_is_in_the_shipped_corpus(gauntlet):
         for item in gauntlet.items(attack):
             for fact in item.world.facts_list:
                 assert fact.subject.lower() not in known, f"{attack}: {fact.subject}"
+            for name in (item.payload[0] if attack == "surgery" else ()):
+                assert str(name).lower() not in known, f"{attack}: {name}"
 
 
 def test_the_same_seed_mints_the_same_gauntlet():
@@ -173,9 +183,11 @@ def test_the_walk_is_measured_and_the_gaps_are_where_they_were_recorded():
 
     V.37 floor: wording 0.100, contradiction 0.000, homonym 0.000, legs 0.000 — 0.508 overall.
     V.38:       wording 1.000 on taught cues, homonym 1.000 — 0.707.
-    V.39 now:   contradiction 1.000, legs 1.000 — 0.850. Every zero the floor recorded is closed
-                except ``wording_new``, which is the honest ceiling of an induced grammar rather
-                than a gap: a cue nobody demonstrated is not guessed, and every item is silent.
+    V.39:       contradiction 1.000, legs 1.000 — 0.850.
+    V.40 now:   two new papers, ``surgery`` and ``fusion``, both 1.000 — 0.883. Every zero the
+                floor recorded is closed except ``wording_new``, which is the honest ceiling of an
+                induced grammar rather than a gap: a cue nobody demonstrated is not guessed, and
+                every item comes back silent.
     """
     report = run(limit=24)
     assert report.paper("entities").score == 1.0        # the control
@@ -190,6 +202,10 @@ def test_the_walk_is_measured_and_the_gaps_are_where_they_were_recorded():
     # Closed at V.39, by the predator.
     assert report.paper("contradiction").score == 1.0   # the dispute is reported, not resolved
     assert report.paper("legs").score == 1.0            # joint necessity
+    # Added at V.40, and each falsified: see test_surgery.py and test_fusion.py.
+    assert report.paper("surgery").score == 1.0         # the equivalence class, not a pick
+    assert report.paper("fusion").score == 1.0          # the bijection, not a resemblance
+
     # And the honest ceiling of an induced grammar: a cue nobody demonstrated is not guessed.
     assert report.paper("wording_new").score == 0.0
     assert report.paper("wording_new").silent == report.paper("wording_new").asked

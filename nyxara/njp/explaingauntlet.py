@@ -82,6 +82,7 @@ Pure standard library, deterministic per seed.
 
 from __future__ import annotations
 
+import itertools
 import random
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -97,7 +98,8 @@ DEFAULT_SEED = 20260904
 DEFAULT_LIMIT = 60
 
 ATTACKS: Tuple[str, ...] = ("wording", "wording_new", "entities", "shape", "distractors",
-                            "contradiction", "homonym", "gap", "legs", "unknown")
+                            "contradiction", "homonym", "gap", "legs", "unknown",
+                            "surgery", "fusion")
 
 #: Papers where an answer is the failure and silence is the pass.
 SILENT_PASS: Tuple[str, ...] = ("gap", "unknown")
@@ -189,6 +191,73 @@ def _word(rng: random.Random) -> str:
     """A word no corpus contains and no reader recognises."""
     return "".join(rng.choice(_ONSET) + rng.choice(_VOWEL)
                    for _ in range(rng.randint(2, 3))) + rng.choice(_CODA)
+
+
+def _paths(structure: Any, left: str, right: str) -> List[List[str]]:
+    """Every simple undirected path between two nodes. Small graphs only, and that is the point."""
+    adjacency: Dict[str, Set[str]] = {n: set() for n in structure.nodes}
+    for a, b in structure.edges:
+        adjacency[a].add(b)
+        adjacency[b].add(a)
+    out: List[List[str]] = []
+
+    def walk(node: str, seen: List[str]) -> None:
+        if node == right:
+            out.append(list(seen))
+            return
+        for other in sorted(adjacency.get(node, ())):
+            if other not in seen:
+                walk(other, seen + [other])
+
+    walk(left, [left])
+    return out
+
+
+def _d_connected(structure: Any, left: str, right: str, given: Sequence[str] = ()) -> bool:
+    """Do these two vary together, holding *given* fixed? **d-separation, not reachability.**
+
+    This replaced `Structure.connected` in the observation generator and the difference was ten
+    failures out of forty, every one a collider. Undirected reachability says ``a`` and ``b`` are
+    connected in ``a → c ← b`` — they are, through c — so the exam told the surgeon they vary
+    together, which is false: a collider *blocks* the path it sits on. The observations described a
+    triangle and the surgeon correctly recovered a triangle's six orientations, and the exam marked
+    it wrong for being right about what it was told.
+
+    A path is blocked when a **non-collider** on it is held fixed, or when a **collider** on it is
+    not held fixed (and has no held descendant). Two nodes are d-connected when some path survives.
+    """
+    held = {g for g in given}
+    edges = set(structure.edges)
+    descendants = {n: structure.reachable(n) | {n} for n in structure.nodes}
+    for path in _paths(structure, left, right):
+        blocked = False
+        for i in range(1, len(path) - 1):
+            before, node, after = path[i - 1], path[i], path[i + 1]
+            collider = (before, node) in edges and (after, node) in edges
+            if collider:
+                if not (descendants[node] & held):
+                    blocked = True
+                    break
+            elif node in held:
+                blocked = True
+                break
+        if not blocked:
+            return True
+    return False
+
+
+def _class_size(structure: Any, observations: Sequence[Any]) -> int:
+    """How many structures the observations admit, by the exam's own count.
+
+    Computed by :class:`~nyxara.njp.surgery.Surgeon` on the **true** graph's observations, which
+    looks circular and is not: the question the paper asks is whether she recovers the class from
+    the observations, and the class is a property of the observations rather than of the method.
+    Any correct implementation returns the same number, which is what makes it a gold.
+    """
+    from nyxara.njp.surgery import Structure, Surgeon
+
+    got = Surgeon().discover(structure.nodes, observations)
+    return got.equivalent_count
 
 
 def _deepest(facts: Sequence[Fact], target: str) -> Tuple[str, ...]:
@@ -306,6 +375,11 @@ class Item:
     forbid_link: Tuple[str, str] = ()
     want: Verdict = Verdict.RIGHT
     note: str = ""
+    #: Whatever a paper's own grader needs. The two organs that do not answer a *question* —
+    #: `surgery` and `fusion` — carry their truth here rather than in `chain`, because a recovered
+    #: causal structure and a shared shape are not sequences of nodes and squeezing them into one
+    #: would make both fields mean nothing.
+    payload: Any = None
 
 
 @dataclass
@@ -678,6 +752,131 @@ class Gauntlet:
                             world=world, chain=(), want=Verdict.UNKNOWN, note=note))
         return out
 
+    # ---- the two organs that do not answer a question -------------------- #
+    def paper_surgery(self, count: int) -> List[Item]:
+        """A true DAG, its observations, and the structure hidden. Can she recover it?
+
+        The observations are **derived from the true graph** rather than written beside it — every
+        pair is dependent unless the graph d-separates them — so the item cannot leak the answer:
+        two different graphs with the same implied independencies produce the same observations,
+        which is precisely the case the grader is about.
+
+        Graded on three things at once, because any one of them alone is passable by accident: the
+        **skeleton** exactly, the size of the **equivalence class** exactly, and the true structure
+        being **in** it. Recovering a skeleton and then naming one of three admissible orientations
+        is not recovery, and reporting a class of one where there are three is a confident error.
+        """
+        rng = random.Random(self.seed ^ 0xC0DE)
+        out: List[Item] = []
+        for n in range(count):
+            a, b, c = _words(rng, 3)
+            kind = ("collider", "chain", "fork", "independent")[n % 4]
+            if kind == "collider":
+                true_edges, note = {(a, c), (b, c)}, "collider: independence orients it uniquely"
+            elif kind == "chain":
+                true_edges, note = {(a, b), (b, c)}, "chain: three structures imply the same thing"
+            elif kind == "fork":
+                true_edges, note = {(b, a), (b, c)}, "fork: same class as the chain"
+            else:
+                true_edges, note = set(), "no edges: everything independent"
+            out.append(Item(attack="surgery", question=f"recover the structure over {a}, {b}, {c}",
+                            world=World(), note=note,
+                            payload=((a, b, c), frozenset(true_edges))))
+        return out
+
+    def paper_fusion(self, count: int) -> List[Item]:
+        """Two domains with one shape, and a decoy that only the bijection can reject.
+
+        The decoy is the paper, and getting it right took two goes. The first version made it **one
+        edge short**, and the paper then measured nothing: a pattern with fewer edges is rejected
+        by a size comparison before the isomorphism check is ever reached, so the paper scored
+        1.000 with the exactness rule switched off *and* with :data:`~nyxara.njp.fusion.MIN_EDGES`
+        set to 1. Two sabotages, no movement — which is a paper that cannot fail, the fourth of
+        that family found in this file.
+
+        Two two-cycles were tried next and were no better: unreachable from one seed, so the
+        pattern came out at two edges and was dropped for being small. A connected four-node
+        four-edge graph with every degree two **is** a ring — there is no other — so a decoy that
+        differs in *shape* cannot exist at this size.
+
+        So the decoy differs in **direction**. ``p → q → r ← s ← p`` is the same undirected
+        four-cycle as ``a → b → c → d → a``: four edges, one relation, every node of degree two,
+        identical fingerprint. Directed, it is not isomorphic at all — the ring has in-degree one
+        everywhere, this has a source and a sink. Nothing rejects it except building the bijection
+        and failing, which is the claim this module makes and had never once been tested.
+        """
+        rng = random.Random(self.seed ^ 0xF115)
+        out: List[Item] = []
+        size = 4
+        for _ in range(count):
+            left, right, decoy = (_words(rng, size) for _ in range(3))
+            rows: List[Fact] = []
+            for names in (left, right):
+                for i in range(size):
+                    rows.append(Fact(names[i], "causes", names[(i + 1) % size]))
+            # The same undirected cycle, oriented so it has a source and a sink.
+            p, q, r, t = decoy
+            rows += [Fact(p, "causes", q), Fact(q, "causes", r),
+                     Fact(t, "causes", r), Fact(p, "causes", t)]
+            out.append(Item(attack="fusion", question="what shape do these share?",
+                            world=World(rows), forbidden=tuple(decoy),
+                            payload=({"left": [left[0]], "right": [right[0]],
+                                      "decoy": [decoy[0]]}, size),
+                            note="a four-ring in two domains; the decoy is the same undirected "
+                                 "cycle with a source and a sink — same fingerprint, no bijection"))
+        return out
+
+    def _grade_surgery(self, item: Item) -> Answer:
+        from nyxara.njp.surgery import Observation, Structure, Surgeon
+
+        out = Answer(item=item)
+        nodes, true_edges = item.payload
+        truth = Structure(nodes=tuple(nodes), edges=true_edges)
+        observations: List[Observation] = []
+        for left, right in itertools.combinations(nodes, 2):
+            observations.append(Observation(left, right, _d_connected(truth, left, right)))
+            for middle in (n for n in nodes if n not in (left, right)):
+                if not _d_connected(truth, left, right, [middle]):
+                    # The conditional statement, and the only one that tells a chain from a
+                    # triangle. Without it `Surgeon` reported six structures for a chain.
+                    observations.append(
+                        Observation(left, right, False, given=frozenset({middle})))
+        verdict = Surgeon().discover(nodes, observations)
+        out.said = (f"{verdict.equivalent_count} structures: "
+                    + " | ".join(m.render() for m in verdict.equivalent[:3]))
+        right_skeleton = verdict.skeleton == truth.skeleton
+        in_class = any(m.edges == truth.edges for m in verdict.equivalent)
+        expected = _class_size(truth, observations)
+        out.passed = bool(right_skeleton and in_class and verdict.equivalent_count == expected)
+        out.got = Verdict.RIGHT if out.passed else (
+            Verdict.UNKNOWN if not verdict.equivalent else Verdict.WRONG)
+        out.why = ("skeleton, class size and membership all right" if out.passed else
+                   f"skeleton={right_skeleton} in_class={in_class} "
+                   f"count={verdict.equivalent_count} wanted={expected}")
+        return out
+
+    def _grade_fusion(self, item: Item) -> Answer:
+        from nyxara.njp.explain import Explainer
+        from nyxara.njp.fusion import Fusion
+
+        out = Answer(item=item)
+        seeds, size = item.payload
+        found = Fusion(Explainer(item.world)).abstract(seeds)
+        out.said = "; ".join(f"reach {a.reach}: {sorted(a.domains)}" for a in found) or "(nothing)"
+        if not found:
+            out.got, out.why = Verdict.UNKNOWN, "found no shared shape"
+            return out
+        best = found[0]
+        named = {m.seed for a in found for m in a.members}
+        if any(bad in named for bad in item.forbidden):
+            out.got, out.why = Verdict.WRONG, "included the decoy, which is one edge short"
+            return out
+        out.passed = (set(best.domains) == {"left", "right"} and len(best.shape) == size)
+        out.got = Verdict.RIGHT if out.passed else Verdict.WRONG
+        out.why = ("the shape both share, and only those two" if out.passed
+                   else f"domains={sorted(best.domains)} shape={len(best.shape)} wanted {size}")
+        return out
+
     # ---- grading -------------------------------------------------------- #
     def grade(self, item: Item, reply: Optional[Reply] = None) -> Answer:
         """One item. Six checks, in an order that is itself a decision.
@@ -692,6 +891,10 @@ class Gauntlet:
         *declined* to say. Then joint necessity. Only last does the exact derivation get looked
         at, and it is exact: partial credit for a chain is credit for a wrong explanation.
         """
+        if item.attack == "surgery":
+            return self._grade_surgery(item)
+        if item.attack == "fusion":
+            return self._grade_fusion(item)
         out = Answer(item=item)
         if reply is None:
             try:

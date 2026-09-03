@@ -2107,6 +2107,33 @@ class NJPBrain:
         got = self.explain(question)
         return getattr(got, "survival", None)
 
+    def recover_structure(self, nodes: Sequence[str]) -> Any:
+        """Which causal structures the observations about these things actually support.
+
+        Not a walk of the stored graph — a **recovery** from what was observed, which may disagree
+        with what was stored. Returns a :class:`~nyxara.njp.surgery.Verdict` holding the whole
+        Markov equivalence class, so a caller can ask :meth:`Verdict.holds` whether an arrow is in
+        *every* admissible structure rather than in the one that happened to come first.
+        """
+        try:
+            from nyxara.njp.surgery import Surgeon
+            return Surgeon(self.grounder).discover(list(nodes))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def shared_shape(self, seeds: Dict[str, Sequence[str]]) -> Any:
+        """The abstractions two or more domains turn out to have in common. ``{domain: [seed]}``.
+
+        Cross-domain by construction: two subgraphs from one file are a duplicate, not an analogy.
+        """
+        if self.explainer is None:
+            return []
+        try:
+            from nyxara.njp.fusion import Fusion
+            return Fusion(self.explainer).abstract(dict(seeds))
+        except Exception:  # noqa: BLE001
+            return []
+
     def refresh_explanations(self) -> int:
         """Re-index the walk after the store has grown. Returns the edge count it now sees.
 

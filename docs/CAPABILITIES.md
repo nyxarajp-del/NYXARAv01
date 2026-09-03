@@ -60,6 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39f | Structure discovery and cross-domain abstraction (she does not only walk the stored graph — she recovers which causal structures the *observations* support, reporting a whole Markov equivalence class rather than picking one of three indistinguishable orientations, with add/remove/reverse/merge/split as named operations and an MDL-style score that never overrules the evidence. And she finds subgraphs in different domains that are the same graph under a renaming — a structure-preserving bijection on shape alone, since the vocabularies share nothing — returning one abstraction reaching three domains with every role aligned, and leaving it unnamed) | `nyxara.njp.surgery` + `nyxara.njp.fusion` | NEW |
 | 39e | Self-attack on explanations (`njp/adversary` goes after a *belief*; nothing went after a *composition*, where every fact can be true and the sentence still false. Four attacks, each carrying the stated triple that licenses it: two answers the store says exclude each other — reported as a dispute and never resolved; chains the target `requires` on both sides — a conjunction, not a list; a hop at the confidence floor, marked and not withdrawn; and a stated counterexample. It runs *after* the walk, never inside it, so it cannot suppress its own evidence) | `nyxara.njp.predator` + `nyxara.njp.explaingauntlet` | NEW |
 | 39d | Meaning over spelling (a question's *form* induced from demonstrations rather than listed as regular expressions — the cue is the open-class word left when the topic and the closed class are removed, kept only once two demonstrations differing in topic agree, dropped when two disagree; and an identity firewall so a chain cannot enter a node on one sense of a word and leave on another. The gauntlet's `wording` 0.100 → 1.000 and `homonym` 0.000 → 1.000) | `nyxara.njp.asking` + `nyxara.njp.explain` | NEW |
 | 39c | Explanation (the other two questions a person asks. She answered **what**, and *why* and *how* were not weak in her, they were absent — no relation in any graph is called "why", so an explanation is a **path** and had to be walked. Mechanistic why backwards along production, teleological why forwards along purpose, and never one for the other; a mechanism from parts crossed with what they do; and a procedure's **order derived from its prerequisites**, never told — with every order returned where the telling left two steps free. Over all 42 of the Master's domains, 14 of which had no source file at all) | `nyxara.njp.explain` + `nyxara.njp.explainread` + `nyxara.njp.explainschool` + `scripts/knowledge/*.kb` | NEW |
@@ -3812,6 +3813,113 @@ item comes back silent rather than wrong, and two demonstrations would close it 
 
 Run it: `NJPBrain.hunt_explanation("why does t happen?")`, or read `Explanation.conflict`,
 `.joint` and `.survival` off any answer.
+
+
+#### NJP V.40 — rival structures, and the same shape in two subjects that never met
+
+The last two of the Master's list. **0.850 → 0.883**, on a gauntlet that grew two papers.
+
+##### `njp/surgery.py` — if the graph is wrong, every path through it is wrong
+
+Everything in `njp/explain.py` walks *the* graph, and its only question is which path answers. That
+is a reader, and it has one blind spot no amount of better walking closes.
+
+```
+Model 1:  A → B → C        Model 2:  A → C  and  B → C        Model 3:  A ← B → C
+```
+
+Three structures over the same three names. This module asks **which the evidence supports**, and
+may add, remove, reverse, merge or split to find out.
+
+The evidence is deliberately **not the edges** — asking the graph whether the graph is right is how
+a model confirms itself, and this repository has made that mistake twice. It is *observations*:
+`depends_on` and `independent_of`, which say nothing about direction. From those the structure is
+recovered in three steps — skeleton, v-structures, propagation — and then:
+
+> **Where several structures fit the evidence equally, the answer is that there are several.**
+
+`A→B→C`, `A←B→C` and `A←B←C` imply *exactly* the same dependencies. They are one Markov
+equivalence class and naming one of them invents a direction. Measured: chain/fork **3**, collider
+**1**, triangle **6**, all-independent **1** — textbook, and `Verdict.holds` answers *"is this
+arrow in **every** admissible structure"* rather than *"in the first one"*.
+
+Two defects the measurement found. **Marginal observations alone halve what is recoverable**: with
+nothing held fixed a chain and a triangle are indistinguishable, and `discover` returned six for a
+chain, which is every orientation of a triangle — because a triangle is what the observations
+described. One conditional statement — *A and C do not vary together **once B is held fixed*** —
+fixes it, and the set that made a pair independent also decides whether the middle is a collider,
+so one field does both jobs. And **the middle is the whole v-rule**: testing only whether a pair
+was separated accepted `a → b ← c` for a chain, where `b` is precisely what makes `a` and `c`
+independent, and the class came back 4 where it is 3.
+
+Scoring is the Master's #14 made computable — `explains − unsupported − λ·complexity` — and it
+**never overrules the evidence**: members of one equivalence class are indistinguishable by
+construction, so scoring them against each other is scoring noise. The `unsupported` term was dead
+on arrival: it counted only marginal dependence, so in a chain `a → c` looked called for and the
+complete graph scored zero unsupported edges. A conditional independence deletes an edge, and the
+score has to read that the same way the skeleton does.
+
+##### `njp/fusion.py` — three files, three vocabularies, one shape
+
+`biology.kb` knows a body holds its temperature steady; `engineering.kb` knows a control system
+holds a quantity at a set value; `economics.kb` knows price moves until supply meets demand. A
+store that keeps them apart has three facts where it could have an idea.
+
+An analogy here is a **structure-preserving bijection** — not word similarity, not co-occurrence.
+The words are deliberately unavailable, because the point is to relate things whose vocabularies
+share nothing:
+
+```
+sensor   → controller   → actuator → quantity    → sensor       (engineering)
+receptor → hypothalamus → effector → temperature → receptor     (biology)
+```
+
+Measured on three domains it returns **one** abstraction with reach 3 and every role filled in
+every domain — `role0 = biology: receptor, economics: wage, engineering: sensor`. The roles are
+**positions, not names**: calling it *"feedback regulation"* would be the module supplying the
+insight it claims to have found.
+
+Three refusals: different domains or it is a duplicate; `MIN_EDGES = 3`, below which an isomorphism
+is arithmetic; and **a near-miss is a miss**. *"The atom is a solar system"* is right about four
+edges and wrong about the one that matters.
+
+`MAX_RADIUS` is **3**, measured: at two the four-edge loop came back as a two-edge line, because
+the edge back to the seed — the one that *makes* it feedback — is a hop further than the walk went.
+And `abstract` grouped three domains into an idea reaching two, because it took one analogy's two
+sides as the membership instead of the transitive closure over the shape.
+
+##### The fusion paper could not fail, twice
+
+It scored 1.000 with the exactness rule off *and* with `MIN_EDGES` set to 1. The decoy was **one
+edge short**, so it was rejected by a size comparison before the bijection was ever reached. Two
+two-cycles were no better — unreachable from one seed, so the pattern came out at two edges and was
+dropped for being small. A connected four-node four-edge graph with every degree two **is** a ring;
+there is no other, so a decoy differing in *shape* cannot exist at that size.
+
+The decoy now differs in **direction**: `p → q → r ← s ← p` is the same undirected four-cycle, four
+edges, one relation, every degree two — identical fingerprint, no bijection. It now scores
+**1.000 → 0.000** when the bijection is not checked, which is the first time that paper measured
+anything.
+
+`surgery` falsifies the same way: **1.000 → 0.750** without the v-structure rule, **→ 0.500** on
+marginal observations only.
+
+And a fourth exam defect of the same family as V.37's: the observation generator used **undirected
+reachability**, so it told the surgeon that `a` and `b` vary together in `a → c ← b` — they do not,
+a collider *blocks* the path it sits on. Ten of forty failures, every one a collider, every one the
+exam marking her wrong for correctly recovering the triangle it had described. It uses
+d-separation now.
+
+```
+wording 1.000 · wording_new 0.000 · entities 1.000 · shape 0.950 · distractors 1.000
+contradiction 1.000 · homonym 1.000 · gap 1.000 · legs 1.000 · unknown 1.000
+surgery 1.000 · fusion 1.000
+
+0.883 · 1.000 restraint · 0 confabulations
+```
+
+Run it: `NJPBrain.recover_structure(["a", "b", "c"])`, `NJPBrain.shared_shape({"biology": [...],
+"engineering": [...]})`.
 
 
 ### Reachable over the wire
