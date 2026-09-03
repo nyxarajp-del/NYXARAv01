@@ -59,7 +59,8 @@ from nyxara.njp.semantics import compile_meaning
 __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
     "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
-    "Anticipating", "Tongue", "Wiring", "DiscourseSchool", "SUBJECTS", "main",
+    "Anticipating", "ExchangeSubject", "Grounded", "Tongue", "Wiring",
+    "DiscourseSchool", "SUBJECTS", "main",
 ]
 
 
@@ -677,6 +678,111 @@ class RegisterSubject(DiscourseSubject):
         return score, misses
 
 
+class ExchangeSubject(DiscourseSubject):
+    """What counts as a reply to what, and what counts as nothing to do with it.
+
+    Half the paper is the relations — answering, accepting — read off the **acts** of two
+    consecutive turns rather than off either sentence. The other half is the two refusals, and
+    they pull in opposite directions: a reply she has no pairing for is a **non-sequitur** and she
+    says so, and a turn following an act she has been shown nothing about draws **no complaint at
+    all**. A module that only had the first would object to every conversation it had not been
+    taught; one that only had the second would never object to anything.
+    """
+
+    id = "exchange"
+    title = "what counts as a reply to what"
+    teaches = "adjacency pairs induced from demonstrated exchanges"
+    items = 10
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.student
+        for _ in range(2):
+            a, b = mint.word(), mint.word()
+            voice.show_exchange(f"What is the {a}?", f"The {a} is the {b}.", "answer")
+        for _ in range(2):
+            a, b = mint.word(), mint.word()
+            voice.show_exchange(f"Open the {a}.", f"The {a} is {b}.", "accept")
+        return Taught(4, f"{len(voice.exchange.kept)} pairs kept, "
+                         f"relations {sorted(voice.exchange.relations())}")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.student
+        score, misses = Score(), []
+        for _ in range(3):
+            a, b = mint.word(), mint.word()
+            got = voice.exchange.read(voice.acts.read(f"What is the {a}?").intended,
+                                      voice.acts.read(f"The {a} is the {b}.").intended)
+            self.mark(score, misses, got=got.relation, want="answer",
+                      item=f"question → assertion ({a})", silence="")
+        for _ in range(3):
+            a, b = mint.word(), mint.word()
+            got = voice.exchange.read(voice.acts.read(f"Open the {a}.").intended,
+                                      voice.acts.read(f"The {a} is {b}.").intended)
+            self.mark(score, misses, got=got.relation, want="accept",
+                      item=f"command → assertion ({a})", silence="")
+        for _ in range(2):                       # a reply she has no pairing for
+            a = mint.word()
+            got = voice.exchange.read(voice.acts.read(f"What is the {a}?").intended,
+                                      voice.acts.read(f"Open the {a}.").intended)
+            self.mark(score, misses, got=got.fits, want=False,
+                      item=f"question → command ({a})")
+        for _ in range(2):                       # and an act she has been shown nothing about
+            a = mint.word()
+            got = voice.exchange.read("exclamation",
+                                      voice.acts.read(f"The {a} is here.").intended)
+            self.mark(score, misses, got=got.fits, want=True,
+                      item=f"after an exclamation ({a}) — no evidence, no objection")
+        return score, misses
+
+
+class Grounded(DiscourseSubject):
+    """The same thing said twice, and the second time shorter.
+
+    A floor rather than a lesson, for the reason :class:`OtherMinds` is: what the hearer already
+    has is state the conversation puts there, not a convention anybody demonstrates. What is
+    measured is that the state is actually used — :mod:`nyxara.social.common_ground` has modelled
+    given-versus-new since it was written and nothing in this package had ever put a sentence into
+    it, so an organ that was real and unreachable is now real and reached.
+
+    Its control is the half that stops this being a trick: an elaboration that was **never**
+    grounded must still be said, however many other things have been.
+    """
+
+    id = "ground"
+    title = "not repeating what the hearer already has"
+    teaches = "nothing — the common ground is state, and this measures that it is used"
+    items = 9
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        score, misses = Score(), []
+        for _ in range(3):
+            voice = Communicator()
+            subject, relation, obj = mint.word(), mint.word(), mint.word()
+            meaning = compile_meaning(f"{subject} {relation} {obj}")
+            meaning.condition, meaning.temporal = f"the {mint.word()} holds", "today"
+            first = voice.say(meaning, "engineer")
+            voice.hear(f"The {mint.word()} {mint.word()} the {mint.word()}.")
+            second = voice.say(meaning, "engineer")
+            self.mark(score, misses, got=("condition" in first.carried), want=True,
+                      item=f"{subject}: said in full the first time")
+            self.mark(score, misses, got=("condition" in second.omitted), want=True,
+                      item=f"{subject}: left out the second time")
+            # The control: a fresh hearer has nothing, so nothing may be left out.
+            fresh = Communicator()
+            again = fresh.say(meaning, "engineer")
+            self.mark(score, misses, got=bool(again.omitted), want=False,
+                      item=f"{subject}: a hearer who has nothing is told everything")
+        return score, misses
+
+
 class Anticipating(DiscourseSubject):
     """The turn she expected, scored before it arrived.
 
@@ -916,8 +1022,8 @@ class Wiring(DiscourseSubject):
 #: The syllabus, in the order it is sat. Conventions first, because the mechanisms behind them do
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
-    Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating,
-    ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject,
+    Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating, ExchangeSubject,
+    ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject, Grounded,
     Tongue, Wiring,
 )
 

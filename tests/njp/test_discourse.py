@@ -773,3 +773,80 @@ def test_the_counts_survive_a_new_conversation_and_the_position_does_not():
     opening = voice.anticipation.expect()
     assert opening.act == "question"
     assert opening.act != mid or mid == "question"
+
+
+# --------------------------------------------------------------------------- #
+# 10 · the exchange, and the common ground
+# --------------------------------------------------------------------------- #
+
+def _exchange_taught():
+    voice = Communicator()
+    for a, b in (("seal", "key"), ("vault", "door")):
+        voice.show_exchange(f"What is the {a}?", f"The {a} is the {b}.", "answer")
+    for a, b in (("gate", "open"), ("lock", "shut")):
+        voice.show_exchange(f"Open the {a}.", f"The {a} is {b}.", "accept")
+    return voice
+
+
+def test_a_reply_is_read_from_the_acts_and_not_from_either_sentence():
+    voice = _exchange_taught()
+    voice.hear("What is the drum?")
+    got = voice.hear("The drum is the barrel.")
+    assert got.reply is not None
+    assert got.reply.relation == "answer" and got.reply.fits
+
+
+def test_a_reply_she_has_no_pairing_for_is_a_non_sequitur_and_she_says_so():
+    voice = _exchange_taught()
+    voice.hear("What is the drum?")
+    got = voice.hear("Open the shed.")
+    assert not got.reply.fits
+    assert "assertion" in got.reply.expected
+    assert "never been shown following" in got.reply.why
+
+
+def test_where_she_has_been_shown_nothing_she_objects_to_nothing():
+    """A module that only detected non-sequiturs would object to every unfamiliar conversation."""
+    voice = _exchange_taught()
+    got = voice.exchange.read("exclamation", "assertion")
+    assert got.fits and not got.relation
+    assert "nothing has ever been shown following" in got.why
+
+
+def test_a_pair_two_demonstrations_disagree_about_is_contested():
+    voice = _exchange_taught()
+    voice.show_exchange("What is the mast?", "The mast is the pole.", "correction")
+    got = voice.exchange.read("question", "assertion")
+    assert not got.relation and got.fits
+    assert ("question", "assertion") in voice.exchange.contested
+
+
+def test_untaught_nothing_is_a_reply_and_nothing_is_a_non_sequitur():
+    voice = Communicator()
+    voice.hear("What is the drum?")
+    got = voice.hear("Open the shed.")
+    assert got.reply is not None and got.reply.fits and not got.reply.relation
+
+
+def test_what_the_hearer_already_has_is_left_unsaid():
+    """`social.common_ground` has modelled given-versus-new since it was written, and nothing in
+    this package had ever put a sentence into it."""
+    voice = Communicator()
+    meaning = compile_meaning("water boils today")
+    meaning.condition, meaning.modality = "the pressure is normal", "typical"
+
+    first = voice.say(meaning, "engineer")
+    assert "condition" in first.carried and not first.omitted
+    voice.hear("The kettle is on the stove.")      # the hearer carries on: it is grounded
+    second = voice.say(meaning, "engineer")
+    assert "condition" in second.omitted
+    assert second.words < first.words
+    assert second.claim == first.claim             # and the claim itself never goes
+
+
+def test_a_hearer_who_has_nothing_is_told_everything():
+    voice = Communicator()
+    meaning = compile_meaning("water boils today")
+    meaning.condition, meaning.modality = "the pressure is normal", "typical"
+    said = voice.say(meaning, "engineer")
+    assert not said.omitted

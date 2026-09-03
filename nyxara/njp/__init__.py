@@ -361,7 +361,9 @@ from nyxara.njp.discourse import (
     Readings,
     Reference,
     Register,
+    Exchange,
     Expectation,
+    Reply,
     Resolution,
     Surprise,
     Uptake,
@@ -494,8 +496,8 @@ __all__ = [
     "CorpusReading", "CorpusRecord", "CorpusSolver", "CorpusVerdict", "verify_corpus_answer",
     # NJP V.26 — what was meant, and by whom (njp/discourse.py)
     "ActLearner", "Anticipation", "Claim", "ClaimVerdict", "Communicator", "Expectation",
-    "Figure", "Interpretation", "Ledger", "Minds", "Readings", "Reference", "Register",
-    "Resolution", "Surprise", "Uptake",
+    "Exchange", "Figure", "Interpretation", "Ledger", "Minds", "Readings", "Reference",
+    "Register", "Reply", "Resolution", "Surprise", "Uptake",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions

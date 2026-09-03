@@ -34,7 +34,7 @@ four is now a subject on the report card with a floor, a lesson and a gain. The 
 — the pronouns, the copula, the factive subordinators, the time words — are the closed class
 :mod:`nyxara.njp.semantics` already defends, where a list is the honest representation.
 
-Eight organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather than
+Nine organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather than
 a new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
 something nobody demonstrated; where two readings survive the answer is that there are two.**
 
@@ -107,7 +107,22 @@ lacks, the reading is flagged figurative and nothing is filed. Where there are n
 the new subject's kinds are unknown, **nothing is claimed** — with an empty store no sentence is
 figurative, and that is the correct answer rather than a limitation to apologise for.
 
-**7 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
+**7 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
+:mod:`nyxara.social.common_ground`). The Master listed seventeen things a conversation does and
+eleven of them were unreachable, for one reason: this module read every turn **alone**. What makes
+a turn a clarification rather than an answer is the turn before it. So adjacency pairs are induced
+from demonstrated exchanges — over the **acts**, never the sentences — and the negative half is
+the point: a reply she has no pairing for is a non-sequitur and she says so, while a turn
+following an act she has been shown nothing about draws no complaint at all.
+
+Beside it, the other half of *how much to say*: what the hearer already has is left unsaid.
+:mod:`nyxara.social.common_ground` has modelled given-versus-new since it was written and nothing
+in this package had ever put a sentence into it. Now :meth:`Communicator.say` proposes what it
+says and the hearer's next turn acknowledges it, which is Clark's mechanism run by the module that
+implements it. Measured: the same meaning to the same hearer, eighteen words the first time and
+two the second, with the claim itself unchanged — and a fresh hearer still told everything.
+
+**8 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
 The Master's fifth deep mechanism — ``PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`` — and
 this module did not have it at all. Three things are predicted about a turn before it is looked
 at: what the speaker will be *doing*, what they will be *about*, and what it will do to the
@@ -125,7 +140,7 @@ prediction against a reading it wrote is the same self-confirming loop :class:`F
 to have. Measured with that loop closed: the control exchange's act distribution collapsed to one
 successor and reported 1.00 confidence on a sequence built to be unpredictable.
 
-**8 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
+**9 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
 with the telescope."* The evidence that there is an ambiguity at all is in
 :mod:`nyxara.njp.semantics`'s own output: it has no frame for a prepositional phrase after an
 object, so it fuses the two noun phrases into one object string — ``man telescope``, with ``with
@@ -157,7 +172,7 @@ from nyxara.njp.semantics import _lemma as _lemma_of
 __all__ = [
     "GAP", "MORE", "LEVELS", "REGISTERS", "LICENCE", "UNIVERSAL",
     "Readings", "attachment", "AttachLearner", "Marker", "MarkerLearner",
-    "Anticipation", "Expectation", "Surprise",
+    "Anticipation", "Expectation", "Surprise", "Exchange", "Pair", "Reply",
     "free_words", "clause_proposition",
     "shapes_of", "fillers_of", "literal_act",
     "Act", "Interpretation", "ActLearner",
@@ -1744,15 +1759,22 @@ class Said:
     verified: bool = False
     #: Which of the meaning's fields this register said out loud.
     carried: Tuple[str, ...] = ()
+    #: Which it left out because the hearer already had them.
+    omitted: Tuple[str, ...] = ()
+    #: Every elaboration this register would say to a hearer who had nothing.
+    extras: Tuple[str, ...] = ()
 
     @property
     def words(self) -> int:
         return len(str(self.text or "").split())
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"audience": self.audience, "text": self.text, "claim": self.claim,
-                "verified": self.verified, "carried": list(self.carried),
-                "words": self.words}
+        out = {"audience": self.audience, "text": self.text, "claim": self.claim,
+               "verified": self.verified, "carried": list(self.carried),
+               "words": self.words}
+        if self.omitted:
+            out["omitted"] = list(self.omitted)
+        return out
 
 
 class Register:
@@ -1777,7 +1799,16 @@ class Register:
         self.refused = 0
 
     # -- one rendering ------------------------------------------------------- #
-    def say(self, meaning: Meaning, audience: str = "student") -> Said:
+    def say(self, meaning: Meaning, audience: str = "student",
+            given: Any = ()) -> Said:
+        """One rendering. ``given`` is what the hearer already has, and is left unsaid.
+
+        This is the half of *how much to say* that scope alone cannot reach. Two hearers who need
+        the same amount are still owed different sentences if one of them has already been told
+        the condition — repeating it is not thoroughness, it is not listening. What counts as
+        already-had is :mod:`nyxara.social.common_ground`'s business, not this class's.
+        """
+        given = frozenset(str(x) for x in (given or ()))
         out = Said(audience=str(audience or "student"))
         try:
             if meaning is None or not meaning.readable:
@@ -1792,24 +1823,30 @@ class Register:
                 return out
             self.rendered += 1
             rank = REGISTERS.index(out.audience) if out.audience in REGISTERS else 1
-            extras: List[str] = []
-            carried = ["claim"]
+            candidates: List[Tuple[str, str]] = []
             if rank >= 1 and meaning.condition:
-                extras.append(f"this holds if {meaning.condition}")
-                carried.append("condition")
+                candidates.append(("condition", f"this holds if {meaning.condition}"))
             if rank >= 2:
                 if meaning.temporal:
-                    extras.append(f"as of {meaning.temporal}")
-                    carried.append("temporal")
+                    candidates.append(("temporal", f"as of {meaning.temporal}"))
                 if meaning.modality:
-                    extras.append(f"held as {meaning.modality} rather than certain")
-                    carried.append("modality")
+                    candidates.append(
+                        ("modality", f"held as {meaning.modality} rather than certain"))
             if rank >= 3:
-                extras.append(f"on {meaning.evidential or 'stated'} grounds, "
-                              f"parse confidence {meaning.confidence:.2f}")
-                carried.append("evidential")
+                candidates.append(("evidential",
+                                   f"on {meaning.evidential or 'stated'} grounds, "
+                                   f"parse confidence {meaning.confidence:.2f}"))
+            extras, carried, omitted = [], ["claim"], []
+            for name, text in candidates:
+                if text in given:
+                    omitted.append(name)
+                    continue
+                extras.append(text)
+                carried.append(name)
             out.text = "; ".join([core] + extras)
             out.carried = tuple(carried)
+            out.omitted = tuple(omitted)
+            out.extras = tuple(text for _name, text in candidates)
             return out
         except Exception:  # noqa: BLE001
             return out
@@ -2162,7 +2199,155 @@ def attachment(surface: str, meaning: Optional[Meaning] = None, *,
 
 
 # --------------------------------------------------------------------------- #
-# 8 · language as prediction — expect the turn, then be corrected by it
+# 8 · the exchange — what counts as a reply to what
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class Pair:
+    """One induced adjacency pair: an act, an act that follows it, and what that following is."""
+
+    first: str = ""
+    second: str = ""
+    relation: str = ""
+    demonstrations: Tuple[Tuple[str, ...], ...] = ()
+
+    @property
+    def support(self) -> int:
+        return len(set(self.demonstrations))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"first": self.first, "second": self.second, "relation": self.relation,
+                "support": self.support}
+
+
+@dataclass
+class Reply:
+    """What the current turn is doing to the one before it."""
+
+    relation: str = ""
+    confidence: float = 0.0
+    fits: bool = True
+    #: What she had grounds to expect instead, when the pair does not fit.
+    expected: Tuple[str, ...] = ()
+    why: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"relation": self.relation,
+                               "confidence": round(self.confidence, 4), "fits": self.fits}
+        if self.expected:
+            out["expected"] = list(self.expected)
+        if self.why:
+            out["why"] = self.why
+        return out
+
+
+class Exchange:
+    """What counts as a reply to what — induced, and the half that matters is the refusal.
+
+    The Master's sixth capability listed seventeen things a conversation does: answering,
+    clarifying, correcting, agreeing, disagreeing, refusing, negotiating, explaining, teaching,
+    summarising. Six of them were reachable and eleven were not, and the reason is that this
+    module read every turn **alone**. A turn is not alone: it is a reply, and what makes it a
+    clarification rather than an answer is the turn before it.
+
+    A demonstration is two consecutive turns and what the second is doing to the first. What is
+    induced is the pair of **acts** — not the sentences — so a demonstration of one question being
+    answered reads any question being answered. Two demonstrations minimum, differing in fillers,
+    unanimous; a pair two demonstrations disagree about is contested and never read. That is
+    :class:`ActLearner`'s rule for the fourth time in this module, and it is deliberate: one
+    discipline applied everywhere is a claim, and four mechanisms would be four chances to get it
+    wrong differently.
+
+    **And the negative half is the point.** :meth:`fits` says whether this reply is one she has
+    ever been shown following that kind of turn. A request answered with a question is not
+    *wrong*, it is a clarification — but a request followed by something she has no pairing for is
+    a non-sequitur and she can say so. Where she knows nothing about what follows an act, she
+    complains about nothing: no evidence, no objection.
+    """
+
+    min_support = 2
+
+    def __init__(self, *, min_support: Optional[int] = None) -> None:
+        if min_support is not None:
+            self.min_support = max(1, int(min_support))
+        self.seen: Dict[Tuple[str, str], Dict[str, List[Tuple[str, ...]]]] = {}
+        self.kept: Dict[Tuple[str, str], Pair] = {}
+        self.contested: Set[Tuple[str, str]] = set()
+        self.shown = 0
+
+    def show(self, first_act: str, second_act: str, relation: str,
+             fillers: Sequence[str] = ()) -> None:
+        """One demonstration: after this kind of turn, this kind of turn is doing this."""
+        try:
+            key = (str(first_act or ""), str(second_act or ""))
+            relation = str(relation or "").strip().lower()
+            if not (key[0] and key[1] and relation):
+                return
+            self.seen.setdefault(key, {}).setdefault(relation, []).append(tuple(fillers))
+            self.shown += 1
+            self._settle()
+        except Exception:  # noqa: BLE001
+            return
+
+    def _settle(self) -> None:
+        kept: Dict[Tuple[str, str], Pair] = {}
+        contested: Set[Tuple[str, str]] = set()
+        for key, relations in self.seen.items():
+            live = [name for name, demos in relations.items() if demos]
+            if len(live) > 1:
+                contested.add(key)
+                continue
+            demos = tuple(relations[live[0]])
+            if len(set(demos)) < self.min_support:
+                continue
+            kept[key] = Pair(first=key[0], second=key[1], relation=live[0],
+                             demonstrations=demos)
+        self.kept, self.contested = kept, contested
+
+    # -- reading ------------------------------------------------------------- #
+    def read(self, first_act: str, second_act: str) -> Reply:
+        out = Reply()
+        try:
+            key = (str(first_act or ""), str(second_act or ""))
+            if key in self.contested:
+                out.why = "two relations demonstrated for this pair; it does not choose"
+                out.fits = True
+                return out
+            known = self.expects(key[0])
+            found = self.kept.get(key)
+            if found is not None:
+                out.relation = found.relation
+                out.confidence = min(0.95, 0.6 + 0.08 * found.support)
+                out.why = f"{found.support} demonstrations of {key[0]} → {key[1]}"
+                return out
+            if not known:
+                out.why = f"nothing has ever been shown following a {key[0] or 'turn'}"
+                return out
+            out.fits = False
+            out.expected = tuple(sorted({pair.second for pair in known}))
+            out.why = (f"a {key[1]} has never been shown following a {key[0]}; "
+                       f"what has is {', '.join(out.expected)}")
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    def expects(self, first_act: str) -> List[Pair]:
+        """Every kind of turn she has been shown following this one."""
+        return [pair for key, pair in self.kept.items() if key[0] == str(first_act or "")]
+
+    def fits(self, first_act: str, second_act: str) -> bool:
+        return self.read(first_act, second_act).fits
+
+    def relations(self) -> Set[str]:
+        return {pair.relation for pair in self.kept.values()}
+
+    def stats(self) -> Dict[str, Any]:
+        return {"shown": self.shown, "kept": len(self.kept),
+                "contested": len(self.contested), "relations": sorted(self.relations())}
+
+
+# --------------------------------------------------------------------------- #
+# 9 · language as prediction — expect the turn, then be corrected by it
 # --------------------------------------------------------------------------- #
 
 @dataclass
@@ -2385,6 +2570,9 @@ class Uptake:
     #: rather than about the turn.
     expected: Optional[Expectation] = None
     surprise: Optional[Surprise] = None
+    #: What this turn is doing to the one before it, and whether that is something she has ever
+    #: been shown following such a turn — see :class:`Exchange`.
+    reply: Optional[Reply] = None
     #: The one thing worth asking back, or ``""``. Ordered by what blocks understanding hardest:
     #: an act nobody can read, then a referent nothing settles, then two claims that cannot both
     #: hold.
@@ -2422,6 +2610,8 @@ class Uptake:
             out["expected"] = self.expected.to_dict()
         if self.surprise is not None and self.surprise.predicted:
             out["surprise"] = self.surprise.to_dict()
+        if self.reply is not None and (self.reply.relation or not self.reply.fits):
+            out["reply"] = self.reply.to_dict()
         if self.question:
             out["question"] = self.question
         return out
@@ -2454,6 +2644,18 @@ class Communicator:
         #: What she expects of a turn before it arrives, learned from what has actually
         #: followed what — see :class:`Anticipation`.
         self.anticipation = Anticipation()
+        #: What counts as a reply to what — see :class:`Exchange`.
+        self.exchange = Exchange()
+        #: What both parties have taken as established. Driven from :meth:`hear`, which is the
+        #: thing :mod:`nyxara.social.common_ground` has never had: it has been a real model of
+        #: given-versus-new since it was written and nothing in this package could put a sentence
+        #: into it.
+        self.ground: Any = None
+        try:
+            from nyxara.social.common_ground import CommonGround
+            self.ground = CommonGround((speaker, addressee))
+        except Exception:  # noqa: BLE001
+            self.ground = None
         self.reference = Reference(speaker=speaker, addressee=addressee)
         self.ledger = Ledger()
         self.minds = Minds(speaker=speaker)
@@ -2483,6 +2685,19 @@ class Communicator:
         """Demonstrate what a speaker would call this pair of claims —
         see :meth:`MarkerLearner.show`."""
         self.markers.show(first, second, verdict)
+
+    def show_exchange(self, first: str, second: str, relation: str) -> None:
+        """Demonstrate what the second turn is doing to the first — see :meth:`Exchange.show`.
+
+        The **acts** of the two surfaces are what is recorded, never the sentences, so one
+        demonstration of a question being answered reads any question being answered.
+        """
+        try:
+            self.exchange.show(self.acts.read(first).intended,
+                               self.acts.read(second).intended, relation,
+                               fillers=fillers_of(first) + fillers_of(second))
+        except Exception:  # noqa: BLE001
+            return
 
     def show_attachment(self, surface: str, site: str) -> None:
         """Demonstrate which site a prepositional phrase attached to —
@@ -2547,6 +2762,18 @@ class Communicator:
                     f"where {out.expected.act!r} follows {self.anticipation.last_act or 'this'} "
                     f"{out.expected.act_confidence:.0%} of the time")
 
+            # What this turn does to the one before it. Read from the acts, so it is about the
+            # exchange rather than about either sentence.
+            before = self.history[-1] if self.history else None
+            if before is not None and before.interpretation is not None \
+                    and out.interpretation is not None:
+                out.reply = self.exchange.read(before.interpretation.intended,
+                                               out.interpretation.intended)
+
+            # What the conversation has taken as established, which is what decides how much of a
+            # thing needs saying next time — see :meth:`Register.say`.
+            self._establish(out)
+
             claim = out.verdict.claim if out.verdict is not None else None
             out.surprise = self.anticipation.observe(
                 out.expected,
@@ -2561,6 +2788,34 @@ class Communicator:
             return out
         except Exception:  # noqa: BLE001
             return out
+
+    def _establish(self, out: Uptake) -> None:
+        """Put this turn's claim into the common ground, and acknowledge the last one.
+
+        A proposition enters the common ground when one party proposes it and the other gives
+        evidence of having taken it — which, in a two-party exchange where she is the hearer, is
+        the turn after it. So the previous claim is acknowledged as this one arrives, and the
+        current claim is proposed. Nothing is grounded by being said once.
+        """
+        try:
+            if self.ground is None:
+                return
+            claim = out.verdict.claim if out.verdict is not None else None
+            if claim is None:
+                return
+            content = f"{claim.subject}|{claim.relation}|{claim.object}"
+            previous = getattr(self, "_proposed", "")
+            if previous and previous != content:
+                self.ground.acknowledge(self.reference.addressee, previous)
+            # And everything she said last turn: the speaker carrying on without objecting is the
+            # positive evidence of understanding that grounding needs.
+            for text in tuple(getattr(self, "_offered", ())):
+                self.ground.acknowledge(out.speaker or self.speaker, text)
+            self._offered = ()                  # noqa: attribute defined outside __init__
+            self.ground.propose(out.speaker or self.speaker, content)
+            self._proposed = content            # noqa: attribute defined outside __init__
+        except Exception:  # noqa: BLE001
+            return
 
     @staticmethod
     def _question(out: Uptake) -> str:
@@ -2604,7 +2859,32 @@ class Communicator:
 
     # -- asking it things ---------------------------------------------------- #
     def say(self, meaning: Meaning, audience: str = "student") -> Said:
-        return self.register.say(meaning, audience)
+        """One meaning said for one hearer, with what they already have left unsaid.
+
+        Whatever she says is **proposed** into the common ground, and the hearer's next turn
+        acknowledges it — Clark's mechanism, run by the module that has implemented it all along
+        and never been driven by a sentence.
+        """
+        given: Set[str] = set()
+        try:
+            if self.ground is not None:
+                for text in self.register.say(meaning, audience).extras:
+                    if self.ground.is_grounded(text):
+                        given.add(text)
+        except Exception:  # noqa: BLE001
+            given = set()
+        said = self.register.say(meaning, audience, given=given)
+        try:
+            if self.ground is not None:
+                offered = []
+                for text in said.extras:
+                    if text not in given:
+                        self.ground.propose(self.reference.addressee, text)
+                        offered.append(text)
+                self._offered = tuple(offered)  # noqa: attribute defined outside __init__
+        except Exception:  # noqa: BLE001
+            pass
+        return said
 
     def figurative(self, surface: str) -> bool:
         """Is this sentence one that must not be filed literally?
@@ -2621,7 +2901,13 @@ class Communicator:
         return self.ledger.holds(subject, relation)
 
     def stats(self) -> Dict[str, Any]:
+        ground = {}
+        try:
+            ground = self.ground.status() if self.ground is not None else {}
+        except Exception:  # noqa: BLE001
+            ground = {}
         return {"turns": self.turn, "acts": self.acts.stats(),
+                "exchange": self.exchange.stats(), "ground": ground,
                 "anticipation": self.anticipation.stats(),
                 "markers": self.markers.stats(), "attach": self.attach.stats(),
                 "reference": self.reference.stats(), "ledger": self.ledger.stats(),

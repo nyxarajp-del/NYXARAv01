@@ -2863,6 +2863,48 @@ an exchange of thirty-six turns built to be unlearnable, and what is asserted is
 **below the commitment floor** on it: `act accuracy 0.95` on the patterned exchange, `control
 best 0.54` against a floor of 0.70.
 
+#### NJP V.28 — a turn is a reply, and a hearer who already knows
+
+The gap report scored capability #6 at six of seventeen. The reason was not seventeen missing
+features: it was that this module read every turn **alone**. What makes a turn a clarification
+rather than an answer is the turn before it.
+
+`Exchange` induces adjacency pairs from demonstrated exchanges, over the **acts** rather than the
+sentences, so one demonstration of a question being answered reads any question being answered.
+Two demonstrations minimum, differing in fillers, unanimous, contested the moment they disagree —
+the same rule as `ActLearner`, `MarkerLearner` and `AttachLearner`, for the fourth time, on
+purpose. One discipline applied everywhere is a claim; four mechanisms would be four chances to
+get it wrong differently.
+
+**The two refusals are the point, and they pull opposite ways.** A reply she has no pairing for is
+a non-sequitur and she names what she expected instead. A turn following an act she has been shown
+*nothing* about draws no complaint at all. A module with only the first would object to every
+conversation it had not been taught; one with only the second would never object to anything.
+
+Beside it, the other half of *how much to say*. `nyxara.social.common_ground` has modelled
+given-versus-new since it was written, and **nothing in this package had ever put a sentence into
+it** — the same finding as `social.tom` in V.26, in a second organ. Now `Communicator.say`
+proposes what it says, and the hearer's next turn acknowledges it, which is Clark's mechanism run
+by the module that implements it rather than reimplemented here.
+
+```
+first  → water boil; this holds if the pressure is normal; as of today;
+         held as typical rather than certain          (18 words)
+hearer carries on                                      → grounded
+second → water boil                                    (2 words, omitted: condition, temporal,
+                                                        modality)
+```
+
+The claim itself never goes, and a **fresh hearer is still told everything** — which is the control
+that stops this being a trick rather than a capability.
+
+    exchange   0.20 -> 1.00
+    ground     floor, with its own control
+
+`ground` is a floor and says so: what the hearer already has is state the conversation puts there,
+not a convention anybody demonstrates. What it measures is that an organ which was real and
+unreachable is now real and reached.
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -2875,20 +2917,22 @@ best 0.54` against a floor of 0.70.
   figurative         0.50   1.00   +0.50       3  LEARNED
   attachment         0.50   1.00   +0.50       7  LEARNED
   anticipation       0.50   1.00   +0.50      18  LEARNED
+  exchange           0.20   1.00   +0.80       4  LEARNED
   reference          0.80   1.00   +0.20       9  LEARNED
   contradiction      0.75   1.00   +0.25      10  LEARNED
   memory             0.50   1.00   +0.50      10  LEARNED
   minds              1.00   1.00   +0.00       0  already
   register           1.00   1.00   +0.00       0  already
+  ground             1.00   1.00   +0.00       0  already
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      13/13 subjects
-  learned       10 subject(s) moved by teaching
-  overall       121/121 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  mastered      15/15 subjects
+  learned       11 subject(s) moved by teaching
+  overall       140/140 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       121/121 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       140/140 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
 **Four of those floors did not exist before the second pass.** `reference`, `contradiction`,

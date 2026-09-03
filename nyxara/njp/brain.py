@@ -1981,6 +1981,17 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def show_exchange(self, first: str, second: str, relation: str) -> None:
+        """Demonstrate what the second turn is doing to the first — answering it, accepting it,
+        clarifying it. The **acts** are what is recorded, never the sentences, so one
+        demonstration of a question being answered reads any question being answered."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_exchange(str(first or ""), str(second or ""),
+                                             str(relation or ""))
+        except Exception:  # noqa: BLE001
+            return
+
     def show_attachment(self, surface: str, site: str) -> None:
         """Demonstrate which site a prepositional phrase attached to — ``event`` or ``object``.
         A preposition demonstrated both ways is one this language uses both ways."""

@@ -43,7 +43,7 @@ def test_every_subject_is_mastered_and_the_taught_ones_moved(taught):
     assert not transcript.failing, [r.subject for r in transcript.failing]
     moved = {r.subject for r in transcript.learned}
     assert {"acts", "transfer", "repair", "figurative", "attachment", "anticipation",
-            "reference", "contradiction", "memory", "tongue"} <= moved
+            "exchange", "reference", "contradiction", "memory", "tongue"} <= moved
 
 
 def test_the_taught_subjects_have_a_real_floor(taught):
@@ -55,7 +55,7 @@ def test_the_taught_subjects_have_a_real_floor(taught):
     _brain, transcript = taught
     floors = {r.subject: r.pre.accuracy for r in transcript.results}
     for subject in ("acts", "transfer", "repair", "figurative", "attachment", "anticipation",
-                    "reference", "contradiction", "memory", "tongue"):
+                    "exchange", "reference", "contradiction", "memory", "tongue"):
         assert floors[subject] < 0.9, f"{subject} floor {floors[subject]}"
 
 
@@ -63,7 +63,7 @@ def test_the_floor_subjects_teach_nothing_and_say_so(taught):
     """Two of them, now. `minds` and `register` are mechanisms; `wiring` measures reachability."""
     _brain, transcript = taught
     for result in transcript.results:
-        if result.subject in ("minds", "register", "wiring"):
+        if result.subject in ("minds", "register", "ground", "wiring"):
             assert result.taught == 0
             assert "floor" in result.note or "measures" in result.teaches
 
@@ -165,10 +165,10 @@ def test_the_attachment_lesson_finds_one_preposition_and_not_the_other():
     assert voice.attach.ambiguous == {"with"}
 
 
-def test_the_syllabus_is_thirteen_subjects_with_unique_ids():
+def test_the_syllabus_is_fifteen_subjects_with_unique_ids():
     made = [factory() for factory in SUBJECTS]
-    assert len(made) == 13
-    assert len({subject.id for subject in made}) == 13
+    assert len(made) == 15
+    assert len({subject.id for subject in made}) == 15
     assert all(isinstance(subject, DiscourseSubject) for subject in made)
 
 
