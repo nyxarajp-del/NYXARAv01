@@ -3534,6 +3534,92 @@ Run it: `NJPBrain.explain("why does rain happen?")`, `why`, `how`, `how_to`,
 `refresh_explanations`, or `python -m nyxara.njp.explainschool`.
 
 
+#### NJP V.37 — the 0.990 is frozen; here is the exam it could not be
+
+A benchmark at 0.99 has stopped being an instrument. `njp/explainschool.py` generates every item
+from the shipped fact store — entities she was told about, in graph shapes somebody wrote by hand,
+phrased the way the question grammar's own patterns are phrased. So `njp/explaingauntlet.py` is
+written the way `njp/hard.py` was: by someone looking for what the faculty **cannot** do, against
+a faculty that is finished. Nothing in it comes from the corpus. Every world is minted per item —
+entities, causal graph, wording, and the trap.
+
+Nine attacks, each naming a property of real inference the walk has no defence against:
+
+| attack | what it injects | what a pass requires |
+|---|---|---|
+| `wording` | phrasings no pattern was written for | *what brings about X*, *on account of what*, *how come* |
+| `entities` | every node a nonsense word | the control: nothing recognised, only derived |
+| `shape` | chain, fork, **collider**, diamond, random DAG | a collider's two causes are not a sequence |
+| `distractors` | true facts on `causes`, downstream and sideways | naming one is **wrong**, not verbose |
+| `contradiction` | two causes stated to exclude each other | report the **dispute**; picking one is wrong |
+| `homonym` | one spelling, two disjoint neighbourhoods | never cross between senses |
+| `gap` | the target's only incoming edge deleted | **UNKNOWN** — everything around it still stands |
+| `legs` | two legs, neither sufficient alone | a **conjunction**, not a list of alternatives |
+| `unknown` | evidence genuinely insufficient | silence |
+
+**UNKNOWN is a verdict, not a failure to have one.** Four values — `RIGHT`, `WRONG`, `UNKNOWN`,
+`CONFLICT` — and the report refuses to average papers that reward opposite behaviours. Two numbers
+sit beside the score: **restraint** (of the items whose only pass is silence, how many got it) and
+**confabulations** (answers where nothing supported one). A system scoring 0.6 by answering
+everything is worse than one scoring 0.6 by answering what it can, and a single number cannot tell
+them apart — a test asserts an always-answering stub scores 0.0 restraint.
+
+##### The floor, cold
+
+```
+attack            asked  passed  wrong  silent   score
+wording              40       4      0      36   0.100
+entities             40      40      0       0   1.000
+shape                40      38      0       0   0.950
+distractors          40      40      0       0   1.000
+contradiction        40       0     40       0   0.000   (the dispute is the pass)
+homonym              40       0     40       0   0.000
+gap                  40      40      0      40   1.000   (silence is the pass)
+legs                 40       0     40       0   0.000
+unknown              40      40      0      40   1.000   (silence is the pass)
+
+0.508 over the papers that reward answering
+1.000 restraint · 0 confabulations
+```
+
+**0.508**, against 0.990 on the exam it replaces. Two of the passes are real strengths worth
+naming rather than skipping past: she does **not** invent a bridge across a deleted mechanism —
+1.000 restraint, zero confabulations, on a world where the target is still described and still
+causes something, so there was plenty to invent from — and she respects causal direction against
+distractors wired downstream on the very relation she walks.
+
+Three capabilities are **absent**: no notion of a dispute inside an explanation, no separation of
+two senses of one spelling, no joint necessity. And the question grammar is a list of surfaces,
+which is what 0.100 means.
+
+##### Four of the nine papers were graded wrongly on the first run, and all four were the exam
+
+**A collider's gold was one of two right answers.** `A → C ← B` says both cause C and are unrelated;
+the item wanted `A` and she named both, which is every answer that would be right. Marked wrong for
+not guessing which the generator picked first — the same rule broken the same way in V.36's
+mechanism paper, one version earlier. The pass is now *both, and neither routed through the other*.
+
+**The `gap` paper called a stated fact a confabulation.** It deleted `b → c` in `a → b → c → d`
+and then asked about **d** — but `c causes d` is still stated, so *"because c"* is correct. Twenty
+confabulations that were nothing of the kind. It now asks about **c**, the node whose own support
+went missing.
+
+**The distractors were noise in a channel nobody was listening to.** Injected on `purpose`,
+`has_part` and `is_a`, which a backward causal walk does not read, so the paper scored 1.000 by
+construction. They are now on `causes`, downstream and sideways.
+
+**`contradiction` and `legs` passed on "mentioned both".** Listing two causes is not noticing they
+exclude each other, and it is not deriving that both are required — three different claims from the
+same two names. The adapter now returns a **structured** reply with `conflict` and `joint` flags,
+both `False` for the current walk, and that is the finding rather than a shortcoming of the
+harness.
+
+Also: the generated-graph gold was the last edge written instead of the **longest** derivation, so
+seven of forty failures were answers that were longer and correct.
+
+Run it: `python -m nyxara.njp.explaingauntlet --failures 3`.
+
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
