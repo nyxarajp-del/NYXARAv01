@@ -172,7 +172,10 @@ def test_the_walk_is_measured_and_the_gaps_are_where_they_were_recorded():
     difference between fixing something and breaking the measurement.
 
     V.37 floor: wording 0.100, contradiction 0.000, homonym 0.000, legs 0.000 — 0.508 overall.
-    V.38 now:   wording 1.000 on taught cues, homonym 1.000. contradiction and legs still absent.
+    V.38:       wording 1.000 on taught cues, homonym 1.000 — 0.707.
+    V.39 now:   contradiction 1.000, legs 1.000 — 0.850. Every zero the floor recorded is closed
+                except ``wording_new``, which is the honest ceiling of an induced grammar rather
+                than a gap: a cue nobody demonstrated is not guessed, and every item is silent.
     """
     report = run(limit=24)
     assert report.paper("entities").score == 1.0        # the control
@@ -184,9 +187,9 @@ def test_the_walk_is_measured_and_the_gaps_are_where_they_were_recorded():
     assert report.paper("wording").score == 1.0         # induced from demonstrations
     assert report.paper("homonym").score == 1.0         # the identity firewall
 
-    # Still absent, and named rather than rounded away.
-    assert report.paper("contradiction").score == 0.0   # no notion of a dispute
-    assert report.paper("legs").score == 0.0            # no joint necessity
+    # Closed at V.39, by the predator.
+    assert report.paper("contradiction").score == 1.0   # the dispute is reported, not resolved
+    assert report.paper("legs").score == 1.0            # joint necessity
     # And the honest ceiling of an induced grammar: a cue nobody demonstrated is not guessed.
     assert report.paper("wording_new").score == 0.0
     assert report.paper("wording_new").silent == report.paper("wording_new").asked

@@ -163,7 +163,9 @@ _ASKABLE: Dict[str, Tuple[str, str]] = {
 
 #: Emitted into the graph, never into the exam. See the module docstring for why each is here and
 #: why neither gets a question.
-_GRAPH_ONLY = ("part_of", "also_known_as")
+#: ``excludes`` joins them: it is read by `njp/predator.py` when it goes after an explanation
+#: offering two answers, and "what does X exclude" is not a sentence anybody writes.
+_GRAPH_ONLY = ("part_of", "also_known_as", "excludes")
 
 #: Relations that hold exactly one value, where a second is a contradiction rather than an
 #: addition. ``grounding._FUNCTIONAL`` names the first two; the rest are functional by meaning —

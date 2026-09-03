@@ -60,6 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39e | Self-attack on explanations (`njp/adversary` goes after a *belief*; nothing went after a *composition*, where every fact can be true and the sentence still false. Four attacks, each carrying the stated triple that licenses it: two answers the store says exclude each other — reported as a dispute and never resolved; chains the target `requires` on both sides — a conjunction, not a list; a hop at the confidence floor, marked and not withdrawn; and a stated counterexample. It runs *after* the walk, never inside it, so it cannot suppress its own evidence) | `nyxara.njp.predator` + `nyxara.njp.explaingauntlet` | NEW |
 | 39d | Meaning over spelling (a question's *form* induced from demonstrations rather than listed as regular expressions — the cue is the open-class word left when the topic and the closed class are removed, kept only once two demonstrations differing in topic agree, dropped when two disagree; and an identity firewall so a chain cannot enter a node on one sense of a word and leave on another. The gauntlet's `wording` 0.100 → 1.000 and `homonym` 0.000 → 1.000) | `nyxara.njp.asking` + `nyxara.njp.explain` | NEW |
 | 39c | Explanation (the other two questions a person asks. She answered **what**, and *why* and *how* were not weak in her, they were absent — no relation in any graph is called "why", so an explanation is a **path** and had to be walked. Mechanistic why backwards along production, teleological why forwards along purpose, and never one for the other; a mechanism from parts crossed with what they do; and a procedure's **order derived from its prerequisites**, never told — with every order returned where the telling left two steps free. Over all 42 of the Master's domains, 14 of which had no source file at all) | `nyxara.njp.explain` + `nyxara.njp.explainread` + `nyxara.njp.explainschool` + `scripts/knowledge/*.kb` | NEW |
 | 40 | Multimodal Intelligence | `nyxara.senses.binding` | REAL+WIRED |
@@ -3721,6 +3722,96 @@ removes, and what it removes on the shipped corpus is nothing.
 
 Run it: `NJPBrain()` teaches the forms on construction; `Explainer.senses("atrium")`,
 `crosses_senses`, `python -m nyxara.njp.asking` demonstrations via `asking.teach()`.
+
+
+#### NJP V.39 — the predator over explanations
+
+The last two zeroes. **0.707 → 0.850.**
+
+`njp/adversary.py` attacks a **belief** — one claim, with its evidence and its track record.
+Nothing attacked an **explanation**, and the difference is not academic: an explanation is a
+*composition*, every fact in it can be true, and the composition can still be false. V.36 shipped
+one — `heart → atrium → bringing daylight into the middle of a deep plan` — where all three edges
+were correct and the sentence was not.
+
+The gauntlet measured what that costs on two papers that scored 0.000 and **could not have scored
+anything else**:
+
+* **`contradiction`** — two causes of one effect, where the store also says the two exclude each
+  other. The walk returned both, as a list, cheerfully. Listing two claims is not noticing they
+  cannot both hold, and a reader given that list is worse off than one given nothing, because the
+  list *looks* like knowledge.
+* **`legs`** — two chains reaching one target, where the target `requires` a node on each. They are
+  a **conjunction** and the walk reported them as alternatives. *"Because A, or because B"* and
+  *"because A and B together"* are different claims built from the same two names.
+
+Both are one gap: the walk **builds** and nothing **examines**.
+
+##### Four attacks, each grounded in a stated fact
+
+* **Exclusion** — two surviving chains whose roots the store says cannot both hold. The verdict is
+  not *pick the better one*; it is *these two cannot both hold and nothing here settles which* —
+  the same refusal `Grounder.answer` has made since V.13 for two equally supported triples, moved
+  up a level from a fact to a composition. `excludes` is a new relation the store had no name for,
+  so a corpus that knew two causes were mutually exclusive had nowhere to put it.
+* **Conjunction** — the target's own `requires` edges landing on two different chains. Then neither
+  is *an* explanation; together they are *the* explanation.
+* **Unsupported assumption** — a hop at the confidence floor, carrying a chain that is then stated
+  flatly. **Marked, never withdrawn**: a defeasible link is how most true generalisations are
+  stated, and refusing them would leave her able to explain almost nothing.
+* **Counterexample** — a stated case where the chain's cause holds and its effect does not. Rare in
+  a curated corpus and worth its two lines the day it fires: the store contradicting a derivation
+  out of its own contents.
+
+##### Three things it may not do
+
+**It may not invent.** Every attack carries the triple that licenses it, and a test walks every
+attack the predator makes and asserts that triple is in the store. An attack needing a fact nobody
+stated would be the predator confabulating *in order to accuse*, which is worse than the
+confabulation it hunts.
+
+**It may not resolve a conflict it found.** Reporting *"A and B cannot both hold"* and then
+answering with A is worse than never having noticed.
+
+**It runs after the walk and never inside it.** A predator wired into chain-building would suppress
+the very chains that are its evidence — the self-confirming failure V.26's figurative guard was
+built out of and had to be rescued from. It sees the finished explanation, the same one a reader
+sees. A test asserts the chains are byte-identical with the hunt on and off, and only the finding
+differs.
+
+And the finding is said **before** the list it changes, because a reader who saw the list and not
+the finding would be worse off than one who saw neither.
+
+```
+attack            hunt on   hunt off
+contradiction       1.000      0.000
+legs                1.000      0.000
+entities            1.000      1.000
+distractors         1.000      1.000
+shape               0.933      0.933
+overall             0.848      0.705
+```
+
+It swings exactly the two papers it was built for and nothing else. `explainschool` went **0.995 →
+0.998** — the `direction` paper gained, because an explanation that knows it is disputed no longer
+answers a purpose question with a cause.
+
+##### Where the gauntlet stands
+
+```
+wording 1.000 · wording_new 0.000 · entities 1.000 · shape 0.950 · distractors 1.000
+contradiction 1.000 · homonym 1.000 · gap 1.000 · legs 1.000 · unknown 1.000
+
+0.850 · 1.000 restraint · 0 confabulations
+```
+
+Every zero the V.37 floor recorded is closed **except `wording_new`**, and that one is not a gap.
+It is the honest ceiling of an induced grammar: a cue nobody demonstrated is not guessed, every
+item comes back silent rather than wrong, and two demonstrations would close it at any time. The
+0.850 is what it is *because* that paper is in the denominator, and it stays there.
+
+Run it: `NJPBrain.hunt_explanation("why does t happen?")`, or read `Explanation.conflict`,
+`.joint` and `.survival` off any answer.
 
 
 ### Reachable over the wire

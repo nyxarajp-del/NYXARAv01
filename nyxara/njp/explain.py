@@ -325,6 +325,18 @@ class Explanation:
     considered: int = 0
     pruned: int = 0
     why: str = ""
+    #: What :mod:`nyxara.njp.predator` found when it went after this. ``None`` when nothing did.
+    survival: Any = None
+
+    @property
+    def conflict(self) -> bool:
+        """Two answers the store says cannot both hold. Reported, never resolved."""
+        return bool(self.survival is not None and self.survival.conflict)
+
+    @property
+    def joint(self) -> bool:
+        """The chains are conjuncts. *"Because A and B together"*, not *"because A, or B"*."""
+        return bool(self.survival is not None and self.survival.joint)
 
     @property
     def answered(self) -> bool:
@@ -338,12 +350,22 @@ class Explanation:
         return [c for c in self.chains if c.kind == kind]
 
     def text(self) -> str:
-        """The whole answer as prose, one line per chain, causes before purposes."""
-        return "\n".join(c.gloss() for c in self.chains if c.gloss())
+        """The whole answer as prose, one line per chain, causes before purposes.
+
+        And **what the predator found, first**. A conflict or a conjunction changes what the list
+        of chains below it means, so a reader who saw the list and not the finding would be worse
+        off than one who saw neither: the list looks like knowledge.
+        """
+        body = "\n".join(c.gloss() for c in self.chains if c.gloss())
+        if self.survival is not None and self.survival.attacks:
+            return self.survival.note() + ("\n" + body if body else "")
+        return body
 
     def to_dict(self) -> Dict[str, Any]:
         return {"topic": self.topic, "question": self.question, "answered": self.answered,
                 "considered": self.considered, "pruned": self.pruned, "why": self.why,
+                "conflict": self.conflict, "joint": self.joint,
+                "survival": self.survival.to_dict() if self.survival is not None else None,
                 "chains": [c.to_dict() for c in self.chains]}
 
 
@@ -413,8 +435,11 @@ class Explainer:
     def __init__(self, grounder: Any = None, *,
                  max_depth: int = MAX_DEPTH,
                  min_confidence: float = MIN_CHAIN_CONFIDENCE,
-                 max_chains: int = MAX_CHAINS) -> None:
+                 max_chains: int = MAX_CHAINS, hunt: bool = True) -> None:
         self.grounder = grounder
+        #: Whether a finished explanation is attacked. Off makes the walk what it was before V.39,
+        #: which is how the papers measure what the predator is worth.
+        self.hunt = bool(hunt)
         self.max_depth = max(1, int(max_depth))
         self.min_confidence = float(min_confidence)
         self.max_chains = max(1, int(max_chains))
@@ -863,7 +888,23 @@ class Explainer:
                        else f"{out.pruned} chains, all below the floor")
         else:
             out.why = f"{len(out.chains)} of {out.considered} chains"
-        return out
+        return self._hunt(out)
+
+    def _hunt(self, explanation: Explanation) -> Explanation:
+        """Let the predator at the finished explanation.
+
+        **After** the walk and never inside it. A predator consulted while chains were being built
+        would suppress the very chains that are its evidence — the self-confirming failure V.26's
+        figurative guard was built out of and had to be rescued from. It sees what a reader sees.
+        """
+        if not self.hunt or not explanation.chains:
+            return explanation
+        try:
+            from nyxara.njp.predator import Predator
+            explanation.survival = Predator(self).attack(explanation)
+        except Exception:  # noqa: BLE001 — an explanation still stands if nothing attacked it
+            explanation.survival = None
+        return explanation
 
     def _rank(self, chains: Sequence[Chain]) -> List[Chain]:
         """Longest first inside a kind, causes before purposes before requirements.
@@ -951,7 +992,7 @@ class Explainer:
         out.chains = self._rank(kept)
         out.why = (f"{len(out.chains)} of {out.considered} chains" if out.chains
                    else "no parts and no effects stored")
-        return out
+        return self._hunt(out)
 
     def _walk_forward(self, topic: str, seen: Set[str], depth: int) -> List[List[Step]]:
         """Forwards along production. What happens next, and next after that."""

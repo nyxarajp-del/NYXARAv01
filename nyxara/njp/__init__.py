@@ -364,6 +364,16 @@ from nyxara.njp.explain import (
     Step,
 )
 from nyxara.njp.explainread import read_explanation_question
+from nyxara.njp.asking import Asking, Cue as QuestionCue, Frame as QuestionFrame
+# `Attack` is already `nyxara.njp.adversary.Attack` — an attack on a *belief*. This one attacks an
+# *explanation*, which is a different object, so it takes a qualified name here for the reason
+# `CausalExplanation` did: the export list is the wrong place to settle a word two organs are both
+# entitled to.
+from nyxara.njp.predator import (
+    Attack as ExplanationAttack,
+    Predator,
+    Survival,
+)
 
 # The communication organ is imported; `nyxara.njp.discourseschool` carries a `__main__` and is
 # kept out for the reason `corpusschool` is — `NJPBrain.go_to_discourse_school` is its in-process
@@ -528,6 +538,9 @@ __all__ = [
     "Register", "Reply", "Resolution", "Retelling", "Scale", "Standing", "TurnSurprise", "Uptake",
     # NJP V.36 — what, how and why (njp/explain.py)
     "Chain", "Explainer", "CausalExplanation", "Plan", "Step", "read_explanation_question",
+    # NJP V.38/V.39 — the question form induced, and the predator over explanations
+    "Asking", "QuestionCue", "QuestionFrame",
+    "Predator", "ExplanationAttack", "Survival",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions

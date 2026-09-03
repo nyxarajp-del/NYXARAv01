@@ -2097,6 +2097,16 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def hunt_explanation(self, question: str) -> Any:
+        """Ask, then go after the answer. Returns the :class:`~nyxara.njp.predator.Survival`.
+
+        The walk already runs the predator on every explanation it returns; this is for a caller
+        who wants the findings rather than the prose — which of two answers exclude each other,
+        which chains are jointly required, which link the whole thing rests on.
+        """
+        got = self.explain(question)
+        return getattr(got, "survival", None)
+
     def refresh_explanations(self) -> int:
         """Re-index the walk after the store has grown. Returns the edge count it now sees.
 

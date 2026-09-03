@@ -3653,6 +3653,11 @@ _PREDICATE_ALIASES: Dict[str, str] = {
     "unit": "unit", "formula": "formula", "birthplace": "birthplace",
     "has_kind": "has_kind", "has_part": "has_part", "consists_of": "consists_of",
     "has_step": "has_step", "has_stage": "has_stage",
+    # *These two cannot both hold.* A relation the store had no name for, so a corpus that knew
+    # two causes were mutually exclusive had nowhere to put it and `njp/predator.py` had nothing
+    # to read. Every spelling folds onto one edge for the reason the `produces` family does.
+    "excludes": "excludes", "exclude": "excludes", "rules_out": "excludes",
+    "incompatible_with": "excludes", "contradicts": "excludes",
     "also_known_as": "also_known_as", "occurs_when": "occurs_when", "capable_of": "capable_of",
     # The relations a seed pattern renames on the way in. "animal needs water" is *stored* as
     # `requires` by the pattern that reads it, and "what does an animal need" asks for `needs` —

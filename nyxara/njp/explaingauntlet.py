@@ -813,10 +813,11 @@ def _ensure_taught() -> None:
 def _walk(question: str, world: World) -> Reply:
     """Point the gauntlet at :mod:`nyxara.njp.explain`.
 
-    ``conflict`` and ``joint`` are both False, and neither is a limitation of this adapter: the
-    walk has no representation for *"these two cannot both hold"* or *"these two are both
-    required"*. That is what the ``contradiction`` and ``legs`` papers exist to record, and
-    filling the fields in from the text would be the harness answering its own question.
+    ``conflict`` and ``joint`` are read off the explanation, never off its text. They were both
+    hard-coded False until V.39 because the walk had no representation for *"these two cannot both
+    hold"* or *"these two are both required"* — and filling them in from the text would have been
+    the harness answering its own question. They now come from
+    :mod:`nyxara.njp.predator`, which is a different organ than the one being examined.
 
     ``chains`` is every chain it returned, best first — the grader reads the leading one for a
     derivation and all of them for a forbidden link, because a wrong edge buried in the fourth
@@ -832,7 +833,9 @@ def _walk(question: str, world: World) -> Reply:
     if hasattr(got, "orders"):
         return Reply(text=" → ".join(got.first) if got.first else "",
                      chains=[list(got.first)] if got.first else [])
-    return Reply(text=got.text(), chains=[list(c.nodes) for c in got.chains])
+    return Reply(text=got.text(), chains=[list(c.nodes) for c in got.chains],
+                 conflict=bool(getattr(got, "conflict", False)),
+                 joint=bool(getattr(got, "joint", False)))
 
 
 def run(*, seed: int = DEFAULT_SEED, limit: int = DEFAULT_LIMIT,
