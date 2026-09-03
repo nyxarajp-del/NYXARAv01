@@ -60,6 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39g | Breadth, measured (`njp/breadth.py` asks what no other exam here can: of things a person might name, what fraction does she have any fact about. ConceptNet's English assertions ship as a second corpus — 4,382 subjects become 130,274 — and it is **off by default** because measuring it honestly showed 12× the facts buys 2.8 points on subjects nobody mentioned, nothing on derivation, and costs `recall` 1.00 → 0.70 and 23× the time per question) | `nyxara.njp.breadth` + `nyxara/njp/data/world_broad.jsonl.gz` | NEW |
 | 39f | Structure discovery and cross-domain abstraction (she does not only walk the stored graph — she recovers which causal structures the *observations* support, reporting a whole Markov equivalence class rather than picking one of three indistinguishable orientations, with add/remove/reverse/merge/split as named operations and an MDL-style score that never overrules the evidence. And she finds subgraphs in different domains that are the same graph under a renaming — a structure-preserving bijection on shape alone, since the vocabularies share nothing — returning one abstraction reaching three domains with every role aligned, and leaving it unnamed) | `nyxara.njp.surgery` + `nyxara.njp.fusion` | NEW |
 | 39e | Self-attack on explanations (`njp/adversary` goes after a *belief*; nothing went after a *composition*, where every fact can be true and the sentence still false. Four attacks, each carrying the stated triple that licenses it: two answers the store says exclude each other — reported as a dispute and never resolved; chains the target `requires` on both sides — a conjunction, not a list; a hop at the confidence floor, marked and not withdrawn; and a stated counterexample. It runs *after* the walk, never inside it, so it cannot suppress its own evidence) | `nyxara.njp.predator` + `nyxara.njp.explaingauntlet` | NEW |
 | 39d | Meaning over spelling (a question's *form* induced from demonstrations rather than listed as regular expressions — the cue is the open-class word left when the topic and the closed class are removed, kept only once two demonstrations differing in topic agree, dropped when two disagree; and an identity firewall so a chain cannot enter a node on one sense of a word and leave on another. The gauntlet's `wording` 0.100 → 1.000 and `homonym` 0.000 → 1.000) | `nyxara.njp.asking` + `nyxara.njp.explain` | NEW |
@@ -3920,6 +3921,81 @@ surgery 1.000 · fusion 1.000
 
 Run it: `NJPBrain.recover_structure(["a", "b", "c"])`, `NJPBrain.shared_shape({"biology": [...],
 "engineering": [...]})`.
+
+
+#### NJP V.41 — knowledge at scale, and the number that says what a fact store cannot do
+
+The Master asked for knowledge of everything, on the scale of a modern LLM. This section is the
+honest answer, and most of it is a measurement rather than a claim.
+
+##### What was done
+
+ConceptNet 5.7's full assertions dump — 34,074,917 rows — converted through the existing
+`scripts/prepare_conceptnet.py` and shipped as `nyxara/njp/data/world_broad.jsonl.gz` (1.9 MB).
+**198,455 kept**; 26.2M dropped by relation (`RelatedTo` and `AtLocation` are excluded for reasons
+that script already documents) and 7.2M by language.
+
+```
+                    facts      subjects
+curated            15,848         4,382
++ broad           211,149       130,274      (13× facts, 30× subjects)
+```
+
+`njp/breadth.py` is the new examination, and it asks the question no other exam in this package
+can, because every other one draws its subjects from what she already knows:
+
+> Of the things a person might mention, what fraction does she have **any fact at all** about?
+
+##### The numbers
+
+**Breadth, in-source.** On 1,500 subjects sampled from ConceptNet, coverage goes **0.060 → 1.000**.
+That number is *true and nearly worthless*, and a test says so: sampling subjects from the file you
+just ingested is a tautology. It is reported only because the honest version needs it as a contrast.
+
+**Breadth, held out by subject.** Ten percent of subjects removed from the load entirely, then
+asked about:
+
+```
+                 coverage    reachable    derived
+curated only        0.060        0.931      0.029
++ 176k facts        0.088        0.880      0.030
+```
+
+**Twelve times the facts bought 2.8 percentage points on subjects nobody mentioned, and nothing at
+all on derivation.** That is the finding, and it is the structural difference from a language
+model stated as a number rather than as an argument: a fact store knows exactly the entities it was
+told about. It does not generalise to a new one. `derived` — two-hop questions whose answer was
+never ingested — moved 0.029 to 0.030.
+
+**And it costs.** `recall` on the curated corpus falls **1.00 → 0.70**: ConceptNet supplies
+competing values for subjects the curated corpus had cleanly, and `Grounder.answer` correctly
+declines to choose between two equally supported readings — so a question that had one answer now
+has none. Loading goes 0.8s → 14.0s and thirty exam items go **0.2s → 4.7s**, twenty-three times
+the cost per question.
+
+So the broad corpus ships and is **off by default**, on that measurement rather than on a
+preference. `load_brain(broad=True)` turns it on. Breadth and precision are genuinely in tension
+here and the caller is the one who knows which they need.
+
+##### What this cannot become, said plainly
+
+A fact store and a language model do not have the same shape of knowledge, and no single number
+compares them. What is on this side is **named entities and stated relations between them** — which
+can be asked for, checked, contradicted, and derived from, and every one of those verbs is a thing
+the rest of this package does. What is not on this side is everything a model carries that was
+never a triple: how a sentence is usually finished, what a paragraph of legal prose sounds like,
+the shape of an argument, the thousand unstated regularities that come from reading rather than
+from being told.
+
+Scaling this corpus further — Wikidata, DBpedia — would move the first number and, on the evidence
+above, **not the third**. More facts of the same kind is not the road to the second thing. The road
+to the second thing is her CORTEX, which is a language model, already on-device, and already
+classed among her own brains rather than as an external teacher (capability 39).
+
+What this file adds is the honest instrument for saying which of the two a given question needs.
+
+Run it: `python -m nyxara.njp.breadth --against <triples.jsonl.gz> --sample 1500`,
+`load_brain(broad=True)`.
 
 
 ### Reachable over the wire

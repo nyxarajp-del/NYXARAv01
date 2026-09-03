@@ -980,16 +980,49 @@ class GeneralKnowledgeExam:
 # --------------------------------------------------------------------------- #
 # Convenience
 # --------------------------------------------------------------------------- #
-def load_brain(path: str = "", *, brain: Any = None) -> Any:
-    """A bare :class:`~nyxara.njp.brain.NJPBrain` with the shipped world corpus in it."""
+#: The broad corpus: ConceptNet 5.7's English assertions, reshaped by
+#: ``scripts/prepare_conceptnet.py``. Crowd-sourced, ~198,000 facts over ~130,000 subjects, and
+#: **not loaded by default** — see :func:`load_brain`.
+_BROAD = "world_broad.jsonl.gz"
+
+
+def load_brain(path: str = "", *, brain: Any = None, broad: bool = False) -> Any:
+    """A bare :class:`~nyxara.njp.brain.NJPBrain` with the shipped world corpus in it.
+
+    ``broad`` additionally loads :data:`_BROAD`, and it is **off by default** on a measurement
+    rather than on a preference. What it buys and what it costs are both large:
+
+    * **Breadth.** 4,382 subjects become 130,274 — thirty times as many things she has anything at
+      all to say about. On a list of 1,500 things a person might name, coverage goes from
+      **0.060 to 1.000**.
+    * **Nothing at all for what she was not told.** Held out *by subject* — ten percent of the
+      subjects removed from the load and asked about afterwards — coverage moves **0.060 → 0.088**
+      and two-hop derivation **0.029 → 0.030**. Twelve times the facts, two and a half percentage
+      points. A fact store's knowledge does not generalise to an entity nobody mentioned, and that
+      is the structural difference from a language model, measured rather than argued.
+    * **It makes her worse at what she already knew.** ``recall`` on the curated corpus goes
+      **1.00 → 0.70**. ConceptNet supplies competing values for subjects the curated corpus had
+      cleanly, and :meth:`~nyxara.njp.grounding.Grounder.answer` correctly declines to pick between
+      two equally supported readings — so a question that had one answer now has none. Retrieval of
+      what she holds falls the same way, 0.931 → 0.880.
+    * **And it is slow.** Loading goes 0.8s → 14.0s, and thirty exam items go **0.2s → 4.7s**:
+      twenty-three times the cost per question, for a graph thirteen times the size.
+
+    So the curated corpus is the default because it is what the examinations are about, and the
+    broad one is a flag because breadth and precision are genuinely in tension here and the caller
+    is the one who knows which they need.
+    """
     from nyxara.njp.brain import NJPBrain
     from nyxara.njp.ingest import ingest_triples
 
     got = brain if brain is not None else NJPBrain()
-    if not path:
-        import os
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", _TRIPLES)
-    ingest_triples(got, path, source="world_knowledge")
+    import os
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    ingest_triples(got, path or os.path.join(here, _TRIPLES), source="world_knowledge")
+    if broad:
+        wide = os.path.join(here, _BROAD)
+        if os.path.exists(wide):
+            ingest_triples(got, wide, source="conceptnet")
     return got
 
 
