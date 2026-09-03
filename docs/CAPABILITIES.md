@@ -2998,6 +2998,52 @@ because -> cause-after    so -> cause-before    to -> goal-after
   -> the same anchor
 ```
 
+#### NJP V.31 — the closed class, found rather than typed
+
+The gap report scored multilinguality at two of seven: 242 closed-class words, 197 Latin and 45
+Devanagari, and **zero** for Gujarati, Spanish, Arabic, Chinese and French. Closing that by typing
+five more lists would be five more of exactly what V.26 spent a commit removing.
+
+`semantics.py` argues, correctly, that the closed class is the half of a language that does not
+grow and that a list is the honest representation of it. What it does not argue — because it cannot
+— is that the list must be **written by hand for every language**. The closed class has a
+distributional signature, and it took two tries to state correctly:
+
+| score | English F1 | precision on an overheard language | recall |
+|---|---|---|---|
+| frequency | 1.00 | **0.01** | 1.00 |
+| breadth | 0.86 | **0.04** | 1.00 |
+| breadth × frequency | 0.86 | **1.00** | **1.00** |
+
+Breadth alone measures *small class*, not *closed class*: a language with 120 verb types and 300
+noun types gives its verbs wide distributions too, and 101 of them came back "closed". Frequency
+alone is worse. It is the **product** — a closed word is both very frequent and stands beside
+almost anything, and a content word is neither.
+
+**The cut is fitted where the answer is known and applied where it is not.** The lesson is exposure
+to English, whose closed class this package ships; the exam is a language minted *after* the lesson
+that she has only overheard, with no meaning attached and nothing asserted from it. What transfers
+is the **criterion**, never the words — the same claim `tongue` makes one level down, and the only
+kind of cross-language transfer this module has been willing to make anywhere. Unfitted, she
+claims nothing.
+
+Beside it, translation at the communication level. `LanguageFaculty.translate` carries the roles,
+the polarity, the tense and the mood and verifies by reading its own output back. `Retelling`
+reports what it carried **and what it did not**: the act does not cross, because an indirect
+request is a convention of a speech community rather than a property of a meaning. The `retell`
+subject scores that negative result rather than hiding it — a run where the act silently came
+through would fail.
+
+**Two defects in the exam, both mine, and both the same shape.** The post-test looked its language
+block up by prefix and found the **pre-test's**, checking this sitting's answer against a different
+dialect. And the block name was keyed on the mint's own counter, which two sittings both reach, so
+three separately minted dialects were poured into one language — where every closed form was
+correctly found, and precision read 0.33 because twelve of them were "wrong" for the one dialect
+being asked about. The exam was merging languages; the learner was right both times.
+
+    vocabulary   0.50 -> 1.00
+    retell       a floor, and it scores the act NOT crossing
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -3013,21 +3059,23 @@ because -> cause-after    so -> cause-before    to -> goal-after
   exchange           0.20   1.00   +0.80       4  LEARNED
   alternations       0.30   1.00   +0.70      10  LEARNED
   anchor             0.23   1.00   +0.77       6  LEARNED
+  vocabulary         0.50   1.00   +0.50    4000  LEARNED
   reference          0.80   1.00   +0.20       9  LEARNED
   contradiction      0.75   1.00   +0.25      10  LEARNED
   memory             0.50   1.00   +0.50      10  LEARNED
   minds              1.00   1.00   +0.00       0  already
   register           1.00   1.00   +0.00       0  already
   ground             1.00   1.00   +0.00       0  already
+  retell             1.00   1.00   +0.00       0  already
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      17/17 subjects
-  learned       13 subject(s) moved by teaching
-  overall       163/163 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  mastered      19/19 subjects
+  learned       14 subject(s) moved by teaching
+  overall       173/173 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       163/163 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       173/173 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
 **Four of those floors did not exist before the second pass.** `reference`, `contradiction`,

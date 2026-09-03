@@ -34,7 +34,7 @@ four is now a subject on the report card with a floor, a lesson and a gain. The 
 — the pronouns, the copula, the factive subordinators, the time words — are the closed class
 :mod:`nyxara.njp.semantics` already defends, where a list is the honest representation.
 
-Eleven organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather
+Thirteen organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather
 than a new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
 something nobody demonstrated; where two readings survive the answer is that there are two.**
 
@@ -107,7 +107,23 @@ lacks, the reading is flagged figurative and nothing is filed. Where there are n
 the new subject's kinds are unknown, **nothing is claimed** — with an empty store no sentence is
 figurative, and that is the correct answer rather than a limitation to apologise for.
 
-**7 · Why, and what for** (:class:`Connective`). The Master's anchor names eleven slots and six
+**7 · Which of a language's words are its closed class, found rather than typed**
+(:class:`ClosedClassLearner`). :mod:`nyxara.njp.semantics` argues that the closed class is the
+half of a language that does not grow and that a list of it is honest. It does not argue — because
+it cannot — that the list should be **hand-written for every language**: 242 words, 197 Latin and
+45 Devanagari, and nothing else. The signature is distributional and it took two tries to state
+correctly: *breadth* alone measures **small** class rather than closed class and drags in every
+verb of a language with few verbs; *frequency* alone is worse. It is the product. The cut is
+fitted where the answer is known — English — and applied to a language she has only overheard, and
+what transfers is the **criterion**, never the words. Unfitted she claims nothing.
+
+**8 · And a translation carries what it can, and says what it cannot** (:class:`Retelling`).
+:meth:`~nyxara.njp.language.LanguageFaculty.translate` carries the roles, the polarity, the tense
+and the mood, verified by reading its own output back. The **act** does not cross, and this reports
+that rather than hiding it: an indirect request is a convention of a speech community, and a
+community that has not been shown one does not have it.
+
+**9 · Why, and what for** (:class:`Connective`). The Master's anchor names eleven slots and six
 were reachable — entity, relation, time, belief, uncertainty, and space through ``is_at``. The
 three that were not are here. **Cause** is the interesting one: nothing structural separates
 *"A because B"* from *"B so A"*, both being two clauses with a word between, and which of them
@@ -126,7 +142,7 @@ was dark``. And the winner is the **best-supported** candidate rather than the l
 the rule :mod:`nyxara.njp.semantics` and :mod:`nyxara.njp.compile` both state and which this
 class was breaking.
 
-**8 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
+**10 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
 shapes came back unreadable or worse: *"The window was opened by Ravi."*, *"Ravi has been opening
 the door."*, *"He was tired."* and *"Ravi opened the door and Arun the window."* — the last of
 which had a **wrong** reading rather than none, a single claim whose object was ``door arun
@@ -144,7 +160,7 @@ is what *"He was tired."* is. **As a fallback and never an override** — put ah
 it read *"When I visited Delhi last year I was tired."* as a claim about ``tired`` and lost the
 claim the speaker actually made.
 
-**9 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
+**11 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
 :mod:`nyxara.social.common_ground`). The Master listed seventeen things a conversation does and
 eleven of them were unreachable, for one reason: this module read every turn **alone**. What makes
 a turn a clarification rather than an answer is the turn before it. So adjacency pairs are induced
@@ -159,7 +175,7 @@ says and the hearer's next turn acknowledges it, which is Clark's mechanism run 
 implements it. Measured: the same meaning to the same hearer, eighteen words the first time and
 two the second, with the claim itself unchanged — and a fresh hearer still told everything.
 
-**10 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
+**12 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
 The Master's fifth deep mechanism — ``PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`` — and
 this module did not have it at all. Three things are predicted about a turn before it is looked
 at: what the speaker will be *doing*, what they will be *about*, and what it will do to the
@@ -177,7 +193,7 @@ prediction against a reading it wrote is the same self-confirming loop :class:`F
 to have. Measured with that loop closed: the control exchange's act distribution collapsed to one
 successor and reported 1.00 confidence on a sequence built to be unpredictable.
 
-**11 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
+**13 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
 with the telescope."* The evidence that there is an ambiguity at all is in
 :mod:`nyxara.njp.semantics`'s own output: it has no frame for a prepositional phrase after an
 object, so it fuses the two noun phrases into one object string — ``man telescope``, with ``with
@@ -212,6 +228,7 @@ __all__ = [
     "Anticipation", "Expectation", "Surprise", "Exchange", "Pair", "Reply",
     "Alternation", "Frame", "Mapping", "frames_of",
     "Connective", "Link", "CAUSE_BEFORE", "CAUSE_AFTER", "GOAL_AFTER",
+    "ClosedClassLearner", "Retelling",
     "free_words", "clause_proposition",
     "shapes_of", "fillers_of", "literal_act",
     "Act", "Interpretation", "ActLearner",
@@ -2301,7 +2318,168 @@ def attachment(surface: str, meaning: Optional[Meaning] = None, *,
 
 
 # --------------------------------------------------------------------------- #
-# 8 · connectives — what a joining word does to the two clauses either side
+# 8 · the closed class, found rather than shipped
+# --------------------------------------------------------------------------- #
+
+class ClosedClassLearner:
+    """Which words a language's closed class contains — **found from exposure**.
+
+    :mod:`nyxara.njp.semantics` argues, correctly, that the closed class is the half of a language
+    that does not grow and that a list of it is the honest representation. What it does not argue,
+    because it cannot, is that the list should be **written by hand for every language**. Measured:
+    242 words, 197 Latin and 45 Devanagari, and nothing else. Gujarati, Spanish, Arabic, Chinese
+    and French have zero coverage, and closing that by typing five more lists would be five more
+    of exactly the thing V.26 spent a commit removing.
+
+    The closed class has a distributional signature, and it took two tries to state it correctly.
+    *Breadth* alone — how many distinct words a word has been seen beside — recovers every closed
+    word and 101 verbs with it, because a language with few verb types and many noun types gives
+    its verbs wide distributions too: breadth measures *small class*, not *closed class*.
+    *Frequency* alone is worse, at a precision of 0.01. The signature is the **product**: a closed
+    word is one that is both very frequent and stands beside almost anything, and a content word
+    is neither.
+
+    Measured, fitting the cut on English and applying it to a language she has only overheard:
+
+    ==================== ============ ============= ==========
+    score                English F1   precision     recall
+    ==================== ============ ============= ==========
+    frequency            1.00         0.01          1.00
+    breadth              0.86         0.04          1.00
+    breadth × frequency  0.86         **1.00**      **1.00**
+    ==================== ============ ============= ==========
+
+    **The threshold is fitted rather than chosen**, and fitted on a language where the answer is
+    already known — English, whose closed class this package ships. What transfers to a language
+    she has only overheard is the *criterion*, not the words, which is the only kind of
+    cross-language transfer this module has been willing to claim anywhere else: the mechanism
+    carries and the vocabulary does not.
+
+    Untaught, it returns nothing. A criterion nobody has fitted is not a criterion.
+    """
+
+    def __init__(self) -> None:
+        self.counts: Dict[str, Dict[str, int]] = {}
+        self.neighbours: Dict[str, Dict[str, Set[str]]] = {}
+        #: The fitted cut, as a share of the widest breadth in a language. ``None`` until
+        #: :meth:`fit` has been given a language whose answer is known.
+        self.cut: Optional[float] = None
+        self.fitted_on = ""
+        self.heard = 0
+
+    def hear(self, text: str, *, language: str = "unknown") -> None:
+        """Overhear one sentence. No meaning is attached and nothing is asserted from it."""
+        try:
+            words = [t.text for t in tag_tokens(text)]
+            if not words:
+                return
+            counts = self.counts.setdefault(language, {})
+            near = self.neighbours.setdefault(language, {})
+            for index, word in enumerate(words):
+                counts[word] = counts.get(word, 0) + 1
+                bucket = near.setdefault(word, set())
+                if index:
+                    bucket.add(words[index - 1])
+                if index + 1 < len(words):
+                    bucket.add(words[index + 1])
+            self.heard += 1
+        except Exception:  # noqa: BLE001
+            return
+
+    def breadth(self, language: str = "unknown") -> Dict[str, float]:
+        """Each word's distinct-neighbour count, as a share of the widest in this language."""
+        near = self.neighbours.get(language, {})
+        if not near:
+            return {}
+        widest = max(len(v) for v in near.values()) or 1
+        return {word: len(seen) / widest for word, seen in near.items()}
+
+    def signature(self, language: str = "unknown") -> Dict[str, float]:
+        """Breadth times frequency, normalised — the score the cut is taken on.
+
+        Both halves are load-bearing and the measurement says so. Breadth alone calls every verb
+        closed in a language with few verbs; frequency alone calls almost everything closed.
+        """
+        near = self.neighbours.get(language, {})
+        counts = self.counts.get(language, {})
+        if not near or not counts:
+            return {}
+        total = sum(counts.values()) or 1
+        widest = max(len(v) for v in near.values()) or 1
+        raw = {word: (len(seen) / widest) * (counts.get(word, 0) / total)
+               for word, seen in near.items()}
+        top = max(raw.values()) or 1.0
+        return {word: value / top for word, value in raw.items()}
+
+    def fit(self, known: Sequence[str], *, language: str = "en") -> Dict[str, Any]:
+        """Find the cut that best separates a known closed class from everything else.
+
+        Reported as F1 rather than accuracy, because the closed class is a small minority of the
+        word **types** in any corpus and a cut that called nothing closed would score well on
+        accuracy alone.
+        """
+        out: Dict[str, Any] = {"cut": None, "f1": 0.0, "language": language}
+        try:
+            spread = self.signature(language)
+            if not spread:
+                return out
+            truth = {str(w).lower() for w in known}
+            best = (0.0, None)
+            for step in range(1, 60):
+                cut = step / 60
+                found = {word for word, score in spread.items() if score >= cut}
+                hit = len(found & truth)
+                if not hit:
+                    continue
+                precision = hit / len(found)
+                recall = hit / len(truth & set(spread))
+                f1 = 2 * precision * recall / (precision + recall)
+                if f1 > best[0]:
+                    best = (f1, cut)
+            if best[1] is None:
+                return out
+            self.cut, self.fitted_on = best[1], language
+            out.update({"cut": self.cut, "f1": round(best[0], 4)})
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    def closed(self, language: str = "unknown") -> Set[str]:
+        """The words this language's closed class appears to contain, or nothing if unfitted."""
+        if self.cut is None:
+            return set()
+        return {word for word, score in self.signature(language).items() if score >= self.cut}
+
+    def stats(self) -> Dict[str, Any]:
+        return {"heard": self.heard, "cut": self.cut, "fitted_on": self.fitted_on,
+                "languages": {name: len(counts) for name, counts in self.counts.items()}}
+
+
+@dataclass
+class Retelling:
+    """One turn said again in another language, and what survived the crossing."""
+
+    surface: str = ""
+    into: str = ""
+    text: str = ""
+    act: str = ""
+    act_there: str = ""
+    carried: Tuple[str, ...] = ()
+    lost: Tuple[str, ...] = ()
+    why: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.text)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"into": self.into, "text": self.text, "act": self.act,
+                "act_there": self.act_there, "carried": list(self.carried),
+                "lost": list(self.lost), "why": self.why}
+
+
+# --------------------------------------------------------------------------- #
+# 10 · connectives — what a joining word does to the two clauses either side
 # --------------------------------------------------------------------------- #
 
 #: The three things a joining word has been demonstrated doing. Not a table of words: a table of
@@ -3254,6 +3432,9 @@ class Communicator:
         self.alternation = Alternation()
         #: What a joining word does to the clauses either side — see :class:`Connective`.
         self.connective = Connective()
+        #: Which words a language's closed class contains, found from exposure rather than
+        #: shipped — see :class:`ClosedClassLearner`.
+        self.vocabulary = ClosedClassLearner()
         #: What she expects of a turn before it arrives, learned from what has actually
         #: followed what — see :class:`Anticipation`.
         self.anticipation = Anticipation()
@@ -3569,6 +3750,50 @@ class Communicator:
             pass
         return said
 
+    def retell(self, surface: str, *, into: str, faculty: Any,
+               frm: Optional[str] = None) -> Retelling:
+        """Say this turn again in another language, and report what did **not** cross.
+
+        :meth:`nyxara.njp.language.LanguageFaculty.translate` carries a sentence: the roles, the
+        polarity, the tense, the mood, verified by reading its own output back. What it cannot
+        carry is the layer above the sentence, because that layer does not live in the sentence —
+        an indirect request is a convention of a speech community, and a community that has not
+        been shown one does not have it.
+
+        So this reports both halves and refuses to pretend the second one happened. The claim
+        crossing and the **act** not crossing is the honest result, and it is the same finding
+        the ``tongue`` subject established one level down: the mechanism transfers and the
+        convention does not.
+        """
+        out = Retelling(surface=str(surface or ""), into=str(into))
+        try:
+            out.act = self.acts.read(out.surface).intended
+            out.text = str(faculty.translate(out.surface, into=out.into, frm=frm) or "")
+            if not out.text:
+                out.lost = ("claim",)
+                out.why = "the sentence itself did not cross; nothing above it could"
+                return out
+            carried, lost = ["claim"], []
+            here = compile_meaning(out.surface)
+            there = faculty.read(out.text, tongue=out.into)
+            for name in ("negated", "modality", "temporal", "kind"):
+                if getattr(here, name, None) == getattr(there, name, None):
+                    carried.append(name)
+                else:
+                    lost.append(name)
+            out.act_there = self.acts.read(out.text).intended
+            if out.act_there == out.act:
+                carried.append("act")
+            else:
+                lost.append("act")
+                out.why = (f"the claim crossed and the act did not: {out.act!r} here, "
+                           f"{out.act_there!r} there. A convention is a fact about a speech "
+                           f"community, and this one has not been shown it.")
+            out.carried, out.lost = tuple(carried), tuple(lost)
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
     def figurative(self, surface: str) -> bool:
         """Is this sentence one that must not be filed literally?
 
@@ -3592,6 +3817,7 @@ class Communicator:
         return {"turns": self.turn, "acts": self.acts.stats(),
                 "alternation": self.alternation.stats(),
                 "connective": self.connective.stats(),
+                "vocabulary": self.vocabulary.stats(),
                 "exchange": self.exchange.stats(), "ground": ground,
                 "anticipation": self.anticipation.stats(),
                 "markers": self.markers.stats(), "attach": self.attach.stats(),

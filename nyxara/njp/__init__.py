@@ -354,6 +354,7 @@ from nyxara.njp.discourse import (
     Alternation,
     Anticipation,
     Claim,
+    ClosedClassLearner,
     Communicator,
     Connective,
     Figure,
@@ -367,6 +368,7 @@ from nyxara.njp.discourse import (
     Expectation,
     Link,
     Reply,
+    Retelling,
     Resolution,
     Surprise,
     Uptake,
@@ -498,9 +500,9 @@ __all__ = [
     "Constraint", "Expr", "Problem", "SolvedProblem", "Solver",
     "CorpusReading", "CorpusRecord", "CorpusSolver", "CorpusVerdict", "verify_corpus_answer",
     # NJP V.26 — what was meant, and by whom (njp/discourse.py)
-    "ActLearner", "Alternation", "Anticipation", "Claim", "ClaimVerdict", "Communicator", "Connective", "Expectation",
+    "ActLearner", "Alternation", "Anticipation", "Claim", "ClaimVerdict", "ClosedClassLearner", "Communicator", "Connective", "Expectation",
     "Exchange", "Figure", "Interpretation", "Ledger", "Link", "Minds", "Readings", "Reference",
-    "Register", "Reply", "Resolution", "Surprise", "Uptake",
+    "Register", "Reply", "Resolution", "Retelling", "Surprise", "Uptake",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions

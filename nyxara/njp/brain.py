@@ -1981,6 +1981,56 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def overhear_language(self, text: str, *, language: str = "unknown") -> None:
+        """Overhear one sentence of any language, for the closed-class induction only.
+
+        Nothing is asserted from it and no meaning is attached — the counterpart of
+        :meth:`hear_language`, one level down: that feeds the affix induction and the word
+        classes, and this feeds the question of which of a language's words are its **closed
+        class** at all. See :class:`~nyxara.njp.discourse.ClosedClassLearner`.
+        """
+        try:
+            if self.discourse is not None:
+                self.discourse.vocabulary.hear(str(text or ""), language=str(language))
+        except Exception:  # noqa: BLE001
+            return
+
+    def fit_closed_class(self, known: Any, *, language: str = "en") -> Any:
+        """Fit the closed-class criterion where the answer is known, so it can be applied where
+        it is not. What transfers is the criterion, never the words."""
+        try:
+            if self.discourse is None:
+                return {}
+            return self.discourse.vocabulary.fit(known, language=language)
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def closed_class(self, language: str = "unknown") -> Any:
+        """The words that language's closed class appears to contain, or nothing if unfitted."""
+        try:
+            if self.discourse is None:
+                return set()
+            return self.discourse.vocabulary.closed(language)
+        except Exception:  # noqa: BLE001
+            return set()
+
+    def retell(self, surface: str, *, into: str, frm: Optional[str] = None) -> Any:
+        """Say one turn again in another language, and report what did **not** cross.
+
+        The claim crosses; the **act** does not, unless the target language's convention has been
+        separately demonstrated. That is the honest result and this reports it rather than hiding
+        it — an indirect request is a fact about a speech community, not about a meaning.
+        """
+        try:
+            if self.discourse is None or self.language is None:
+                from nyxara.njp.discourse import Retelling
+                return Retelling(surface=str(surface or ""), into=str(into))
+            return self.discourse.retell(str(surface or ""), into=str(into),
+                                         faculty=self.language, frm=frm)
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.discourse import Retelling
+            return Retelling(surface=str(surface or ""), into=str(into))
+
     def show_cause(self, surface: str, *, cause: str = "", goal: str = "") -> None:
         """Demonstrate which clause of this sentence is the cause, or which is the purpose.
 

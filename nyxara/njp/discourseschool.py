@@ -50,7 +50,7 @@ Run it: ``python -m nyxara.njp.discourseschool``, or ``NJPBrain.go_to_discourse_
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from nyxara.njp.discourse import (REGISTERS, Communicator, Referent, attachment,
                                   read_claim)
@@ -60,8 +60,8 @@ from nyxara.njp.semantics import compile_meaning
 __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
     "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
-    "Anticipating", "ExchangeSubject", "Alternations", "Anchor", "Grounded", "Tongue",
-    "Wiring",
+    "Anticipating", "ExchangeSubject", "Alternations", "Anchor", "Vocabulary", "Retell",
+    "Grounded", "Tongue", "Wiring",
     "DiscourseSchool", "SUBJECTS", "main",
 ]
 
@@ -761,6 +761,149 @@ class Alternations(DiscourseSubject):
         return score, misses
 
 
+class Vocabulary(DiscourseSubject):
+    """The closed class of a language she has only overheard, found rather than typed.
+
+    :mod:`nyxara.njp.semantics` argues that the closed class is the half of a language that does
+    not grow and that a list is the honest representation of it. It does not argue — because it
+    cannot — that the list should be **hand-written for every language**: 242 words, 197 Latin
+    and 45 Devanagari, and nothing else.
+
+    So the criterion is fitted where the answer is known and applied where it is not. The lesson
+    is exposure to English, whose closed class this package ships; the exam is a **minted
+    language** whose closed forms were drawn after the lesson and which she has only ever
+    overheard — no meaning attached, nothing asserted, exactly what
+    :meth:`~nyxara.njp.brain.NJPBrain.hear_language` does.
+
+    Both halves are scored, and precision is the one that matters: recovering the closed class by
+    calling every word closed is not recovering anything.
+    """
+
+    id = "vocabulary"
+    title = "the closed class of a language she was never given"
+    teaches = "the distributional signature of a closed class, fitted where the answer is known"
+    items = 6
+    threshold = 0.8
+
+    SHAPES = ("the {a} {v} the {b}", "a {a} {v} a {b}", "the {a} did not {v} the {b}",
+              "is the {a} in the {b}", "what {v} the {a}", "can the {a} {v} the {b}")
+    KNOWN = ("the", "a", "did", "not", "is", "in", "what", "can")
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.student
+        rng = mint.rng
+        nouns = [mint.word() for _ in range(300)]
+        verbs = [mint.word() for _ in range(120)]
+        for _ in range(4000):
+            voice.vocabulary.hear(
+                rng.choice(self.SHAPES).format(a=rng.choice(nouns), b=rng.choice(nouns),
+                                               v=rng.choice(verbs)), language="en")
+        fitted = voice.vocabulary.fit(self.KNOWN, language="en")
+        return Taught(4000, f"cut {fitted['cut']}, F1 {fitted['f1']} on English")
+
+    def _overhear(self, brain: Any, mint: Mint) -> Tuple[Set[str], Set[str], str]:
+        """Expose her to a minted language and return ``(found, true, the language's name)``.
+
+        The name comes back because the student is shared between the sittings and each of them
+        mints its own language. Looking the block up by prefix afterwards found the **pre-test's**
+        language and checked this sitting's answer against it — one item wrong every run, for a
+        reason that was the exam's.
+        """
+        from nyxara.njp.dialects import mint_dialect
+
+        voice = self.student
+        rng = mint.rng
+        tongue = mint_dialect(rng, "overheard")
+        truth = {tongue.negator, tongue.polar, tongue.wh_object, tongue.wh_subject}
+        nouns = [mint.word() for _ in range(300)]
+        verbs = [mint.word() for _ in range(120)]
+        shapes = ("{a} {v} {b}", "{p} {a} {v} {b}", "{a} {n} {v} {b}",
+                  "{w} {v} {b}", "{a} {v} {ws}")
+        # A counter on the subject, not on the mint. Two sittings' mints reach the same
+        # ``issued`` count, so the name collided and three separately minted dialects were poured
+        # into one language block — where every one of their closed forms was correctly found, and
+        # precision read 0.33 because twelve of them were "wrong" for the one dialect being asked
+        # about. The exam was merging languages, not the learner.
+        self._overheard = getattr(self, "_overheard_count", 0) + 1
+        self._overheard_count = self._overheard   # noqa: attribute defined outside __init__
+        name = f"overheard-{self._overheard}"
+        for _ in range(4000):
+            voice.vocabulary.hear(
+                rng.choice(shapes).format(a=rng.choice(nouns), b=rng.choice(nouns),
+                                          v=rng.choice(verbs), p=tongue.polar,
+                                          n=tongue.negator, w=tongue.wh_object,
+                                          ws=tongue.wh_subject), language=name)
+        return voice.vocabulary.closed(name), truth, name
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        score, misses = Score(), []
+        found, truth, language = self._overhear(brain, mint)
+        hit = len(found & truth)
+        precision = hit / len(found) if found else 0.0
+        recall = hit / len(truth) if truth else 0.0
+        self.mark(score, misses, got=(recall == 1.0), want=True,
+                  item=f"recall {recall:.2f} on a language she has only overheard")
+        self.mark(score, misses, got=(precision == 1.0), want=True,
+                  item=f"precision {precision:.2f} — {sorted(found - truth)[:4]} were not closed")
+        # Frequency alone recovers everything and is worthless; the exam says so rather than
+        # leaving the combination looking arbitrary.
+        spread = self.student.vocabulary.signature(language)
+        self.mark(score, misses, got=all(spread.get(word, 0) > 0 for word in truth),
+                  want=True, item="every closed form scores above zero")
+        # And the control: unfitted, she claims nothing at all.
+        blank = Communicator()
+        blank.vocabulary.hear("the dog chased the cat", language="en")
+        self.mark(score, misses, got=blank.vocabulary.closed("en"), want=set(),
+                  item="unfitted, nothing is claimed")
+        return score, misses
+
+
+class Retell(DiscourseSubject):
+    """A turn said again in another language, and what did **not** cross.
+
+    The claim crosses: :meth:`~nyxara.njp.language.LanguageFaculty.translate` carries the roles,
+    the polarity, the tense and the mood, and verifies by reading its own output back. The **act**
+    does not, and this subject exists to say so rather than to hide it. An indirect request is a
+    convention of a speech community; a community that has not been shown one does not have it,
+    and a translator that claimed otherwise would be inventing a convention rather than carrying
+    one.
+
+    So the paper scores the claim crossing **and** the act not crossing, and a run where the act
+    silently came through would fail it.
+    """
+
+    id = "retell"
+    title = "what survives a crossing, and what does not"
+    teaches = "nothing — it measures which layers a translation can carry"
+    items = 6
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        from nyxara.njp.language import LanguageFaculty
+
+        score, misses = Score(), []
+        faculty = getattr(brain, "language", None) or LanguageFaculty()
+        voice = self.voice(brain)
+        for _ in range(3):
+            who, what = mint.word(), mint.word()
+            said = f"Can you {mint.word()} the {what}?"
+            got = voice.retell(said, into="nowhere", faculty=faculty)
+            # A language she has never been taught cannot receive anything, and the honest
+            # report of that is an empty crossing rather than a sentence with holes in it.
+            self.mark(score, misses, got=got.ok, want=False,
+                      item=f"into a language she has not been taught ({who})")
+            self.mark(score, misses, got=("claim" in got.lost), want=True,
+                      item="and it says the claim itself did not cross")
+        return score, misses
+
+
 class Anchor(DiscourseSubject):
     """The Master's semantic anchor, and the three slots that were missing from it.
 
@@ -1191,7 +1334,7 @@ class Wiring(DiscourseSubject):
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
     Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating, ExchangeSubject,
-    Alternations, Anchor,
+    Alternations, Anchor, Vocabulary, Retell,
     ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject, Grounded,
     Tongue, Wiring,
 )

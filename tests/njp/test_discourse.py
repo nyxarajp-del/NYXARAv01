@@ -1054,3 +1054,97 @@ def test_the_anchor_reports_only_the_slots_the_turn_actually_filled():
     filled = got.anchor(voice.ledger)
     assert filled["agent"] == "ravi" and filled["relation"] == "open"
     assert "cause" not in filled and "goal" not in filled and "occurrence" not in filled
+
+
+# --------------------------------------------------------------------------- #
+# 13 · the closed class, found rather than shipped
+# --------------------------------------------------------------------------- #
+
+SHAPES = ("the {a} {v} the {b}", "a {a} {v} a {b}", "the {a} did not {v} the {b}",
+          "is the {a} in the {b}", "what {v} the {a}", "can the {a} {v} the {b}")
+KNOWN_CLOSED = ("the", "a", "did", "not", "is", "in", "what", "can")
+
+
+def _english(learner, rng, sentences=4000):
+    nouns = [f"n{i}" for i in range(300)]
+    verbs = [f"v{i}" for i in range(120)]
+    for _ in range(sentences):
+        learner.hear(rng.choice(SHAPES).format(a=rng.choice(nouns), b=rng.choice(nouns),
+                                               v=rng.choice(verbs)), language="en")
+    return learner
+
+
+def _overheard(learner, rng, name="x", sentences=4000):
+    from nyxara.njp.dialects import mint_dialect
+
+    tongue = mint_dialect(rng, name)
+    nouns = [f"q{i}" for i in range(300)]
+    verbs = [f"z{i}" for i in range(120)]
+    shapes = ("{a} {v} {b}", "{p} {a} {v} {b}", "{a} {n} {v} {b}",
+              "{w} {v} {b}", "{a} {v} {ws}")
+    for _ in range(sentences):
+        learner.hear(rng.choice(shapes).format(
+            a=rng.choice(nouns), b=rng.choice(nouns), v=rng.choice(verbs),
+            p=tongue.polar, n=tongue.negator, w=tongue.wh_object,
+            ws=tongue.wh_subject), language=name)
+    return {tongue.negator, tongue.polar, tongue.wh_object, tongue.wh_subject}
+
+
+def test_unfitted_no_word_is_called_closed():
+    import random as _random
+
+    from nyxara.njp.discourse import ClosedClassLearner
+
+    learner = _english(ClosedClassLearner(), _random.Random(3))
+    assert learner.closed("en") == set()
+
+
+def test_the_criterion_is_fitted_where_the_answer_is_known():
+    import random as _random
+
+    from nyxara.njp.discourse import ClosedClassLearner
+
+    learner = _english(ClosedClassLearner(), _random.Random(3))
+    fitted = learner.fit(KNOWN_CLOSED, language="en")
+    assert fitted["cut"] is not None and fitted["f1"] > 0.8
+
+
+def test_it_recovers_the_closed_class_of_a_language_she_has_only_overheard():
+    import random as _random
+
+    from nyxara.njp.discourse import ClosedClassLearner
+
+    rng = _random.Random(3)
+    learner = _english(ClosedClassLearner(), rng)
+    learner.fit(KNOWN_CLOSED, language="en")
+    truth = _overheard(learner, rng, "x")
+    found = learner.closed("x")
+    assert found == truth          # every closed form, and nothing else
+
+
+def test_breadth_and_frequency_are_both_load_bearing():
+    """Breadth alone measures *small* class, not *closed* class; frequency alone is worse."""
+    import random as _random
+
+    from nyxara.njp.discourse import ClosedClassLearner
+
+    rng = _random.Random(3)
+    learner = _english(ClosedClassLearner(), rng)
+    truth = _overheard(learner, rng, "x")
+    learner.fit(KNOWN_CLOSED, language="en")
+    cut = learner.cut
+    by_breadth = {w for w, v in learner.breadth("x").items() if v >= cut}
+    by_signature = {w for w, v in learner.signature("x").items() if v >= cut}
+    # Both find every closed form. Only one of them finds *only* those.
+    assert truth <= by_breadth and truth <= by_signature
+    assert len(by_breadth - truth) > 50
+    assert by_signature - truth == set()
+
+
+def test_a_retelling_into_a_language_she_was_never_taught_carries_nothing():
+    from nyxara.njp.language import LanguageFaculty
+
+    voice = Communicator()
+    got = voice.retell("Can you open the window?", into="nowhere", faculty=LanguageFaculty())
+    assert not got.ok
+    assert "claim" in got.lost
