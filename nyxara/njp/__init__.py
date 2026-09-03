@@ -346,6 +346,24 @@ from nyxara.njp.mathsolver import Solution as SolvedProblem
 # `NJPBrain.sit_corpus_exam` are its in-process entry points.
 from nyxara.njp.corpus import CorpusRecord, CorpusVerdict, verify_corpus_answer
 from nyxara.njp.corpussolver import CorpusReading, CorpusSolver
+# The communication organ is imported; `nyxara.njp.discourseschool` carries a `__main__` and is
+# kept out for the reason `corpusschool` is — `NJPBrain.go_to_discourse_school` is its in-process
+# entry point.
+from nyxara.njp.discourse import (
+    ActLearner,
+    Claim,
+    Communicator,
+    Figure,
+    Interpretation,
+    Ledger,
+    Minds,
+    Readings,
+    Reference,
+    Register,
+    Resolution,
+    Uptake,
+    Verdict as ClaimVerdict,
+)
 from nyxara.njp.index import IntelligenceIndex, IntelligenceVector, Term
 from nyxara.njp.core import (
     CognitiveLearningCore,
@@ -471,6 +489,9 @@ __all__ = [
     # NJP V.24 — problems she has never seen
     "Constraint", "Expr", "Problem", "SolvedProblem", "Solver",
     "CorpusReading", "CorpusRecord", "CorpusSolver", "CorpusVerdict", "verify_corpus_answer",
+    # NJP V.26 — what was meant, and by whom (njp/discourse.py)
+    "ActLearner", "Claim", "ClaimVerdict", "Communicator", "Figure", "Interpretation",
+    "Ledger", "Minds", "Readings", "Reference", "Register", "Resolution", "Uptake",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions

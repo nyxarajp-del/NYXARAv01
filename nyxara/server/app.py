@@ -1353,7 +1353,8 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
 
     # Organs readable over the wire, by URL segment. Read-only: this route never acts.
     _NJP_ORGANS = ("fabric", "truth", "soulsync", "evolver", "pulse", "ledger",
-                   "learner", "calculate", "maths", "mathsolver", "language", "cognition")
+                   "learner", "calculate", "maths", "mathsolver", "language", "cognition",
+                   "discourse")
     # Where the URL segment does not match the attribute on the brain.
     _ORGAN_ATTR = {"calculate": "calculator", "maths": "mathematician",
                    "mathsolver": "solver"}
@@ -1427,6 +1428,21 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                 "engine": str(getattr(got, "engine", "")),
                 "why": str(getattr(got, "why", "")),
                 "verified": bool(getattr(got, "verified", False))}
+
+    @app.post("/v1/njp/discourse", dependencies=auth)
+    def njp_discourse(req: NyxThinkRequest) -> dict:
+        """Read one turn as part of a **conversation** and return the whole uptake.
+
+        What was done by saying it, what its pronouns name (or that nothing settles them), what it
+        does to the claims already on the ledger, whether it is meant literally, and the one
+        question worth asking back. This *is* stateful — it is a conversation — and it is the same
+        organ ``/v1/njp/think`` drives, so a turn read here is a turn she has heard.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "discourse", None) is None:
+            return _off("DISCOURSE_ENABLED")
+        got = brain.hear_turn(req.stimulus)
+        return got.to_dict() if hasattr(got, "to_dict") else {"surface": req.stimulus}
 
     @app.post("/v1/njp/recall", dependencies=auth)
     def njp_recall(req: NyxThinkRequest) -> dict:
