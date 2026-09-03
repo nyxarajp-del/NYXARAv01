@@ -13,7 +13,7 @@ elevation | is_a=a drawing of a building's face | purpose=showing what it looks 
 scale model | is_a=small physical version of a design | purpose=letting people understand a building before it exists
 site | is_a=the piece of ground a building stands on | causes=the design being shaped by orientation, slope and access
 orientation | is_a=which way a building faces | purpose=controlling sunlight and wind | causes=lower heating and cooling need when chosen well
-circulation | is_a=how people move through a building | purpose=connecting spaces without wasting them | causes=confusion when it is unclear
+circulation (in a building) | is_a=how people move through a building | purpose=connecting spaces without wasting them | causes=confusion when it is unclear
 programme | is_a=the list of spaces a building must contain | purpose=deciding how much of each kind of space is needed
 
 # --- structure and enclosure ------------------------------------------------------------------------ #
@@ -26,7 +26,7 @@ buttress | purpose=resisting the outward thrust of an arch or vault | causes=thi
 flying buttress | is_a=buttress | purpose=carrying thrust across an open space to a pier | causes=tall walls with large windows becoming possible
 lintel | is_a=beam over an opening | purpose=carrying the wall above a door or window
 cantilever | purpose=projecting a floor or roof beyond its support
-atrium | is_a=tall open space inside a building | purpose=bringing daylight into the middle of a deep plan
+atrium (in a building) | is_a=tall open space inside a building | purpose=bringing daylight into the middle of a deep plan
 courtyard | is_a=open space enclosed by a building | purpose=giving light, air and privacy | causes=cooler interiors in hot climates
 facade | is_a=the face a building presents to the street | purpose=addressing the public realm
 

@@ -7,7 +7,7 @@ music | is_a=art of organising sound in time | has_part=dynamics | has_part=form
 melody | means=a sequence of single notes heard as a line | purpose=giving music something to follow and remember
 harmony | purpose=colouring a melody and creating tension and release
 rhythm | means=the pattern of sound and silence in time | purpose=giving music its movement | requires=a sense of pulse
-pulse | is_a=the steady beat underlying rhythm | purpose=letting players stay together
+pulse (in music) | is_a=the steady beat underlying rhythm | purpose=letting players stay together
 tempo | is_a=the speed of the pulse | causes=a piece feeling urgent or calm
 metre | is_a=grouping of beats into repeating units | purpose=making a rhythm countable | has_kind=duple metre | has_kind=triple metre
 syncopation | is_a=rhythmic device | means=stressing a beat the metre does not | causes=a sense of push against the pulse

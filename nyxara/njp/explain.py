@@ -112,7 +112,6 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 __all__ = [
     "Step", "Chain", "Explanation", "Plan", "Explainer",
     "MAX_DEPTH", "DECAY", "MIN_CHAIN_CONFIDENCE", "MAX_CHAINS", "MAX_ORDERS",
-    "DEMOTE_MANY_KINDED",
     "PRODUCES", "ENABLES", "PURPOSE", "PARTS", "STEPS",
 ]
 
@@ -163,6 +162,24 @@ STEPS: Tuple[str, ...] = ("has_step",)
 #: Kind-of, for climbing to a purpose the thing itself does not carry, and for noticing a word
 #: that is two words.
 KIND = "is_a"
+
+#: How far the sense-clustering looks when deciding whether two of a node's neighbours belong to
+#: the same thing. Two hops: a neighbour and what that neighbour is attached to. Three reconnects
+#: almost everything to almost everything in a corpus this size, which is the same reason
+#: :data:`MAX_DEPTH` is three.
+SENSE_RADIUS = 2
+
+#: The relations sense-clustering reads when asking whether two neighbours belong together. Every
+#: one of them is a *structural* attachment — what a thing is, what it is part of, what it
+#: consists of — rather than a causal or purposive one. A cause is not evidence of shared
+#: identity: fire and rain both cause damage and are not the same kind of thing.
+SENSE_LINKS: Tuple[str, ...] = ("is_a", "part_of", "has_part", "consists_of", "located_in")
+
+#: Whether two neighbours may also be grouped by **sharing a content word**. **Off**, and measured
+#: off rather than reasoned off — see :meth:`Explainer.senses` for the numbers. Kept as a switch
+#: because a store without declared senses would need it, and because a rejected signal that has
+#: been deleted cannot be re-measured by whoever wonders about it next.
+SENSE_BY_WORDS = False
 
 #: How a chain through a many-kinded node is treated: **ranked last among its equals, and nothing
 #: else**. Not a confidence penalty and not a filter. It was both, for one measurement, and see
@@ -403,6 +420,11 @@ class Explainer:
         self.max_chains = max(1, int(max_chains))
         self._forward: Dict[Tuple[str, str], List[Tuple[str, float]]] = {}
         self._backward: Dict[Tuple[str, str], List[Tuple[str, float]]] = {}
+        self._senses: Dict[str, List[Set[str]]] = {}
+        #: How many continuations the identity firewall refused. Counted rather than silent: a
+        #: guard that removes chains has to be visible, or a topic that looks unexplained because
+        #: everything about it was blocked reads exactly like one nothing reaches.
+        self.blocked = 0
         self._built = 0
         self.reindex()
 
@@ -420,6 +442,7 @@ class Explainer:
         """
         self._forward = {}
         self._backward = {}
+        self._senses = {}
         facts = self._facts()
         for key, triples in facts.items():
             try:
@@ -530,6 +553,184 @@ class Explainer:
     def _out(self, subject: str, relation: str) -> List[Tuple[str, float]]:
         return list(self._forward.get((self._key(subject), relation), ()))
 
+    # ---- the identity firewall ------------------------------------------ #
+    def senses(self, node: str) -> List[Set[str]]:
+        """Partition a node's neighbours into the things the spelling covers.
+
+        V.36 found the defect and declined to fix it: *how does the heart work* answered ``heart →
+        atrium → bringing daylight into the middle of a deep plan``, because the store keys facts
+        on their surface spelling and the heart's chamber and the building's courtyard are one
+        node. V.36 shipped a detector for it that turned out to detect **multiple description**
+        instead — Einstein is a physicist and a Nobel laureate — and could only be used to reorder,
+        never to refuse.
+
+        This asks a different question, and the difference is why it works where that did not.
+        Not *"does this node have unrelated kinds"*, which is the ordinary case, but *"do this
+        node's neighbours fall into groups that have nothing to do with each other"*. Two
+        neighbours are put in one group when they are connected within :data:`SENSE_RADIUS` hops
+        by a **structural** relation — :data:`SENSE_LINKS`, what a thing *is* and what it belongs
+        to. Causal and purposive edges are deliberately not evidence of shared identity: fire and
+        rain both cause damage and are not the same kind of thing.
+
+        **Two signals, and the measurement of each is the reason both are here.**
+
+        The structural one above is the principled one, and on a graph with any depth it is
+        sufficient: on the gauntlet's minted worlds it took the ``homonym`` paper from 0.000 to
+        1.000 on its own. On the **shipped corpus it does nothing at all**, and the reason is worth
+        recording because it is a fact about the corpus rather than about the method. Every
+        neighbour of ``atrium`` — *heart chamber*, *tall open space inside a building*, *receiving
+        blood returning to the heart*, *bringing daylight into the middle of a deep plan* — is a
+        leaf: an object phrase that is not itself a subject and carries no edges of its own. Six
+        neighbours, six singleton groups, nothing to cluster, firewall passes everything.
+
+        A second signal was tried for that and **rejected on measurement**: grouping two
+        neighbours when they share a content word. It did what it was built for — *heart chamber*
+        and *receiving blood returning to the heart* share ``heart``, the building phrases share
+        nothing with them — and it cost far more than it bought. It invents senses out of any two
+        phrases with a word in common, and switched on it blocked **74 continuations** on the
+        shipped corpus and took ``explainschool``'s ``mechanism`` paper from 1.000 to 0.830. Every
+        failure inspected was a false positive: *nerve → neurons → carrying an electrical signal*
+        refused because ``carrying an electrical signal`` had drifted into a group that did not
+        contain ``nerve``. :data:`SENSE_BY_WORDS` is off, and it is a switch rather than a deletion
+        so the next person to wonder can re-measure instead of re-deriving.
+
+        What replaced it is not a cleverer signal, it is **data**. The genuine homonyms in this
+        corpus are few — three automatic tests were tried for finding them (unrelated kinds, two
+        source files, disjoint content) and all three fired mostly on ordinary multiple
+        description: Einstein is a physicist and a Nobel laureate; blood is in ``biology.kb`` and
+        ``body.kb``; *cereal* is in agriculture and in food. Read by hand, six subjects were
+        actually two things and ``pulse`` was three. **A sense is a distinct entity, so it is
+        given a distinct name** — ``atrium (in a building)``, ``pulse (the crop)``, ``fatigue (in a
+        material)`` — which needs no new syntax, because naming a thing is what a knowledge file
+        is for. The false chain disappears at the source rather than being filtered downstream.
+
+        So the division of labour is: declared senses handle the corpus, and this method handles
+        everything else — a graph with structure, which is what an ingested or minted world is.
+
+        Returns the groups, largest first. One group, or none, means the spelling covers one thing
+        as far as anything she has been told can tell.
+        """
+        key = self._key(node)
+        if key in self._senses:
+            return self._senses[key]
+        neighbours: List[str] = []
+        for (subject, _relation), values in self._forward.items():
+            if subject != key:
+                continue
+            for obj, _conf in values:
+                if obj not in neighbours:
+                    neighbours.append(obj)
+        # **And what points at it.** A whole names its part with `has_part`, so the whole is a
+        # neighbour of the part and appears nowhere in the part's own outgoing edges. Leaving that
+        # out meant the entry to a chain was never in any group, `home` was always None, and the
+        # firewall passed everything — which is how it measured 0.000 for one run while looking
+        # like it was working.
+        for relation in SENSE_LINKS:
+            for subject, _conf in self._in(node, relation):
+                if subject not in neighbours:
+                    neighbours.append(subject)
+        groups = self._cluster(neighbours, avoid=key)
+        self._senses[key] = groups
+        return groups
+
+    def _attached(self, node: str, *, avoid: str, depth: int) -> Set[str]:
+        """What this neighbour is structurally attached to, within *depth* hops, never via *avoid*.
+
+        ``avoid`` is the node being disambiguated, and excluding it is the whole trick: every
+        neighbour is trivially connected to each other *through* the ambiguous node, so a walk
+        that went back through it would find one group every time.
+        """
+        seen: Set[str] = set()
+        frontier = [self._key(node)]
+        for _ in range(max(1, depth)):
+            nxt: List[str] = []
+            for current in frontier:
+                if current == avoid or current in seen:
+                    continue
+                seen.add(current)
+                for relation in SENSE_LINKS:
+                    for obj, _c in self._out(current, relation):
+                        got = self._key(obj)
+                        if got != avoid and got not in seen:
+                            nxt.append(got)
+                    for subj, _c in self._in(current, relation):
+                        got = self._key(subj)
+                        if got != avoid and got not in seen:
+                            nxt.append(got)
+            frontier = nxt
+        return seen
+
+    def _cluster(self, neighbours: Sequence[str], *, avoid: str) -> List[Set[str]]:
+        reach = {self._key(n): self._attached(n, avoid=avoid, depth=SENSE_RADIUS)
+                 for n in neighbours}
+        words = {self._key(n): self._content(n) for n in neighbours} if SENSE_BY_WORDS else {}
+
+        def linked(a: str, b: str) -> bool:
+            if a in reach.get(b, ()) or b in reach.get(a, ()):
+                return True
+            return bool(words.get(a) and words.get(b) and (words[a] & words[b]))
+
+        groups: List[Set[str]] = []
+        for node in neighbours:
+            key = self._key(node)
+            landed = None
+            for group in groups:
+                if any(linked(key, other) for other in group):
+                    landed = group
+                    break
+            if landed is None:
+                groups.append({key})
+            else:
+                landed.add(key)
+        # Merge groups that became connected through a member added after them.
+        merged = True
+        while merged:
+            merged = False
+            for i in range(len(groups)):
+                for j in range(i + 1, len(groups)):
+                    if any(linked(a, b) for a in groups[i] for b in groups[j]):
+                        groups[i] |= groups.pop(j)
+                        merged = True
+                        break
+                if merged:
+                    break
+        return sorted(groups, key=len, reverse=True)
+
+    def _content(self, phrase: str) -> Set[str]:
+        """The open-class words of a phrase — the closed class she induced, not a stop list."""
+        try:
+            from nyxara.njp.semantics import _CLOSED
+        except Exception:  # noqa: BLE001
+            _CLOSED = {}
+        return {w for w in self._key(phrase).split() if w not in _CLOSED and len(w) > 2}
+
+    def crosses_senses(self, node: str, came_from: str, going_to: str) -> bool:
+        """Would leaving *node* towards *going_to* change which thing the spelling meant?
+
+        Blocked only on **evidence of belonging elsewhere**, never on absence of evidence. The
+        departure must sit in a group that has at least two members and does not contain the entry:
+        a neighbour attached to nothing is not proof of a second sense, it is a fact with no
+        neighbours, and refusing it would delete the heart's real mechanism along with the
+        building's — which is exactly what V.36's confidence penalty did and why it was withdrawn.
+        """
+        groups = self.senses(node)
+        if len(groups) < 2:
+            return False
+        entry, exit_ = self._key(came_from), self._key(going_to)
+        away = next((g for g in groups if exit_ in g), None)
+        if away is None or entry in away:
+            return False
+        home = next((g for g in groups if entry in g), None)
+        if home is None:
+            # The entry is not itself a neighbour — it reached this node by a relation
+            # sense-clustering does not read, a cause say. Ask which group it is *attached* to
+            # instead, so the firewall still has an anchor.
+            reach = self._attached(came_from, avoid=self._key(node), depth=SENSE_RADIUS)
+            home = next((g for g in groups if g & reach), None)
+        if home is None or home is away:
+            return False
+        return len(away) >= 2
+
     def _in(self, obj: str, relation: str) -> List[Tuple[str, float]]:
         return list(self._backward.get((self._key(obj), relation), ()))
 
@@ -550,7 +751,8 @@ class Explainer:
             out.append((condition, OCCURS, conf))
         return out
 
-    def _walk_back(self, topic: str, seen: Set[str], depth: int) -> List[List[Step]]:
+    def _walk_back(self, topic: str, seen: Set[str], depth: int,
+                   came_from: str = "") -> List[List[Step]]:
         """Every backwards path from *topic*, up to :attr:`max_depth`.
 
         A node already on the path is not entered again — the corpus holds ``evaporation causes
@@ -564,10 +766,13 @@ class Explainer:
             key = self._key(cause)
             if key in seen or key == self._key(topic):
                 continue
+            if came_from and self.crosses_senses(topic, came_from, cause):
+                self.blocked += 1
+                continue
             step = Step(subject=cause, relation=relation, object=topic,
                         confidence=conf, forward=False)
             paths.append([step])
-            for tail in self._walk_back(cause, seen | {key}, depth - 1):
+            for tail in self._walk_back(cause, seen | {key}, depth - 1, came_from=topic):
                 paths.append([step] + tail)
         return paths
 
@@ -720,6 +925,13 @@ class Explainer:
                 for verb in PRODUCES + PURPOSE:
                     for effect, conf in self._out(part, verb):
                         if self._key(effect) == self._key(topic):
+                            continue
+                        # The identity firewall. A chain that entered this part as *the whole's*
+                        # part must not leave it as something else's: `heart → atrium → bringing
+                        # daylight into the middle of a deep plan` is three facts she was correctly
+                        # told and one sentence that is false.
+                        if self.crosses_senses(part, topic, effect):
+                            self.blocked += 1
                             continue
                         tails.append([Step(subject=part, relation=verb, object=effect,
                                            confidence=conf, forward=True)])

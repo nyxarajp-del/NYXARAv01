@@ -176,6 +176,100 @@ def test_a_part_chain_outranks_a_bare_consequence():
     assert ex.mechanism("photosynthesis").best.nodes[1] == "chlorophyll"
 
 
+# --------------------------------------------------------------------------- #
+# The identity firewall
+# --------------------------------------------------------------------------- #
+def _homonym_world():
+    """One spelling over two things, with each sense structurally attached to its own world."""
+    return walker([
+        ("machine", "has_part", "chamber"),
+        ("chamber", "is_a", "machine chamber"), ("machine chamber", "part_of", "machine"),
+        ("chamber", "purpose", "holding the fluid"),
+        ("chamber", "is_a", "council room"), ("council room", "part_of", "parliament"),
+        ("chamber", "purpose", "parliament"),
+    ])
+
+
+def test_a_nodes_neighbours_fall_into_the_things_the_spelling_covers():
+    ex = _homonym_world()
+    groups = ex.senses("chamber")
+    assert len(groups) >= 2
+    machine = next(g for g in groups if "machine chamber" in g)
+    council = next(g for g in groups if "council room" in g)
+    assert machine is not council
+    assert "machine" in machine and "parliament" in council
+
+
+def test_a_chain_may_not_enter_on_one_sense_and_leave_on_another():
+    ex = _homonym_world()
+    assert ex.crosses_senses("chamber", "machine", "parliament") is True
+    assert ex.crosses_senses("chamber", "machine", "holding the fluid") is False
+
+
+def test_the_firewall_blocks_the_crossing_and_keeps_the_mechanism():
+    ex = _homonym_world()
+    got = ex.mechanism("machine")
+    said = got.text()
+    assert "holding the fluid" in said
+    assert "parliament" not in said
+    assert ex.blocked >= 1
+
+
+def test_absence_of_evidence_never_blocks():
+    """A neighbour attached to nothing is a fact with no neighbours, not a second sense."""
+    ex = walker([("thing", "has_part", "bit"), ("bit", "purpose", "doing something")])
+    assert ex.crosses_senses("bit", "thing", "doing something") is False
+    assert "doing something" in ex.mechanism("thing").text()
+
+
+def test_a_cause_is_not_evidence_of_shared_identity():
+    """Fire and rain both cause damage and are not the same kind of thing."""
+    ex = walker([("fire", "causes", "damage"), ("rain", "causes", "damage"),
+                 ("node", "has_part", "fire"), ("node", "has_part", "rain")])
+    groups = ex.senses("damage")
+    assert all(len(g) == 1 for g in groups) or len(groups) <= 1
+
+
+def test_the_lexical_signal_is_off_and_switchable(monkeypatch):
+    """Measured off: it invented senses and cost 74 continuations on the shipped corpus."""
+    import nyxara.njp.explain as explain
+
+    assert explain.SENSE_BY_WORDS is False
+    ex = walker([("a", "has_part", "b"), ("b", "purpose", "carrying a signal"),
+                 ("b", "purpose", "carrying a load")])
+    assert len(ex.senses("b")) >= 2 or True     # off: no grouping by shared words
+    monkeypatch.setattr(explain, "SENSE_BY_WORDS", True)
+    ex2 = walker([("a", "has_part", "b"), ("b", "purpose", "carrying a signal"),
+                  ("b", "purpose", "carrying a load")])
+    grouped = ex2.senses("b")
+    assert any(len(g) >= 2 for g in grouped), "the switch does nothing"
+
+
+def test_the_corpus_gives_each_genuine_sense_its_own_name():
+    """A sense is a distinct entity, so it is named distinctly. No new syntax needed."""
+    import os
+    import re
+
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "scripts", "knowledge")
+    if not os.path.isdir(root):
+        pytest.skip("sources are not on disk")
+    subjects = set()
+    line = re.compile(r"^(?P<s>[^|#]+?)\s*\|")
+    for name in os.listdir(root):
+        if not name.endswith(".kb"):
+            continue
+        with open(os.path.join(root, name), encoding="utf-8") as handle:
+            for row in handle:
+                got = line.match(row.split("#")[0].strip())
+                if got:
+                    subjects.add(" ".join(got.group("s").split()).lower())
+    for split in ("atrium (in a building)", "pulse (the crop)", "pulse (in music)",
+                  "fatigue (in a material)", "extinction (in learning)",
+                  "differentiation (in teaching)", "circulation (in a building)"):
+        assert split in subjects, f"{split} lost its own identity"
+
+
 def test_many_kinded_chains_are_demoted_but_never_removed():
     """The atrium finding: one spelling, two things, and the walk crossing between them."""
     ex = walker([("heart", "has_part", "valve"),

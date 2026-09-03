@@ -48,7 +48,7 @@ brand | is_a=the set of associations a name carries | purpose=letting a customer
 pricing | is_a=decision | purpose=setting what is charged | causes=demand changing | requires=knowing what customers value
 competition | causes=pressure to improve | causes=profits being competed away over time
 competitive advantage | is_a=a reason customers choose this firm | purpose=explaining why profits are not competed away | has_kind=lower cost | has_kind=differentiation
-differentiation | is_a=competitive advantage | means=offering something rivals do not | causes=less pressure on price
+differentiation (in business) | is_a=competitive advantage | means=offering something rivals do not | causes=less pressure on price
 market share | is_a=a firm's share of the sales in its market | purpose=measuring position against rivals
 customer retention | is_a=keeping existing customers | purpose=growing without paying to acquire someone new each time | causes=higher lifetime value
 churn | is_a=the rate at which customers leave | causes=growth stalling even when new customers arrive

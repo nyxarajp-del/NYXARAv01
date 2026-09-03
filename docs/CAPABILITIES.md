@@ -60,6 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39d | Meaning over spelling (a question's *form* induced from demonstrations rather than listed as regular expressions — the cue is the open-class word left when the topic and the closed class are removed, kept only once two demonstrations differing in topic agree, dropped when two disagree; and an identity firewall so a chain cannot enter a node on one sense of a word and leave on another. The gauntlet's `wording` 0.100 → 1.000 and `homonym` 0.000 → 1.000) | `nyxara.njp.asking` + `nyxara.njp.explain` | NEW |
 | 39c | Explanation (the other two questions a person asks. She answered **what**, and *why* and *how* were not weak in her, they were absent — no relation in any graph is called "why", so an explanation is a **path** and had to be walked. Mechanistic why backwards along production, teleological why forwards along purpose, and never one for the other; a mechanism from parts crossed with what they do; and a procedure's **order derived from its prerequisites**, never told — with every order returned where the telling left two steps free. Over all 42 of the Master's domains, 14 of which had no source file at all) | `nyxara.njp.explain` + `nyxara.njp.explainread` + `nyxara.njp.explainschool` + `scripts/knowledge/*.kb` | NEW |
 | 40 | Multimodal Intelligence | `nyxara.senses.binding` | REAL+WIRED |
 | 41 | Embodied Intelligence | `nyxara.sim.embodied` + `nyxara.senses.live` | REAL+WIRED |
@@ -3618,6 +3619,108 @@ Also: the generated-graph gold was the last edge written instead of the **longes
 seven of forty failures were answers that were longer and correct.
 
 Run it: `python -m nyxara.njp.explaingauntlet --failures 3`.
+
+
+#### NJP V.38 — the question form induced, and the identity firewall
+
+Two of the gauntlet's four zeroes, closed. **0.508 → 0.707.**
+
+##### `wording` 0.100 → 1.000, and the nine regexes I did not write
+
+The table in `explainread.py` reached 4 of 40 phrasings. Adding nine rows would have moved that
+number and taught her nothing — the eleventh phrasing would miss, and the author of each row is
+doing the work the mind is meant to do.
+
+`njp/asking.py` holds **no phrasings**. Everything it knows arrives through `show(question, topic,
+walk)`. Given *"what brings about thunder?"* and the fact that the topic was `thunder`, what is
+left is `what brings about ▫` — and `what` and `about` are already in the closed class she induced
+from exposure at V.31. The word carrying the question's identity is the one that is **not** closed:
+`brings`. That is the cue, and it is what generalises.
+
+Three rules, each one this repository has already paid for:
+
+* **A cue is kept only once two demonstrations that differ in their topic agree on it.** Shown one
+  example, `thunder` is as good a candidate for the causal word as `brings`.
+* **Where two demonstrations disagree about the walk, the cue is contested and never read** — not
+  resolved by majority. A cue that means two things means nothing.
+* **Negatives are demonstrations.** *"What is a mammal?"* with walk `""` teaches that a form carries
+  no causal claim.
+
+The lesson is deliberately **not** the exam: five of the gauntlet's ten phrasings are absent from
+it, and the gauntlet now reports `wording` (taught cues, minted topics and graphs) and
+`wording_new` (cues nobody demonstrated) as **separate papers** — so teaching more phrasings can
+never be mistaken for reasoning better. `wording` is 1.000 and `wording_new` is **0.000 with every
+item silent**: she does not guess a cue nobody showed her, and she can learn one from two
+demonstrations at any time.
+
+The induced reader sits **after** the table, not in front of it. The table's dozen readings were
+each measured against `Grounder._read_question`; a learned cue is corroborated by two
+demonstrations. Two demonstrations is enough to be worth consulting and not enough to overrule
+something that was measured.
+
+*Honest note:* the negatives are **not load-bearing on this lesson**, and that is measured rather
+than assumed — settled 24 and false positives 0 with or without them, because `what` and `is` are
+already closed and never become cues. Exactly one cue is contested (`job`) and switching the
+contest rule off changes no reading. They are kept and labelled as what they are: a guard that has
+not yet fired.
+
+##### `homonym` 0.000 → 1.000 — and the signal that was measured and thrown away
+
+V.36 found `heart → atrium → bringing daylight into the middle of a deep plan`, shipped a detector
+that turned out to detect *multiple description* (Einstein is a physicist and a Nobel laureate),
+and named the limit rather than fixing it.
+
+The firewall asks a different question: not *"does this node have unrelated kinds"* — the ordinary
+case — but *"do this node's **neighbours** fall into groups that have nothing to do with each
+other"*. Two neighbours group when connected within two hops by a **structural** relation. A cause
+is deliberately not evidence of shared identity: fire and rain both cause damage. A chain entering
+a node from one group may not leave it towards another, and only on **evidence of belonging
+elsewhere** — a departure alone in its group is a fact with no neighbours, not a second sense.
+
+On the gauntlet's minted worlds that alone took `homonym` from 0.000 to 1.000. **On the shipped
+corpus it does nothing**, and the reason is a fact about the corpus: every neighbour of `atrium` is
+a leaf — an object phrase that is not a subject anywhere and carries no edges of its own.
+
+So a second signal was tried: group two neighbours that share a content word. It worked on
+`atrium` and it **cost 74 continuations** and took `explainschool`'s `mechanism` paper from 1.000
+to 0.830, every inspected failure a false positive — *nerve → neurons → carrying an electrical
+signal* refused because the effect had drifted into a group that did not contain `nerve`.
+`SENSE_BY_WORDS` is **off**, kept as a switch rather than deleted so it can be re-measured.
+
+What replaced it is not a cleverer signal, it is **data**. Three automatic tests for finding
+homonyms were tried — unrelated kinds, two source files, disjoint content — and **all three fired
+mostly on ordinary multiple description**: 261 of 4,230 subjects; 434 of 4,379; 93 of 4,379. Blood
+is in `biology.kb` and `body.kb`. *Cereal* is in agriculture and in food. Read by hand, **six
+subjects were genuinely two things and `pulse` was three**. A sense *is* a distinct entity, so it
+gets a distinct name — `atrium (in a building)`, `pulse (the crop)`, `pulse (in music)`, `fatigue
+(in a material)`, `extinction (in learning)`, `differentiation (in teaching)`, `circulation (in a
+building)`. No new syntax: naming a thing is what a knowledge file is for, and the false chain
+disappears at the source instead of being filtered downstream.
+
+The division of labour is now explicit — **declared senses handle the corpus, the structural
+firewall handles everything else**: an ingested or minted world, where the graph has structure.
+
+```
+attack            asked  passed  wrong  silent   score
+wording              40      40      0       0   1.000   (was 0.100)
+wording_new          40       0      0      40   0.000   (the honest ceiling)
+entities             40      40      0       0   1.000
+shape                40      38      0       0   0.950
+distractors          40      40      0       0   1.000
+contradiction        40       0     40       0   0.000   (still absent)
+homonym              40      40      0       0   1.000   (was 0.000)
+gap                  40      40      0      40   1.000
+legs                 40       0     40       0   0.000   (still absent)
+unknown              40      40      0      40   1.000
+
+0.707 · 1.000 restraint · 0 confabulations
+```
+
+`explainschool` is unchanged at **0.995** — a guard that removes chains was measured for what it
+removes, and what it removes on the shipped corpus is nothing.
+
+Run it: `NJPBrain()` teaches the forms on construction; `Explainer.senses("atrium")`,
+`crosses_senses`, `python -m nyxara.njp.asking` demonstrations via `asking.teach()`.
 
 
 ### Reachable over the wire

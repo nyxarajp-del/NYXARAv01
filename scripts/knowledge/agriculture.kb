@@ -8,9 +8,9 @@ arable farming | is_a=agriculture | means=growing crops on ploughed land
 pastoral farming | is_a=agriculture | means=raising grazing animals
 subsistence farming | is_a=agriculture | means=growing mainly to feed the farmer's own household
 commercial farming | is_a=agriculture | means=growing mainly for sale
-crop | is_a=plant grown for food or material | has_kind=pulse | has_kind=oilseed
+crop | is_a=plant grown for food or material | has_kind=pulse (the crop) | has_kind=oilseed
 cereal | purpose=providing the bulk of dietary energy
-pulse | is_a=crop | purpose=providing protein | causes=nitrogen being added to the soil | has_kind=lentil | has_kind=chickpea | has_kind=bean
+pulse (the crop) | is_a=crop | purpose=providing protein | causes=nitrogen being added to the soil | has_kind=lentil | has_kind=chickpea | has_kind=bean
 cash crop | purpose=being sold rather than eaten by the grower | has_kind=coffee
 
 # --- soil ---------------------------------------------------------------------------------------- #

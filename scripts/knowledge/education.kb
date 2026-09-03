@@ -14,7 +14,7 @@ lesson | is_a=one unit of teaching | has_part=objective | has_part=activity | ha
 learning objective | is_a=statement of what a learner should be able to do afterwards | purpose=making it possible to tell whether the lesson worked
 scaffolding | is_a=teaching technique | purpose=supporting a learner through what they cannot yet do alone | causes=independence when the support is withdrawn gradually
 zone of proximal development | is_a=idea | means=the gap between what a learner can do alone and what they can do with help | purpose=showing where teaching has most effect
-differentiation | is_a=teaching technique | purpose=adapting a lesson to learners at different points | requires=knowing where each learner is
+differentiation (in teaching) | is_a=teaching technique | purpose=adapting a lesson to learners at different points | requires=knowing where each learner is
 formative assessment | is_a=assessment | purpose=finding out what a learner has not yet grasped while there is still time to act | causes=teaching being changed mid course
 summative assessment | is_a=assessment | purpose=recording what a learner has achieved at the end
 diagnostic assessment | is_a=assessment | purpose=finding out what a learner already knows before teaching begins | causes=teaching not repeating what is known

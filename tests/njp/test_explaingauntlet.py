@@ -164,15 +164,32 @@ def test_a_system_that_answers_everything_scores_worse_on_restraint():
 # The floor, pinned
 # --------------------------------------------------------------------------- #
 def test_the_walk_is_measured_and_the_gaps_are_where_they_were_recorded():
-    """The V.37 floor. These are the four capabilities the gauntlet says are absent."""
+    """Where she stands, pinned. This test is **expected to be edited** by each version.
+
+    It is the record of which capabilities the gauntlet says are present and which are absent, and
+    a version that closes one is supposed to come here and say so. What it must never do is get
+    quietly relaxed: an assertion that a paper scores 0.0 turning into `>= 0.0` would hide the
+    difference between fixing something and breaking the measurement.
+
+    V.37 floor: wording 0.100, contradiction 0.000, homonym 0.000, legs 0.000 — 0.508 overall.
+    V.38 now:   wording 1.000 on taught cues, homonym 1.000. contradiction and legs still absent.
+    """
     report = run(limit=24)
     assert report.paper("entities").score == 1.0        # the control
     assert report.paper("gap").score == 1.0             # she does not invent a bridge
     assert report.paper("unknown").score == 1.0
+    assert report.restraint == 1.0 and report.confabulated == 0
+
+    # Closed at V.38.
+    assert report.paper("wording").score == 1.0         # induced from demonstrations
+    assert report.paper("homonym").score == 1.0         # the identity firewall
+
+    # Still absent, and named rather than rounded away.
     assert report.paper("contradiction").score == 0.0   # no notion of a dispute
-    assert report.paper("homonym").score == 0.0         # the V.36 limit, unfixed
     assert report.paper("legs").score == 0.0            # no joint necessity
-    assert report.paper("wording").score < 0.3          # the grammar is a list of surfaces
+    # And the honest ceiling of an induced grammar: a cue nobody demonstrated is not guessed.
+    assert report.paper("wording_new").score == 0.0
+    assert report.paper("wording_new").silent == report.paper("wording_new").asked
 
 
 def test_the_adapter_reports_no_conflict_and_no_joint_and_that_is_the_finding():

@@ -1841,6 +1841,21 @@ class NJPBrain:
             return None
         try:
             from nyxara.njp.explain import Explainer
+
+            # And she is shown how the question is phrased, once, here.
+            #
+            # `explainread` is a table of a dozen regular expressions and the gauntlet measured
+            # what that is worth: 4 of 40 on ten phrasings of one question. Adding nine rows would
+            # move the number and teach her nothing. So `asking.Asking` induces the form from
+            # demonstrations instead, and this is the single call that hands it to the reader —
+            # anywhere else and the organ ends up wired into one code path and not the other.
+            #
+            # It is a *lesson*, not a table: the phrasings demonstrated are deliberately not the
+            # phrasings the gauntlet examines on, and the gauntlet reports the taught and untaught
+            # halves apart.
+            if self._gate("asking", True):
+                from nyxara.njp.asking import install
+                install()
             return Explainer(self.grounder)
         except Exception:  # noqa: BLE001 — a brain without it still answers *what*
             return None

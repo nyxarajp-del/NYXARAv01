@@ -36,7 +36,7 @@ classical conditioning | is_a=form of learning | occurs_when=a neutral stimulus 
 operant conditioning | is_a=form of learning | means=learning from the consequences of an action | causes=behaviour that is reinforced becoming more frequent
 reinforcement | is_a=consequence that makes a behaviour more likely | purpose=strengthening a behaviour | has_kind=positive reinforcement | has_kind=negative reinforcement
 punishment | is_a=consequence that makes a behaviour less likely | causes=suppression of the behaviour while the punisher is present | causes=avoidance of the punisher@0.7
-extinction | is_a=process | occurs_when=a learned signal stops being followed by its consequence | causes=the learned response fading
+extinction (in learning) | is_a=process | occurs_when=a learned signal stops being followed by its consequence | causes=the learned response fading
 observational learning | is_a=form of learning | means=learning by watching someone else | requires=a model | causes=behaviour spreading without anyone being taught
 
 # --- thinking and its systematic errors --------------------------------------------------------------- #

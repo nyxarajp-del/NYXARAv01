@@ -33,7 +33,7 @@ compression | is_a=stress that pushes a material together | causes=shortening | 
 shear | is_a=stress that slides one part of a material past another
 bending | is_a=combination of tension and compression across a beam | occurs_when=a beam carries a load between its supports
 buckling | is_a=sudden sideways failure | occurs_when=a slender column is compressed beyond a critical load | causes=collapse
-fatigue | is_a=failure mode | occurs_when=a material is loaded and unloaded many times | causes=a crack that grows with each cycle | causes=failure far below the static strength
+fatigue (in a material) | is_a=failure mode | occurs_when=a material is loaded and unloaded many times | causes=a crack that grows with each cycle | causes=failure far below the static strength
 creep | is_a=failure mode | occurs_when=a material is held under load at high temperature | causes=slow permanent deformation
 corrosion | is_a=failure mode | occurs_when=metal reacts with its environment | causes=loss of section | causes=weakening of a structure | requires=oxygen | requires=moisture
 brittle fracture | is_a=failure mode | occurs_when=a crack spreads before the material yields | causes=sudden failure with no warning

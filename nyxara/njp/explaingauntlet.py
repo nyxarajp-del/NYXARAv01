@@ -96,7 +96,7 @@ __all__ = [
 DEFAULT_SEED = 20260904
 DEFAULT_LIMIT = 60
 
-ATTACKS: Tuple[str, ...] = ("wording", "entities", "shape", "distractors",
+ATTACKS: Tuple[str, ...] = ("wording", "wording_new", "entities", "shape", "distractors",
                             "contradiction", "homonym", "gap", "legs", "unknown")
 
 #: Papers where an answer is the failure and silence is the pass.
@@ -430,16 +430,58 @@ class Gauntlet:
         world = World([Fact(nodes[i], "causes", nodes[i + 1]) for i in range(length - 1)])
         return world, nodes
 
-    def paper_wording(self, count: int) -> List[Item]:
-        rng = random.Random(self.seed ^ 0x1111)
+    @staticmethod
+    def _covered() -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+        """Which of :data:`WHY_FORMS` somebody has actually shown her, and which nobody has.
+
+        Computed by comparing the form strings against :data:`nyxara.njp.asking.LESSON` and the
+        hand-written table's own control phrasing — a **factual** check, not a grade. It is done at
+        runtime rather than written down so that adding a phrasing to the lesson moves an item from
+        one paper to the other automatically, and a lesson that quietly grew to cover the whole
+        exam would show up as ``wording_new`` running out of items rather than as a rising score.
+        """
+        try:
+            from nyxara.njp.asking import LESSON
+            taught = {form for form, walk in LESSON if walk}
+        except Exception:  # noqa: BLE001
+            taught = set()
+        taught.add("why does {x} happen?")      # the phrasing `explainread`'s table carries
+        covered = tuple(f for f in WHY_FORMS if f in taught)
+        return covered, tuple(f for f in WHY_FORMS if f not in taught)
+
+    def _wording(self, attack: str, forms: Sequence[str], count: int,
+                 salt: int) -> List[Item]:
+        rng = random.Random(self.seed ^ salt)
         out: List[Item] = []
+        if not forms:
+            return out
         for n in range(count):
             world, nodes = self._chain_world(rng, 3)
-            form = WHY_FORMS[n % len(WHY_FORMS)]
-            out.append(Item(attack="wording", question=form.format(x=nodes[-1]), world=world,
-                            chain=tuple(reversed(nodes)),
-                            note=f"phrasing {n % len(WHY_FORMS)}: {form}"))
+            form = forms[n % len(forms)]
+            out.append(Item(attack=attack, question=form.format(x=nodes[-1]), world=world,
+                            chain=tuple(reversed(nodes)), note=form))
         return out
+
+    def paper_wording(self, count: int) -> List[Item]:
+        """Phrasings somebody demonstrated, on topics and graphs nobody did.
+
+        This measures whether **teaching works**: the cue is known, everything else is minted. It
+        is a different question from the one below and mixing them was the first version's error —
+        a single ``wording`` number lets *teaching more phrasings* look identical to *reasoning
+        better*, and those are the two things this pair of papers exists to keep apart.
+        """
+        covered, _ = self._covered()
+        return self._wording("wording", covered, count, 0x1111)
+
+    def paper_wording_new(self, count: int) -> List[Item]:
+        """Phrasings nobody demonstrated. The honest ceiling of an induced grammar.
+
+        A score here is not expected to be high and a high one would be suspicious: it would mean
+        the lesson had grown to cover the exam. What it is for is the **gap** between it and
+        ``wording``, which is the size of what induction bought and what it did not.
+        """
+        _, untaught = self._covered()
+        return self._wording("wording_new", untaught, count, 0x1112)
 
     def paper_entities(self, count: int) -> List[Item]:
         """The control. Same shape, the phrasing the grammar was built for, minted nodes only."""
@@ -752,6 +794,22 @@ class Gauntlet:
 # --------------------------------------------------------------------------- #
 # The thing under test
 # --------------------------------------------------------------------------- #
+def _ensure_taught() -> None:
+    """Put the reader in the state a live brain is in, once.
+
+    The gauntlet must measure what she actually ships as. Run without this, ``wording`` reported
+    0.200 against a reader nobody had shown anything to — a number about an unconfigured process
+    rather than about her — while :meth:`~nyxara.njp.brain.NJPBrain._build_explainer` teaches the
+    forms on every real construction. Measuring a configuration that never runs is the same class
+    of error as grading a walk against its own output.
+    """
+    from nyxara.njp import explainread
+
+    if explainread.LEARNED is None:
+        from nyxara.njp.asking import install
+        install()
+
+
 def _walk(question: str, world: World) -> Reply:
     """Point the gauntlet at :mod:`nyxara.njp.explain`.
 
@@ -766,6 +824,7 @@ def _walk(question: str, world: World) -> Reply:
     """
     from nyxara.njp.explain import Explainer
 
+    _ensure_taught()
     explainer = Explainer(world)
     got = explainer.ask(question)
     if got is None:

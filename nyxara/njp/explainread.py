@@ -251,6 +251,12 @@ def candidates_for(phrase: str, *, verbal: bool = False) -> List[str]:
     return out
 
 
+#: The induced reader, or ``None`` while nothing has been taught. Set by
+#: :func:`nyxara.njp.asking.install`, never by this module — a table does not get to appoint its
+#: own replacement, and a process that has been shown nothing must not be consulted.
+LEARNED: Any = None
+
+
 def read_explanation_question(text: str) -> Optional[Tuple[str, Tuple[str, ...]]]:
     """``(walk, candidate topics)`` or ``None`` when this is not a why/how question.
 
@@ -260,6 +266,18 @@ def read_explanation_question(text: str) -> Optional[Tuple[str, Tuple[str, ...]]
     raw = " ".join(str(text or "").split())
     if not raw:
         return None
+    # The table first, the induced reader second, and that order is a decision.
+    #
+    # The table is a dozen phrasings somebody wrote down and it is *exactly right* about those
+    # dozen — `what is X used for` is a purpose question and no amount of induction will make it
+    # more so. What it cannot do is reach the thirteenth, which the gauntlet measured at 4 of 40.
+    # So the induced reader is not a replacement, it is the fallback that has no edge: what the
+    # table knows, it answers; what it has never seen, `Asking` may have been taught.
+    #
+    # Putting induction first would be worse and it is worth saying why. The table's readings were
+    # each measured against `Grounder._read_question`; a learned cue is corroborated by two
+    # demonstrations. Two demonstrations is enough to be worth consulting and not enough to
+    # overrule something that was measured.
     for kind, patterns in _TABLE:
         for pattern in patterns:
             match = pattern.match(raw)
@@ -277,4 +295,9 @@ def read_explanation_question(text: str) -> Optional[Tuple[str, Tuple[str, ...]]
             if not got:
                 continue
             return kind, tuple(got)
+    if LEARNED is not None:
+        try:
+            return LEARNED.read(raw)
+        except Exception:  # noqa: BLE001 — a learner that raises must not break the reader
+            return None
     return None
