@@ -3044,6 +3044,56 @@ being asked about. The exam was merging languages; the learner was right both ti
     vocabulary   0.50 -> 1.00
     retell       a floor, and it scores the act NOT crossing
 
+#### NJP V.32 — the last four tiers, and teaching against the failures
+
+The gap report scored the Master's ladder at five of ten and the training loop at five of nine.
+The five missing rungs are here.
+
+**Tier 6, adversarial wording**, is the one that found a defect. Five demonstrations of *"Can you
+{v} the {n}?"* and then *"Can you **really** {v} the {n}?"* — one inserted adverb — read as an
+ability question. A convention is kept as a tag skeleton, and inserting one closed-class token
+moved the sentence off every level that had support. The fix is a fifth level, `bare`: the tag
+sequence **with the adverbs dropped**, sitting between `tags` and `frame`. An adverb is freely
+insertable and does not change what a construction is — and if it ever does for some construction,
+two demonstrations that disagree contest that level and the more specific ones decide, which is
+what every level here is for.
+
+**Tier 7, cross-domain transfer**, is nearly free, and *nearly free* is exactly the kind of claim
+that has to be measured rather than assumed. Demonstrations drawn entirely from one field of words
+(`kettle`, `ladle`, `pantry`) read a sentence drawn entirely from another (`crucible`, `bellows`,
+`anvil`) sharing no word. The control is the other direction: familiar words in a shape nobody
+demonstrated stay unread.
+
+**Tier 9, a wholly unseen combination.** A sentence that is passive *and* causal at once, when one
+of those was taught and the other was not. The right answer is **partial**: read the half there is
+evidence for, leave the rest alone. This found the second defect — the passive frame's agent slot
+swallowed the causal clause and returned `ravi because the wind rose`, a phrase filed as a person.
+A subordinator starts a new clause, and the frame now stops there.
+
+**Tier 10, stating her own approach.** `Communicator.strategy` names which of her organs a turn
+calls for, before any of it is done. Every entry is decided by something in the sentence, so it can
+be wrong and the paper can say so. Half the items are turns needing nothing special, where the
+right answer is the **empty** list — a module that named organs for every sentence would pass the
+other half and fail these.
+
+**And the stage the training loop was missing.** `School` now hands each lesson the previous
+sitting's misses. `Retraining` reads the construction out of them and demonstrates *those*: six
+constructions with six different skeletons, two demonstrated on the first round, and a second round
+that teaches the four that failed rather than repeating itself.
+
+```
+retraining   0.00 -> 1.00     "6 constructions, every one of them missed last time"
+adversarial  1.00 (after the `bare` level; 0.50 before)
+crossdomain  1.00
+unseen       1.00 (after the frame stops at a subordinator; 0.50 before)
+method       1.00
+```
+
+The bank had to be rebuilt for that measurement to mean anything. Six *modals* over one skeleton
+are covered from any two by the generalisation levels, so the first round scored 1.00 and there was
+nothing for a targeted round to be targeted at. Six different skeletons are separable, and the exam
+names the construction in each item so the next lesson can read the failures back out.
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -3060,6 +3110,11 @@ being asked about. The exam was merging languages; the learner was right both ti
   alternations       0.30   1.00   +0.70      10  LEARNED
   anchor             0.23   1.00   +0.77       6  LEARNED
   vocabulary         0.50   1.00   +0.50    4000  LEARNED
+  adversarial        0.50   1.00   +0.50       5  (fixed by the `bare` level)
+  crossdomain        1.00   1.00   +0.00       5  already
+  unseen             0.50   1.00   +0.50       0  (fixed at the subordinator)
+  method             1.00   1.00   +0.00       0  already
+  retraining         0.00   1.00   +1.00      12  LEARNED
   reference          0.80   1.00   +0.20       9  LEARNED
   contradiction      0.75   1.00   +0.25      10  LEARNED
   memory             0.50   1.00   +0.50      10  LEARNED
@@ -3070,12 +3125,12 @@ being asked about. The exam was merging languages; the learner was right both ti
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      19/19 subjects
-  learned       14 subject(s) moved by teaching
-  overall       173/173 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  mastered      24/24 subjects
+  learned       15 subject(s) moved by teaching
+  overall       209/209 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       173/173 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       209/209 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
 **Four of those floors did not exist before the second pass.** `reference`, `contradiction`,

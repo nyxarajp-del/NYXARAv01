@@ -61,7 +61,8 @@ __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
     "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
     "Anticipating", "ExchangeSubject", "Alternations", "Anchor", "Vocabulary", "Retell",
-    "Grounded", "Tongue", "Wiring",
+    "Adversarial", "CrossDomain", "Unseen", "Method", "Retraining", "Grounded", "Tongue",
+    "Wiring",
     "DiscourseSchool", "SUBJECTS", "main",
 ]
 
@@ -761,6 +762,238 @@ class Alternations(DiscourseSubject):
         return score, misses
 
 
+class Adversarial(DiscourseSubject):
+    """Tier 6 — the same turn, worded to break the reader.
+
+    Padding, a distractor clause, a doubled determiner, an unfamiliar opener. None of it changes
+    what was said, so **none of it may change what she reads**, and the property asserted is that
+    rather than a score: the reading of the polluted sentence is *identical* to the reading of the
+    plain one.
+
+    Free, or nearly, and the reason is worth stating because it is an argument for the whole
+    design: a convention is kept as a **tag skeleton** with the open class collapsed to positions,
+    so pollution that changes only content words cannot reach it. What does reach it is pollution
+    that changes the *closed* class — and the half of this paper that adds a determiner is the
+    half that could fail.
+    """
+
+    id = "adversarial"
+    title = "the same turn, worded against her"
+    teaches = "nothing — it measures whether wording she was not taught changes the reading"
+    items = 8
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.voice(brain)
+        for _ in range(3):
+            voice.show(f"Can you {mint.word()} the {mint.word()}?", "request")
+        for _ in range(2):
+            voice.show(f"Can you {mint.word()}?", "ability-question")
+        return Taught(5, "the plain wording only")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.voice(brain)
+        score, misses = Score(), []
+        for _ in range(4):
+            verb, thing = mint.word(), mint.word()
+            plain = f"Can you {verb} the {thing}?"
+            want = voice.acts.read(plain).intended
+            for polluted in (f"Can you {verb} the {mint.word()} {thing}?",
+                             f"Can you really {verb} the {thing}?"):
+                got = voice.acts.read(polluted).intended
+                self.mark(score, misses, got=got, want=want,
+                          item=f"{polluted} — plain reads {want!r}", silence="")
+        return score, misses
+
+
+class CrossDomain(DiscourseSubject):
+    """Tier 7 — a convention taught in one field of words, read in another.
+
+    The demonstrations are all about one thing and the exam is all about a different one, sharing
+    no word. It should be free, because a convention is kept as a skeleton with the content
+    collapsed to positions — and *should be free* is precisely the kind of claim that has to be
+    measured rather than assumed. The control is the other direction: a shape that was never
+    demonstrated stays unread however familiar its words are.
+    """
+
+    id = "crossdomain"
+    title = "taught in one field, read in another"
+    teaches = "that a convention is about a shape and not about a subject matter"
+    items = 8
+
+    KITCHEN = ("kettle", "ladle", "pantry", "skillet", "tureen", "colander")
+    FOUNDRY = ("crucible", "bellows", "anvil", "flywheel", "gantry", "ingot")
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.voice(brain)
+        for word in self.KITCHEN[:3]:
+            voice.show(f"Can you scour the {word}?", "request")
+        for word in self.KITCHEN[3:5]:
+            voice.show(f"Can you {word}?", "ability-question")
+        return Taught(5, "every demonstration drawn from one field of words")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.voice(brain)
+        score, misses = Score(), []
+        for word in self.FOUNDRY[:3]:
+            self.mark(score, misses, got=voice.acts.read(f"Can you temper the {word}?").intended,
+                      want="request", item=f"request about a {word}", silence="")
+        for word in self.FOUNDRY[3:5]:
+            self.mark(score, misses, got=voice.acts.read(f"Can you {word}?").intended,
+                      want="ability-question", item=f"ability about a {word}", silence="")
+        # And the control: familiar words in a shape nobody demonstrated stay unread.
+        for word in self.KITCHEN[:3]:
+            got = voice.acts.read(f"The {word} is clean.").intended
+            self.mark(score, misses, got=(got == "assertion"), want=True,
+                      item=f"a familiar word in an undemonstrated shape ({word})")
+        return score, misses
+
+
+class Unseen(DiscourseSubject):
+    """Tier 9 — a turn whose whole combination is new, where the right answer is partial.
+
+    A sentence that is passive **and** causal **and** an indirect request at once, when no lesson
+    ever put those together. The answer is not to guess the whole of it: it is to read the parts
+    she has evidence for and to leave the rest alone. So the paper scores what she reads **and**
+    what she declines, and a run that confidently read everything would fail it as surely as one
+    that read nothing.
+    """
+
+    id = "unseen"
+    title = "a combination no lesson contains"
+    teaches = "nothing — it measures partial reading against confident guessing"
+    items = 6
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = Communicator()
+        # One organ taught, and only one.
+        for who, what in (("ravi", "window"), ("sara", "gate"), ("devi", "wall")):
+            voice.show_alternation(f"{who} opened the {what}.",
+                                   f"The {what} was opened by {who}.")
+        score, misses = Score(), []
+        for _ in range(3):
+            who, what, why = mint.word(), mint.word(), mint.word()
+            said = f"The {what} was opened by {who} because the {why} rose."
+            got = voice.alternation.read(said)
+            self.mark(score, misses, got=(got.subject if got else ""), want=who,
+                      item=f"the half she was taught ({who})", silence="")
+            self.mark(score, misses, got=voice.connective.read(said), want=None,
+                      item="and the half she was not", silence=object())
+        return score, misses
+
+
+class Method(DiscourseSubject):
+    """Tier 10 — what reading this turn *requires*, named before any of it is done.
+
+    Stating a method and following one are different capabilities living in different organs, and
+    ``corpusschool`` makes the same split for the same reason. Every entry is decided by something
+    in the sentence, so the list can be wrong and this paper can say so.
+
+    Half the items are turns that need nothing special, where the right answer is the **empty**
+    list. A module that named organs for every sentence would pass the other half and fail these.
+    """
+
+    id = "method"
+    title = "saying what a turn will take"
+    teaches = "nothing — it measures whether she can name her own approach"
+    items = 8
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = Communicator()
+        for who, what in (("ravi", "window"), ("sara", "gate"), ("devi", "wall")):
+            voice.show_alternation(f"{who} opened the {what}.",
+                                   f"The {what} was opened by {who}.")
+        for surface, cause in (("ravi opened the door because the wind rose.", "the wind rose"),
+                               ("sara shut the gate because the storm rose.", "the storm rose")):
+            voice.show_cause(surface, cause=cause)
+        score, misses = Score(), []
+        for _ in range(2):
+            who, what = mint.word(), mint.word()
+            self.mark(score, misses, got=voice.strategy(f"The {what} was opened by {who}."),
+                      want=("alternation", "ledger"), item="a passive", silence=())
+        for _ in range(2):
+            who, what, why = mint.word(), mint.word(), mint.word()
+            self.mark(score, misses,
+                      got=voice.strategy(f"{who} shut the {what} because the {why} fell."),
+                      want=("connective", "ledger"), item="a causal", silence=())
+        for _ in range(2):
+            what = mint.word()
+            self.mark(score, misses, got=voice.strategy(f"He carried the {what}."),
+                      want=("reference", "ledger"), item="a pronoun", silence=())
+        for _ in range(2):                       # nothing special, and the empty list is right
+            what = mint.word()
+            self.mark(score, misses, got=voice.strategy(f"What is the {what}?"),
+                      want=(), item="a plain question", silence=object())
+        return score, misses
+
+
+class Retraining(DiscourseSubject):
+    """The stage the training loop was missing: **teaching against what was actually missed**.
+
+    Its lesson bank is six constructions and one round demonstrates two of them, so the first
+    sitting fails four. What the second round does with that is the whole subject: the school now
+    hands each lesson the previous sitting's misses (``subject.missed``), and this one reads the
+    construction out of them and demonstrates *those*. A round that simply repeated itself would
+    stay at two of six for ever, which is what every round of every other subject here does and
+    what the Master's ``FAILURE ANALYSIS → TARGETED RETRAINING`` names as the gap.
+    """
+
+    id = "retraining"
+    title = "teaching against the failures rather than repeating the lesson"
+    teaches = "the constructions that were missed, chosen by having been missed"
+    items = 6
+    threshold = 0.9
+
+    #: Six constructions with six **different skeletons**, which is what makes the bank
+    #: separable. Six modals over one skeleton would not: the generalisation levels cover them
+    #: all from any two, so the first round would score 1.00 and there would be nothing left for
+    #: a second round to be targeted at. The exam names the construction in each item so the next
+    #: lesson can read the failures back out.
+    BANK: Dict[str, str] = {
+        "modal": "Can you {v} the {n}?",
+        "copula": "Is the {n} {v}?",
+        "imperative": "{v} the {n} for me.",
+        "raised": "Would the {n} be {v}?",
+        "dosupport": "Do you {v} the {n}?",
+        "nominal": "The {n} needs {v}.",
+    }
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    def _demonstrate(self, voice: Communicator, mint: Mint, shapes: Sequence[str]) -> int:
+        for shape in shapes:
+            for _ in range(2):
+                voice.show(shape.format(v=mint.word(), n=mint.word()), "request")
+        return len(shapes) * 2
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.student
+        missed = tuple(getattr(self, "missed", ()) or ())
+        wanted = [name for name in self.BANK
+                  if any(f"[{name}]" in text for text in missed)]
+        if not wanted:
+            wanted = list(self.BANK)[:2]
+            note = "no failures to work from — two constructions, chosen arbitrarily"
+        else:
+            note = f"{len(wanted)} constructions, every one of them missed last time"
+        shown = self._demonstrate(voice, mint, [self.BANK[name] for name in wanted])
+        return Taught(shown, note)
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.student
+        score, misses = Score(), []
+        for name, shape in self.BANK.items():
+            item = shape.format(v=mint.word(), n=mint.word())
+            self.mark(score, misses, got=voice.acts.read(item).intended, want="request",
+                      item=f"[{name}] {item}", silence="")
+        return score, misses
+
+
 class Vocabulary(DiscourseSubject):
     """The closed class of a language she has only overheard, found rather than typed.
 
@@ -1334,7 +1567,8 @@ class Wiring(DiscourseSubject):
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
     Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating, ExchangeSubject,
-    Alternations, Anchor, Vocabulary, Retell,
+    Alternations, Anchor, Vocabulary, Retell, Adversarial, CrossDomain, Unseen, Method,
+    Retraining,
     ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject, Grounded,
     Tongue, Wiring,
 )

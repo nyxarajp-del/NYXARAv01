@@ -65,7 +65,8 @@ def test_the_floor_subjects_teach_nothing_and_say_so(taught):
     """Two of them, now. `minds` and `register` are mechanisms; `wiring` measures reachability."""
     _brain, transcript = taught
     for result in transcript.results:
-        if result.subject in ("minds", "register", "ground", "retell", "wiring"):
+        if result.subject in ("minds", "register", "ground", "retell", "unseen", "method",
+                              "wiring"):
             assert result.taught == 0
             assert "floor" in result.note or "measures" in result.teaches
 
@@ -167,10 +168,10 @@ def test_the_attachment_lesson_finds_one_preposition_and_not_the_other():
     assert voice.attach.ambiguous == {"with"}
 
 
-def test_the_syllabus_is_nineteen_subjects_with_unique_ids():
+def test_the_syllabus_is_twenty_four_subjects_with_unique_ids():
     made = [factory() for factory in SUBJECTS]
-    assert len(made) == 19
-    assert len({subject.id for subject in made}) == 19
+    assert len(made) == 24
+    assert len({subject.id for subject in made}) == 24
     assert all(isinstance(subject, DiscourseSubject) for subject in made)
 
 
@@ -207,3 +208,24 @@ def test_the_anticipation_control_is_built_to_be_unlearnable():
     assert subject.student.anticipation.accuracy("act") > 0.9
     assert subject.control.anticipation.turns >= 30
     assert subject._commitment(subject.control) < subject.control.anticipation.floor
+
+
+def test_the_lesson_is_handed_the_previous_sitting_s_failures():
+    """The stage the training loop was missing: teaching against what was actually missed."""
+    import random as _random
+
+    from nyxara.njp.discourseschool import Retraining
+    from nyxara.njp.school import School
+
+    transcript = School(seed=26, rounds=2, subjects=[Retraining]).attend(
+        _Holder(Communicator()))
+    result = transcript.results[0]
+    assert result.pre.accuracy == 0.0          # two of six demonstrated, and the exam is all six
+    assert result.post.accuracy == 1.0
+    assert "missed last time" in result.note
+
+    # And the control: with no failures to work from it falls back to an arbitrary two.
+    blind = Retraining()
+    blind.teach(_Holder(Communicator()), Mint(_random.Random(4)))
+    score, _misses = blind.exam(_Holder(blind.student), Mint(_random.Random(5)))
+    assert score.accuracy < 1.0

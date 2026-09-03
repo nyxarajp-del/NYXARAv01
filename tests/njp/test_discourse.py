@@ -111,11 +111,11 @@ def test_a_shape_two_lessons_disagree_about_stops_being_read():
     assert any(level == "opening" for level, _shape in acts.contested)
 
 
-def test_the_four_levels_are_ordered_from_specific_to_general():
+def test_the_levels_are_ordered_from_specific_to_general():
     shapes = shapes_of("Can you open the window?")
     assert len(shapes) == len(LEVELS)
     assert shapes[0][0] == "can" and shapes[1][0] == "MODAL"
-    assert shapes[3][-2] == "+"
+    assert shapes[-1][-2] == "+"
 
 
 def test_a_correction_lands_on_the_shape_and_not_on_the_sentence():
@@ -1148,3 +1148,62 @@ def test_a_retelling_into_a_language_she_was_never_taught_carries_nothing():
     got = voice.retell("Can you open the window?", into="nowhere", faculty=LanguageFaculty())
     assert not got.ok
     assert "claim" in got.lost
+
+
+# --------------------------------------------------------------------------- #
+# 14 · the last four tiers
+# --------------------------------------------------------------------------- #
+
+def test_an_inserted_adverb_does_not_change_the_convention():
+    """Measured before the `bare` level: five demonstrations of the plain wording, and
+    *"Can you really open the window?"* read as an ability question."""
+    acts = ActLearner()
+    for verb, thing in (("open", "window"), ("shut", "gate"), ("raise", "mast")):
+        acts.show(f"Can you {verb} the {thing}?", "request")
+    assert acts.read("Can you carry the barrel?").intended == "request"
+    assert acts.read("Can you really carry the barrel?").intended == "request"
+    assert acts.read("Can you carefully carry the barrel?").intended == "request"
+
+
+def test_the_bare_level_sits_between_the_tags_and_the_frame():
+    from nyxara.njp.discourse import LEVELS as ORDER
+
+    assert ORDER == ("form", "tags", "bare", "frame", "opening")
+    shapes = dict(zip(ORDER, shapes_of("Can you really open the window?")))
+    assert "ADV" in shapes["tags"] and "ADV" not in shapes["bare"]
+
+
+def test_a_frame_stops_at_a_subordinator():
+    """The agent slot swallowed the whole causal clause: `ravi because the wind rose`."""
+    from nyxara.njp.discourse import frames_of
+
+    found = frames_of("The gate was opened by ravi because the wind rose.")
+    assert found[0].slots["right"] == "ravi"
+
+
+def test_a_convention_taught_in_one_field_reads_in_another():
+    acts = ActLearner()
+    for word in ("kettle", "ladle", "pantry"):
+        acts.show(f"Can you scour the {word}?", "request")
+    for word in ("crucible", "bellows", "anvil"):
+        assert acts.read(f"Can you temper the {word}?").intended == "request"
+
+
+def test_an_unseen_combination_is_read_in_part_and_refused_in_part():
+    voice = Communicator()
+    for who, what in (("ravi", "window"), ("sara", "gate"), ("devi", "wall")):
+        voice.show_alternation(f"{who} opened the {what}.",
+                               f"The {what} was opened by {who}.")
+    said = "The lock was opened by Meera because the alarm rang."
+    assert voice.alternation.read(said).subject == "meera"     # the half she was taught
+    assert voice.connective.read(said) is None                 # and the half she was not
+
+
+def test_she_can_say_what_a_turn_will_take_and_when_it_takes_nothing():
+    voice = Communicator()
+    for who, what in (("ravi", "window"), ("sara", "gate"), ("devi", "wall")):
+        voice.show_alternation(f"{who} opened the {what}.",
+                               f"The {what} was opened by {who}.")
+    assert voice.strategy("The barrel was opened by Kiran.") == ("alternation", "ledger")
+    assert voice.strategy("He carried the barrel.") == ("reference", "ledger")
+    assert voice.strategy("What is the barrel?") == ()

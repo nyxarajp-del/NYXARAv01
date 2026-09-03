@@ -248,7 +248,7 @@ MORE = "+"
 #: uses the first level that has support, which is why the order is the mechanism rather than a
 #: preference: a convention demonstrated for ``can`` specifically beats one generalised over every
 #: modal, and a shape nobody has demonstrated at any level is read as its literal mood.
-LEVELS: Tuple[str, ...] = ("form", "tags", "frame", "opening")
+LEVELS: Tuple[str, ...] = ("form", "tags", "bare", "frame", "opening")
 
 #: Who a rendering is for, in increasing order of how much is said. Not a scale of intelligence —
 #: a scale of *how much of what she holds the hearer has asked to carry*.
@@ -325,6 +325,13 @@ def shapes_of(surface: str) -> Tuple[Tuple[str, ...], ...]:
         end = _terminal(surface)
         form = tuple([t.text if t.tag != Tag.WORD else Tag.WORD for t in tokens] + [end])
         tags = tuple([t.tag for t in tokens] + [end])
+        # The same sequence with the adverbs dropped. An adverb is freely insertable and does not
+        # change what a construction *is*: measured, *"Can you really open the window?"* read as
+        # an ability question after five demonstrations of the plain wording, because inserting
+        # one closed-class token moved the sentence off every level that had support. If adverbs
+        # ever do matter for a construction, two demonstrations that disagree contest this level
+        # and the more specific ones decide -- which is what every level here is for.
+        bare = tuple([t.tag for t in tokens if t.tag != Tag.ADV] + [end])
         frame: List[str] = []
         for token in tokens:
             if token.tag == Tag.WORD:
@@ -335,7 +342,7 @@ def shapes_of(surface: str) -> Tuple[Tuple[str, ...], ...]:
                 frame.append(token.tag)
         opening = tuple([t.tag for t in tokens[:2]] + [MORE, end])
         out: List[Tuple[str, ...]] = []
-        for shape in (form, tags, tuple(frame + [end]), opening):
+        for shape in (form, tags, bare, tuple(frame + [end]), opening):
             out.append(shape)
         return tuple(out)
     except Exception:  # noqa: BLE001
@@ -2746,6 +2753,12 @@ def frames_of(surface: str) -> List[Frame]:
             rest = tokens[index + 1:]
             while rest and rest[0].tag == Tag.ADV:
                 rest = rest[1:]
+            # A subordinator starts a new clause, and the frame stops there. Without this the
+            # agent slot of *"The gate was opened by Ravi because the wind rose"* swallowed the
+            # whole causal clause and came back ``ravi because the wind rose`` -- a phrase, filed
+            # as a person.
+            cut_at = next((j for j, t in enumerate(rest) if t.tag == Tag.SUB), len(rest))
+            rest = rest[:cut_at]
             if len(rest) < 3 or rest[0].tag != Tag.WORD:
                 continue
             preps = [j for j, t in enumerate(rest) if t.tag == Tag.PREP]
@@ -3598,7 +3611,10 @@ class Communicator:
                     if more is not None and not _pronoun(more.subject):
                         self.ledger.note(more)
                         self.figure.witness(more.relation, more.subject)
-                self.minds.hear(out.rewritten)
+                # The clause the sentence **asserts**, not the whole of it. Run over
+                # *"Devi lit the lamp because the room was dark"*, the attitude reader finds
+                # ``lit`` with a clause after it and files a belief nobody expressed.
+                self.minds.hear(asserted)
             elif not out.literal:
                 out.verdict = Verdict(kind="none", why="read as non-literal; nothing filed")
             if out.meaning is not None:
@@ -3793,6 +3809,46 @@ class Communicator:
             return out
         except Exception:  # noqa: BLE001
             return out
+
+    def strategy(self, surface: str) -> Tuple[str, ...]:
+        """What reading this turn **requires**, named before any of it is done.
+
+        Tier 10 of the Master's ladder is her constructing an approach rather than being given
+        one, and the honest version of that here is small and checkable: which of her organs a
+        turn actually calls for. Every entry is decided by something in the sentence — a pronoun
+        needs resolving, a shape with no frame needs a learned mapping, a connective she has been
+        shown needs reading — so the list can be wrong and a test can say so.
+
+        A turn that needs nothing special comes back empty, which is most turns and is the answer
+        that makes the non-empty ones mean something.
+        """
+        needs: List[str] = []
+        try:
+            tokens = tag_tokens(surface)
+            if any(t.tag == Tag.PRON and _pronoun(t.text) in ("third-sg", "third-pl")
+                   for t in tokens):
+                needs.append("reference")
+            if frames_of(surface):
+                needs.append("alternation")
+            link = self.connective.read(surface)
+            if link is not None:
+                needs.append("connective")
+            asserted = link.effect if (link is not None and link.effect) else surface
+            if _attitude(asserted) is not None:
+                needs.append("minds")
+            read = self.acts.read(surface)
+            if read.indirect or read.ambiguous:
+                needs.append("acts")
+            claim = read_claim(surface, markers=self.markers, alternation=self.alternation)
+            if claim is not None:
+                needs.append("ledger")
+                if claim.universal or claim.change:
+                    needs.append("markers")
+            if attachment(surface, learner=self.attach).ambiguous:
+                needs.append("attachment")
+            return tuple(dict.fromkeys(needs))
+        except Exception:  # noqa: BLE001
+            return tuple(needs)
 
     def figurative(self, surface: str) -> bool:
         """Is this sentence one that must not be filed literally?
