@@ -34,7 +34,7 @@ four is now a subject on the report card with a floor, a lesson and a gain. The 
 — the pronouns, the copula, the factive subordinators, the time words — are the closed class
 :mod:`nyxara.njp.semantics` already defends, where a list is the honest representation.
 
-Nine organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather than
+Ten organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather than
 a new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
 something nobody demonstrated; where two readings survive the answer is that there are two.**
 
@@ -107,7 +107,25 @@ lacks, the reading is flagged figurative and nothing is filed. Where there are n
 the new subject's kinds are unknown, **nothing is claimed** — with an empty store no sentence is
 figurative, and that is the correct answer rather than a limitation to apologise for.
 
-**7 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
+**7 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
+shapes came back unreadable or worse: *"The window was opened by Ravi."*, *"Ravi has been opening
+the door."*, *"He was tired."* and *"Ravi opened the door and Arun the window."* — the last of
+which had a **wrong** reading rather than none, a single claim whose object was ``door arun
+window``, filed at the confidence of a fact about something. Detecting the shapes is structural
+and belongs with the closed class (:func:`frames_of`). **Reading them is not**: that a passive
+puts the patient in front and the agent after the preposition is a fact about English, not about
+the shape ``NP be V PREP NP``, and a module that wrote the mapping down could never be told
+otherwise. So a demonstration is two sentences that mean the same thing — one the compiler reads,
+one it does not — and what is induced is where each slot's filler turned up in the reading that
+already existed. Untaught, none of these shapes is read at all.
+
+Three shapes need no mapping because no role moves in them, and they are read structurally beside
+:func:`_locative` and :func:`_possessive`: a copula with a predicate (:func:`_predication`), which
+is what *"He was tired."* is. **As a fallback and never an override** — put ahead of the compiler
+it read *"When I visited Delhi last year I was tired."* as a claim about ``tired`` and lost the
+claim the speaker actually made.
+
+**8 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
 :mod:`nyxara.social.common_ground`). The Master listed seventeen things a conversation does and
 eleven of them were unreachable, for one reason: this module read every turn **alone**. What makes
 a turn a clarification rather than an answer is the turn before it. So adjacency pairs are induced
@@ -122,7 +140,7 @@ says and the hearer's next turn acknowledges it, which is Clark's mechanism run 
 implements it. Measured: the same meaning to the same hearer, eighteen words the first time and
 two the second, with the claim itself unchanged — and a fresh hearer still told everything.
 
-**8 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
+**9 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
 The Master's fifth deep mechanism — ``PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`` — and
 this module did not have it at all. Three things are predicted about a turn before it is looked
 at: what the speaker will be *doing*, what they will be *about*, and what it will do to the
@@ -140,7 +158,7 @@ prediction against a reading it wrote is the same self-confirming loop :class:`F
 to have. Measured with that loop closed: the control exchange's act distribution collapsed to one
 successor and reported 1.00 confidence on a sequence built to be unpredictable.
 
-**9 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
+**10 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
 with the telescope."* The evidence that there is an ambiguity at all is in
 :mod:`nyxara.njp.semantics`'s own output: it has no frame for a prepositional phrase after an
 object, so it fuses the two noun phrases into one object string — ``man telescope``, with ``with
@@ -173,6 +191,7 @@ __all__ = [
     "GAP", "MORE", "LEVELS", "REGISTERS", "LICENCE", "UNIVERSAL",
     "Readings", "attachment", "AttachLearner", "Marker", "MarkerLearner",
     "Anticipation", "Expectation", "Surprise", "Exchange", "Pair", "Reply",
+    "Alternation", "Frame", "Mapping", "frames_of",
     "free_words", "clause_proposition",
     "shapes_of", "fillers_of", "literal_act",
     "Act", "Interpretation", "ActLearner",
@@ -1255,7 +1274,8 @@ def _asserted_clauses(surface: str) -> List[str]:
 
 
 def read_claim(surface: str, meaning: Optional[Meaning] = None, *, turn: int = 0,
-               markers: Optional["MarkerLearner"] = None) -> Optional[Claim]:
+               markers: Optional["MarkerLearner"] = None,
+               alternation: Optional["Alternation"] = None) -> Optional[Claim]:
     """A sentence read as a claim, with its universal and its change licence **looked up**.
 
     Returns ``None`` for anything that is not a complete assertion — a question asserts nothing,
@@ -1277,6 +1297,23 @@ def read_claim(surface: str, meaning: Optional[Meaning] = None, *, turn: int = 0
                 if candidate.readable and candidate.kind == "assertion" and candidate.complete:
                     found = candidate
                     break
+        if found is None and alternation is not None:
+            # A shape the compiler has no frame for, read through a mapping she was shown — see
+            # :class:`Alternation`. Untaught this is ``None`` and the sentence stays unreadable,
+            # which is where this module stood before the mappings existed.
+            found = alternation.read(surface)
+        if found is None:
+            # And the shapes this module reads structurally: a copula with a predicate, a
+            # location, a possession. *"He was tired."* is one of the commonest sentences in
+            # English and had no reading at all.
+            for reader in (_predication, _locative, _possessive):
+                shape = reader(surface)
+                if shape is not None:
+                    shaped_subject, shaped_relation, shaped_object = shape
+                    found = Meaning(kind="assertion", subject=shaped_subject,
+                                    relation=shaped_relation, object=shaped_object,
+                                    confidence=0.7, frame="structural")
+                    break
         if found is None:
             return None
         meaning = found
@@ -1285,6 +1322,11 @@ def read_claim(surface: str, meaning: Optional[Meaning] = None, *, turn: int = 0
         change = bool(markers is not None and markers.carries(marking, LICENCE))
         subject, relation, obj = (_untimed(_bare(meaning.subject)), meaning.relation,
                                   _untimed(_bare(meaning.object)))
+        # Only the locative overrides a reading that already succeeded. Adding the predication
+        # here read *"When I visited Delhi last year I was tired."* as a claim about `tired`,
+        # because the sentence ends in a copula and one word — and the claim the speaker actually
+        # made, inside the fronted clause, was lost. A structural shape is a **fallback** for a
+        # sentence nothing else reads, not an override of one that was read.
         placed = _locative(surface)
         if placed is not None:
             subject, relation, obj = placed
@@ -1500,7 +1542,7 @@ def clause_proposition(clause: str) -> Tuple[str, str]:
     """
     try:
         text = str(clause or "").strip()
-        for reader in (_locative, _possessive):
+        for reader in (_locative, _possessive, _predication):
             found = reader(text)
             if found is not None:
                 subject, relation, obj = found
@@ -1525,7 +1567,7 @@ def proposition(clause: str) -> Tuple[str, str]:
     """
     try:
         text = str(clause or "").strip()
-        for reader in (_locative, _possessive):
+        for reader in (_locative, _possessive, _predication):
             found = reader(text)
             if found is not None:
                 subject, relation, obj = found
@@ -2199,7 +2241,266 @@ def attachment(surface: str, meaning: Optional[Meaning] = None, *,
 
 
 # --------------------------------------------------------------------------- #
-# 8 · the exchange — what counts as a reply to what
+# 8 · alternations — the same meaning, said a different way round
+# --------------------------------------------------------------------------- #
+
+def _predication(surface: str) -> Optional[Tuple[str, str, str]]:
+    """``NP be WORD`` read as ``(subject, predicate, "")``, or ``None``.
+
+    *"He was tired."* has no frame in the compiler at all, and it is one of the commonest shapes
+    in English. Read here for the same reason :func:`_locative` and :func:`_possessive` are — it
+    is a shape over the closed class — and with one property neither of those has: **no relation
+    name is invented.** The relation is the predicate word the sentence used, so nothing in this
+    function decides what anything means.
+    """
+    try:
+        tokens = tag_tokens(surface)
+        for index, token in enumerate(tokens):
+            if token.text not in _COPULA or index == 0:
+                continue
+            rest = [t for t in tokens[index + 1:] if t.tag not in (Tag.ADV,)]
+            if len(rest) != 1 or rest[0].tag != Tag.WORD:
+                continue
+            subject = _bare(" ".join(t.text for t in tokens[:index]))
+            if subject:
+                return subject, rest[0].text, ""
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@dataclass
+class Frame:
+    """One structural shape found over the closed class, with its slots unnamed as to role.
+
+    The shape is structure and the **roles are not in it**. *"The window was opened by Ravi"* has
+    a noun phrase before the auxiliary, a word after it, and a noun phrase after the preposition —
+    and which of those is the agent is a fact about English rather than about the shape. That is
+    the split this class exists to keep: detection is structural, interpretation is learned.
+    """
+
+    name: str = ""
+    slots: Dict[str, str] = field(default_factory=dict)
+    marker: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"name": self.name, "slots": dict(self.slots), "marker": self.marker}
+
+
+def frames_of(surface: str) -> List[Frame]:
+    """Every alternation shape this sentence matches. Structural, over the closed class only."""
+    out: List[Frame] = []
+    try:
+        tokens = tag_tokens(surface)
+        texts = [t.text for t in tokens]
+        tags = [t.tag for t in tokens]
+
+        def phrase(span: Sequence[Any]) -> str:
+            return _bare(" ".join(t.text for t in span))
+
+        # NP be V PREP NP — the shape a passive has. No preposition is named: which one a
+        # language uses for the agent is a fact about that language, and naming ``by`` here would
+        # be the table this module spent V.26 removing.
+        for index, token in enumerate(tokens):
+            if token.text not in _COPULA or index == 0:
+                continue
+            rest = tokens[index + 1:]
+            while rest and rest[0].tag == Tag.ADV:
+                rest = rest[1:]
+            if len(rest) < 3 or rest[0].tag != Tag.WORD:
+                continue
+            preps = [j for j, t in enumerate(rest) if t.tag == Tag.PREP]
+            if not preps or preps[0] == 0:
+                continue
+            cut = preps[0]
+            left, verb = phrase(tokens[:index]), rest[0].text
+            right = phrase(rest[cut + 1:])
+            if left and verb and right:
+                out.append(Frame(name="be-prep",
+                                 slots={"left": left, "verb": verb, "right": right},
+                                 marker=rest[cut].text))
+                break
+
+        # NP AUX AUX V NP — an auxiliary chain, which is where aspect lives.
+        for index in range(len(tokens) - 2):
+            if tags[index] != Tag.AUX or tags[index + 1] != Tag.AUX:
+                continue
+            rest = tokens[index + 2:]
+            if not rest or rest[0].tag != Tag.WORD:
+                continue
+            left, verb = phrase(tokens[:index]), rest[0].text
+            right = phrase(rest[1:])
+            if left and verb:
+                out.append(Frame(name="aux-chain",
+                                 slots={"left": left, "verb": verb, "right": right},
+                                 marker=f"{texts[index]} {texts[index + 1]}"))
+                break
+
+        # NP V NP CONJ NP NP — a coordinate whose second half has no verb of its own.
+        for index, tag in enumerate(tags):
+            if tag != Tag.CONJ or index < 3:
+                continue
+            head, tail = tokens[:index], tokens[index + 1:]
+            opens = [t for t in tail if t.tag == Tag.WORD]
+            first_opens = [t for t in head if t.tag == Tag.WORD]
+            if len(opens) != 2 or len(first_opens) != 3:
+                continue
+            out.append(Frame(name="gapped",
+                             slots={"left": first_opens[0].text,
+                                    "verb": first_opens[1].text,
+                                    "right": first_opens[2].text,
+                                    "left2": opens[0].text, "right2": opens[1].text},
+                             marker=texts[index]))
+            break
+        return out
+    except Exception:  # noqa: BLE001
+        return out
+
+
+@dataclass
+class Mapping:
+    """One learned reading of a frame: which slot holds which role."""
+
+    frame: str = ""
+    roles: Dict[str, str] = field(default_factory=dict)
+    demonstrations: Tuple[Tuple[str, ...], ...] = ()
+
+    @property
+    def support(self) -> int:
+        return len(set(self.demonstrations))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"frame": self.frame, "roles": dict(self.roles), "support": self.support}
+
+
+class Alternation:
+    """The same meaning said a different way round, and **which way round is learned**.
+
+    Four shapes were coming back unreadable or mis-read, and every one of them is ordinary
+    English: *"The window was opened by Ravi"*, *"Ravi has been opening the door"*, *"Ravi said
+    that he was tired"*, *"Ravi opened the door and Arun the window"*. Detecting them is
+    structural and belongs with the closed class (:func:`frames_of`). **Reading them is not.**
+
+    That a passive puts the *patient* in front and the *agent* after the preposition is a fact
+    about English, not about the shape ``NP be V PREP NP``: a language exists where that shape
+    means the opposite, and a module that wrote the mapping down could never be told so. So a
+    demonstration is two sentences that **mean the same thing** — one the compiler already reads,
+    one it does not — and what is induced is where each slot's filler turned up in the reading it
+    already has.
+
+    Two demonstrations minimum, differing in fillers, unanimous; a slot two demonstrations
+    disagree about is contested and the frame is not read. Untaught, none of these shapes is read
+    at all, which is exactly where this module stood before — the capability arrives with the
+    evidence and not with the file.
+    """
+
+    min_support = 2
+
+    def __init__(self, *, min_support: Optional[int] = None) -> None:
+        if min_support is not None:
+            self.min_support = max(1, int(min_support))
+        #: ``frame → slot → role → [signature, …]``
+        self.seen: Dict[str, Dict[str, Dict[str, List[Tuple[str, ...]]]]] = {}
+        self.kept: Dict[str, Mapping] = {}
+        self.contested: Set[Tuple[str, str]] = set()
+        self.shown = 0
+
+    def show(self, plain: str, marked: str) -> None:
+        """Two sentences that mean the same thing; the first is one the compiler already reads."""
+        try:
+            reading = compile_meaning(plain)
+            if not reading.readable or not reading.subject:
+                return
+            where = {_bare(reading.subject): "subject", reading.relation: "relation",
+                     _lemma_of(reading.verb or reading.relation): "relation"}
+            if reading.object:
+                where[_bare(reading.object)] = "object"
+            signature = tuple(sorted(where))
+            for frame in frames_of(marked):
+                for slot, filler in frame.slots.items():
+                    role = where.get(filler) or where.get(_lemma_of(filler))
+                    if not role:
+                        continue
+                    (self.seen.setdefault(frame.name, {}).setdefault(slot, {})
+                     .setdefault(role, []).append(signature))
+            self.shown += 1
+            self._settle()
+        except Exception:  # noqa: BLE001
+            return
+
+    def _settle(self) -> None:
+        kept: Dict[str, Mapping] = {}
+        contested: Set[Tuple[str, str]] = set()
+        for frame, slots in self.seen.items():
+            roles: Dict[str, str] = {}
+            demos: List[Tuple[str, ...]] = []
+            for slot, found in slots.items():
+                live = [role for role, sigs in found.items() if sigs]
+                if len(live) > 1:
+                    contested.add((frame, slot))
+                    continue
+                sigs = found[live[0]]
+                if len(set(sigs)) < self.min_support:
+                    continue
+                roles[slot] = live[0]
+                demos.extend(sigs)
+            if roles:
+                kept[frame] = Mapping(frame=frame, roles=roles, demonstrations=tuple(demos))
+        self.kept, self.contested = kept, contested
+
+    #: Which slots belong to which clause. A structural fact about the shape rather than about
+    #: the language — a gapped coordinate has two clauses by definition, and which words are in
+    #: which of them is what :func:`frames_of` found. What each slot *means* is still learned.
+    CLAUSES: Dict[str, Tuple[Tuple[str, ...], ...]] = {
+        "be-prep": (("left", "verb", "right"),),
+        "aux-chain": (("left", "verb", "right"),),
+        "gapped": (("left", "verb", "right"), ("left2", "verb", "right2")),
+    }
+
+    def readings(self, surface: str) -> List[Meaning]:
+        """Every clause this sentence carries, read through learned mappings.
+
+        A list rather than one, because a gapped coordinate is **two** claims and returning one of
+        them would silently lose the other — which is what *"Ravi opened the door and Arun the
+        window"* did before: it came back as a single claim whose object was ``door arun window``.
+        """
+        out: List[Meaning] = []
+        try:
+            for frame in frames_of(surface):
+                found = self.kept.get(frame.name)
+                if found is None:
+                    continue
+                for group in self.CLAUSES.get(frame.name, (tuple(frame.slots),)):
+                    filled: Dict[str, str] = {}
+                    for slot in group:
+                        role = found.roles.get(slot)
+                        if role and frame.slots.get(slot):
+                            filled.setdefault(role, frame.slots[slot])
+                    if not (filled.get("subject") and filled.get("relation")):
+                        continue
+                    out.append(Meaning(kind="assertion", subject=filled["subject"],
+                                       relation=_lemma_of(filled["relation"]),
+                                       object=filled.get("object", ""),
+                                       confidence=0.7, frame=f"learned:{frame.name}",
+                                       verb=filled["relation"]))
+                if out:
+                    return out
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    def read(self, surface: str) -> Optional[Meaning]:
+        """The first clause this sentence carries, or ``None`` if no mapping applies."""
+        found = self.readings(surface)
+        return found[0] if found else None
+
+    def stats(self) -> Dict[str, Any]:
+        return {"shown": self.shown, "contested": len(self.contested),
+                "kept": {name: dict(m.roles) for name, m in self.kept.items()}}
+
+
+# --------------------------------------------------------------------------- #
+# 9 · the exchange — what counts as a reply to what
 # --------------------------------------------------------------------------- #
 
 @dataclass
@@ -2641,6 +2942,8 @@ class Communicator:
         #: Which prepositions attach two ways. Discovered from demonstrations that disagree,
         #: empty until then — see :class:`AttachLearner`.
         self.attach = AttachLearner()
+        #: How a shape the compiler has no frame for maps onto roles — see :class:`Alternation`.
+        self.alternation = Alternation()
         #: What she expects of a turn before it arrives, learned from what has actually
         #: followed what — see :class:`Anticipation`.
         self.anticipation = Anticipation()
@@ -2686,6 +2989,11 @@ class Communicator:
         see :meth:`MarkerLearner.show`."""
         self.markers.show(first, second, verdict)
 
+    def show_alternation(self, plain: str, marked: str) -> None:
+        """Demonstrate that these two sentences mean the same thing, one of them in a shape the
+        compiler cannot read — see :meth:`Alternation.show`."""
+        self.alternation.show(plain, marked)
+
     def show_exchange(self, first: str, second: str, relation: str) -> None:
         """Demonstrate what the second turn is doing to the first — see :meth:`Exchange.show`.
 
@@ -2723,6 +3031,30 @@ class Communicator:
                 out.surface, meaning=first, turn=self.turn)
             out.meaning = (compile_meaning(out.rewritten)
                            if out.rewritten != out.surface else first)
+            # A shape the compiler has no frame for. Read through a mapping she was shown, or
+            # through one of the structural shapes this module reads — and left unreadable when
+            # neither applies, which is where every one of these sentences stood before.
+            # A learned mapping **outranks** the compiler where one applies. It has to: the
+            # compiler reads *"Ravi opened the door and Arun the window"* perfectly happily as a
+            # single claim whose object is ``door arun window``, so a fallback that only fired on
+            # `unreadable` would never have been reached for the shape that needed it most.
+            # `frames_of` matches three shapes and a mapping needs demonstrations, so an ordinary
+            # active sentence reaches none of this.
+            learned = self.alternation.readings(out.rewritten)
+            if learned:
+                out.meaning = learned[0]
+            elif not out.meaning.readable:
+                # The structural shapes, as a fallback and never as an override — see
+                # :func:`read_claim`. Without this the *claim* was recovered and the **meaning**
+                # was not, so a sentence whose only reading is structural introduced no referent
+                # and was judged by nothing.
+                for reader in (_predication, _locative, _possessive):
+                    shape = reader(out.rewritten)
+                    if shape is not None:
+                        out.meaning = Meaning(kind="assertion", subject=shape[0],
+                                              relation=shape[1], object=shape[2],
+                                              confidence=0.7, frame="structural")
+                        break
             out.interpretation = self.acts.read(out.surface, meaning=out.meaning)
             out.figurative = self.figure.judge(out.meaning)
             self.figure.note_exception(out.figurative)
@@ -2730,10 +3062,34 @@ class Communicator:
             literal_assertion = (out.interpretation.intended in ("assertion", "exclamation")
                                  or out.interpretation.literal == "assertion")
             if literal_assertion and out.literal:
-                claim = read_claim(out.rewritten, turn=self.turn, markers=self.markers)
+                claim = read_claim(out.rewritten, learned[0] if learned else None,
+                                   turn=self.turn, markers=self.markers,
+                                   alternation=self.alternation)
+                # A claim about a pronoun is a claim about nobody — but only when the pronoun
+                # was never resolved. First and second person **are** resolved and are
+                # deliberately not substituted into the surface (that broke a Hinglish question
+                # in V.26), so the ledger has to do the substitution itself. Dropping them
+                # instead cost every claim the Master made about himself: *"I never visited
+                # Delhi."* stopped reaching the ledger at all, and the contradiction two turns
+                # later had nothing to contradict.
+                if claim is not None and _pronoun(claim.subject):
+                    named = next((r.referent for r in out.resolutions
+                                  if r.settled and r.pronoun == claim.subject), "")
+                    if named:
+                        claim.subject = _bare(named.lower())
+                    else:
+                        claim = None
                 out.verdict = self.ledger.note(claim)
                 if claim is not None:
                     self.figure.witness(claim.relation, claim.subject)
+                # A gapped coordinate is **two** claims, and filing one of them would lose the
+                # other silently.
+                for extra in learned[1:]:
+                    more = read_claim(out.rewritten, extra, turn=self.turn,
+                                      markers=self.markers)
+                    if more is not None and not _pronoun(more.subject):
+                        self.ledger.note(more)
+                        self.figure.witness(more.relation, more.subject)
                 self.minds.hear(out.rewritten)
             elif not out.literal:
                 out.verdict = Verdict(kind="none", why="read as non-literal; nothing filed")
@@ -2907,6 +3263,7 @@ class Communicator:
         except Exception:  # noqa: BLE001
             ground = {}
         return {"turns": self.turn, "acts": self.acts.stats(),
+                "alternation": self.alternation.stats(),
                 "exchange": self.exchange.stats(), "ground": ground,
                 "anticipation": self.anticipation.stats(),
                 "markers": self.markers.stats(), "attach": self.attach.stats(),

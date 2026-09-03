@@ -52,14 +52,15 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from nyxara.njp.discourse import REGISTERS, Communicator, Referent, attachment
+from nyxara.njp.discourse import (REGISTERS, Communicator, Referent, attachment,
+                                  read_claim)
 from nyxara.njp.school import ExamConditions, Mint, Score, Subject, Taught, Transcript
 from nyxara.njp.semantics import compile_meaning
 
 __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
     "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
-    "Anticipating", "ExchangeSubject", "Grounded", "Tongue", "Wiring",
+    "Anticipating", "ExchangeSubject", "Alternations", "Grounded", "Tongue", "Wiring",
     "DiscourseSchool", "SUBJECTS", "main",
 ]
 
@@ -678,6 +679,87 @@ class RegisterSubject(DiscourseSubject):
         return score, misses
 
 
+class Alternations(DiscourseSubject):
+    """Four ordinary English shapes that came back unreadable, and one that came back wrong.
+
+    *"The window was opened by Ravi."*, *"Ravi has been opening the door."*, *"He was tired."*,
+    *"Ravi opened the door and Arun the window."* — the first two and the third had no reading at
+    all, and the fourth had a **worse** one: a single claim whose object was ``door arun window``,
+    which is a fact about nothing filed at the same confidence as a fact about something.
+
+    Detecting the shapes is structural and needs no lesson. **Reading them does.** That a passive
+    puts the patient in front and the agent after the preposition is a fact about English rather
+    than about the shape, so the mapping is induced from pairs of sentences that mean the same
+    thing — one the compiler already reads, one it does not — and untaught, none of these shapes
+    is read at all.
+
+    The control is the shape that needs no mapping: *"He was tired."* is read structurally, and
+    an active sentence must go on being read by the compiler and **not** through any of this.
+    """
+
+    id = "alternations"
+    title = "the same meaning, said a different way round"
+    teaches = "where each slot's filler ends up, induced from sentences that mean the same thing"
+    items = 10
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.student
+        for _ in range(3):
+            who, what = mint.word(), mint.word()
+            voice.show_alternation(f"{who} opened the {what}.",
+                                   f"The {what} was opened by {who}.")
+        for _ in range(3):
+            who, what = mint.word(), mint.word()
+            voice.show_alternation(f"{who} opened the {what}.",
+                                   f"{who} has been opening the {what}.")
+        for _ in range(2):
+            one, two, first, second = mint.word(), mint.word(), mint.word(), mint.word()
+            marked = f"{one} opened the {first} and {two} the {second}."
+            voice.show_alternation(f"{one} opened the {first}.", marked)
+            voice.show_alternation(f"{two} opened the {second}.", marked)
+        return Taught(10, f"mappings {sorted(voice.alternation.kept)}")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.student
+        score, misses = Score(), []
+        for _ in range(3):                       # the passive: the agent is not the first noun
+            who, what = mint.word(), mint.word()
+            got = voice.alternation.read(f"The {what} was carried by {who}.")
+            self.mark(score, misses, got=(got.subject if got else ""), want=who,
+                      item=f"passive: the {what} was carried by {who}", silence="")
+        for _ in range(2):                       # the auxiliary chain: the agent is the first
+            who, what = mint.word(), mint.word()
+            got = voice.alternation.read(f"{who} has been carrying the {what}.")
+            self.mark(score, misses, got=(got.subject if got else ""), want=who,
+                      item=f"perfect: {who} has been carrying the {what}", silence="")
+        for _ in range(2):                       # the gap: two claims, not one
+            one, two, first, second = mint.word(), mint.word(), mint.word(), mint.word()
+            got = voice.alternation.readings(
+                f"{one} raised the {first} and {two} the {second}.")
+            names = [m.subject for m in got]
+            self.mark(score, misses, got=names, want=[one, two],
+                      item=f"gapped: {one}/{two}", silence=[])
+        for _ in range(2):                       # structural, and it needs no mapping at all
+            who = mint.word()
+            claim = read_claim(f"{who} was tired.")
+            self.mark(score, misses, got=(claim.subject if claim else ""), want=who,
+                      item=f"{who} was tired", silence="")
+        # The control: an ordinary active sentence matches no frame and must be read by the
+        # compiler, never through a mapping.
+        who, what = mint.word(), mint.word()
+        self.mark(score, misses, got=voice.alternation.read(f"{who} opened the {what}."),
+                  want=None, item="an active sentence reaches no mapping", silence=object())
+        return score, misses
+
+
 class ExchangeSubject(DiscourseSubject):
     """What counts as a reply to what, and what counts as nothing to do with it.
 
@@ -1023,6 +1105,7 @@ class Wiring(DiscourseSubject):
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
     Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating, ExchangeSubject,
+    Alternations,
     ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject, Grounded,
     Tongue, Wiring,
 )

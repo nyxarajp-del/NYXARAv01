@@ -2905,6 +2905,59 @@ that stops this being a trick rather than a capability.
 not a convention anybody demonstrates. What it measures is that an organ which was real and
 unreachable is now real and reached.
 
+#### NJP V.29 — the same meaning, said a different way round
+
+The gap report probed the compiler and four ordinary English shapes came back broken:
+
+```
+The window was opened by Ravi.              unreadable
+Ravi has been opening the door.             unreadable
+He was tired.                               unreadable
+Ravi opened the door and Arun the window.   object = "door arun window"
+```
+
+The last one is the worst of the four. It is not a gap, it is a **wrong claim filed at the
+confidence of a right one** — a fact about nothing, in the store where facts about things go.
+
+**Detecting these shapes is structural and belongs with the closed class.** `frames_of` finds
+`NP be V PREP NP`, an auxiliary chain, and a coordinate whose second half has no verb, and it
+names no preposition: which one a language uses for the agent is a fact about that language, and
+writing `by` here would be the table V.26 spent a whole commit removing.
+
+**Reading them is not structural.** That a passive puts the patient in front and the agent after
+the preposition is a fact about English, not about the shape. A language exists where that shape
+means the opposite, and a module with the mapping written down could never be told so. So a
+demonstration is two sentences that mean the same thing — one the compiler reads, one it does not
+— and what is induced is where each slot's filler turned up in the reading that already existed:
+
+```
+shown:  "Ravi opened the window."  ≡  "The window was opened by Ravi."   (×3, minted)
+learnt: be-prep  →  left: object,  verb: relation,  right: subject
+read:   "The barrel was carried by Meera."  →  meera carry barrel
+untaught:                                   →  nothing
+```
+
+A gapped coordinate is read as **two** claims, because it is two. Three shapes need no mapping
+because no role moves in them — a copula with a predicate, a location, a possession — and those
+are read structurally, **as a fallback and never an override**: put ahead of the compiler,
+`_predication` read *"When I visited Delhi last year I was tired."* as a claim about `tired` and
+lost the claim the speaker actually made inside the fronted clause.
+
+Reported speech came free with it. *"Ravi said that he was tired"* was unreadable because its
+complement was, and `_attitude` requires a complement that is a whole clause; with the copular
+predication readable, the attitude is found and the belief is stored.
+
+**Two defects the measurement found in this change set.** A learned mapping had to *outrank* the
+compiler rather than only fill in for it — a fallback that fired on `unreadable` alone would never
+have been reached for the gapped coordinate, which is the shape that needed it most, because the
+compiler reads that one happily and wrongly. And a guard against filing claims about pronouns
+dropped **every claim the Master made about himself**: first and second person are resolved but
+deliberately not substituted into the surface (that broke a Hinglish question in V.26), so the
+ledger has to name them itself. *"I never visited Delhi."* stopped reaching the ledger at all, and
+the contradiction two turns later had nothing to contradict.
+
+    alternations   0.30 -> 1.00
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -2918,6 +2971,7 @@ unreachable is now real and reached.
   attachment         0.50   1.00   +0.50       7  LEARNED
   anticipation       0.50   1.00   +0.50      18  LEARNED
   exchange           0.20   1.00   +0.80       4  LEARNED
+  alternations       0.30   1.00   +0.70      10  LEARNED
   reference          0.80   1.00   +0.20       9  LEARNED
   contradiction      0.75   1.00   +0.25      10  LEARNED
   memory             0.50   1.00   +0.50      10  LEARNED
@@ -2927,12 +2981,12 @@ unreachable is now real and reached.
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      15/15 subjects
-  learned       11 subject(s) moved by teaching
-  overall       140/140 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  mastered      16/16 subjects
+  learned       12 subject(s) moved by teaching
+  overall       150/150 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       140/140 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       150/150 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
 **Four of those floors did not exist before the second pass.** `reference`, `contradiction`,

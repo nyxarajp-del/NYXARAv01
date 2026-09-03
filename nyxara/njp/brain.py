@@ -1981,6 +1981,16 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def show_alternation(self, plain: str, marked: str) -> None:
+        """Demonstrate that these two sentences mean the same thing, one of them in a shape the
+        compiler cannot read — a passive, an auxiliary chain, a gapped coordinate. Where each
+        slot's filler ends up is induced from the pair rather than written down."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_alternation(str(plain or ""), str(marked or ""))
+        except Exception:  # noqa: BLE001
+            return
+
     def show_exchange(self, first: str, second: str, relation: str) -> None:
         """Demonstrate what the second turn is doing to the first — answering it, accepting it,
         clarifying it. The **acts** are what is recorded, never the sentences, so one

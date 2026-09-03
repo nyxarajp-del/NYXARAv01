@@ -850,3 +850,109 @@ def test_a_hearer_who_has_nothing_is_told_everything():
     meaning.condition, meaning.modality = "the pressure is normal", "typical"
     said = voice.say(meaning, "engineer")
     assert not said.omitted
+
+
+# --------------------------------------------------------------------------- #
+# 11 · alternations — the same meaning, said a different way round
+# --------------------------------------------------------------------------- #
+
+def _alternations_taught():
+    voice = Communicator()
+    for who, what in (("ravi", "window"), ("sara", "gate"), ("devi", "wall")):
+        voice.show_alternation(f"{who} opened the {what}.",
+                               f"The {what} was opened by {who}.")
+        voice.show_alternation(f"{who} opened the {what}.",
+                               f"{who} has been opening the {what}.")
+    for one, two, a, b in (("ravi", "arun", "door", "sill"), ("sara", "devi", "gate", "lock")):
+        marked = f"{one} opened the {a} and {two} the {b}."
+        voice.show_alternation(f"{one} opened the {a}.", marked)
+        voice.show_alternation(f"{two} opened the {b}.", marked)
+    return voice
+
+
+def test_the_shapes_are_found_structurally_and_an_active_sentence_matches_none():
+    from nyxara.njp.discourse import frames_of
+
+    assert [f.name for f in frames_of("The window was opened by Ravi.")] == ["be-prep"]
+    assert [f.name for f in frames_of("Ravi has been opening the door.")] == ["aux-chain"]
+    assert [f.name for f in frames_of("Ravi opened the door and Arun the window.")] == ["gapped"]
+    assert frames_of("Ravi opened the window.") == []
+    assert frames_of("The key is in the drawer.") == []
+
+
+def test_untaught_none_of_these_shapes_is_read():
+    voice = Communicator()
+    assert voice.alternation.read("The barrel was carried by Meera.") is None
+    assert voice.alternation.read("Meera has been carrying the barrel.") is None
+
+
+def test_the_passive_puts_the_agent_where_the_demonstrations_did():
+    voice = _alternations_taught()
+    assert voice.alternation.kept["be-prep"].roles == {
+        "left": "object", "verb": "relation", "right": "subject"}
+    got = voice.alternation.read("The barrel was carried by Meera.")
+    assert got.subject == "meera" and got.object == "barrel"
+
+
+def test_the_auxiliary_chain_does_not_move_anything():
+    voice = _alternations_taught()
+    assert voice.alternation.kept["aux-chain"].roles["left"] == "subject"
+    got = voice.alternation.read("Meera has been carrying the barrel.")
+    assert got.subject == "meera" and got.object == "barrel"
+
+
+def test_a_gapped_coordinate_is_two_claims_and_not_one_bad_one():
+    """It used to come back as a single claim whose object was `door arun window`."""
+    voice = _alternations_taught()
+    got = voice.alternation.readings("Kiran raised the mast and Nita the sail.")
+    assert [(m.subject, m.object) for m in got] == [("kiran", "mast"), ("nita", "sail")]
+
+    voice.hear("Kiran raised the mast and Nita the sail.")
+    filed = [(c.subject, c.object) for c in voice.ledger.claims]
+    assert filed == [("kiran", "mast"), ("nita", "sail")]
+
+
+def test_a_copula_with_a_predicate_needs_no_mapping_at_all():
+    """*"He was tired."* is one of the commonest sentences in English and had no reading.
+
+    A named subject the compiler already handled — as `np-verb`, with the predicate lemmatised.
+    A **pronoun** subject it did not: that frame needs a noun phrase, so the sentence came back
+    unreadable and nothing about it reached the ledger. The structural shape covers it, and
+    covers it as a fallback, so the compiler's reading is untouched where there is one.
+    """
+    named = read_claim("Ravi was tired.")
+    assert named is not None and named.subject == "ravi"
+
+    pronominal = read_claim("He was tired.")
+    assert pronominal is not None
+    assert pronominal.subject == "he" and pronominal.relation == "tired"
+    assert proposition("he was tired") == ("he|tired", "")
+
+
+def test_a_structural_shape_is_a_fallback_and_never_an_override():
+    """Overriding read *"When I visited Delhi last year I was tired."* as a claim about `tired`,
+    and lost the claim the speaker actually made inside the fronted clause."""
+    claim = read_claim("When I visited Delhi last year I was tired.")
+    assert claim is not None
+    assert claim.relation == "visit" and claim.object == "delhi"
+
+
+def test_a_claim_about_an_unresolved_pronoun_is_not_filed():
+    voice = Communicator()
+    voice.hear("ravi met arun.")
+    voice.hear("He was tired.")
+    assert all(not _is_pronoun(claim.subject) for claim in voice.ledger.claims)
+
+
+def test_a_resolved_first_person_is_named_rather_than_dropped():
+    """Dropping them cost every claim the Master made about himself."""
+    voice = Communicator()
+    got = voice.hear("I never visited Delhi.")
+    assert got.verdict is not None and got.verdict.claim is not None
+    assert got.verdict.claim.subject == "master"
+
+
+def _is_pronoun(word):
+    from nyxara.njp.discourse import _pronoun
+
+    return bool(_pronoun(word))
