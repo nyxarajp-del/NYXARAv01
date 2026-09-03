@@ -1295,3 +1295,71 @@ def test_the_discourse_exports_do_not_shadow_the_organs_that_had_the_names_first
     assert package.Anticipation is SoulAnticipation
     assert package.ClaimLedger is Ledger
     assert package.TurnAnticipation.__module__ == "nyxara.njp.discourse"
+
+
+# --------------------------------------------------------------------------- #
+# 16 · a word nobody glossed, read off what its turns do
+# --------------------------------------------------------------------------- #
+
+VERBS = ("moved", "rose", "fell", "turned", "shifted", "waited", "sank", "flew")
+
+
+def _particle_corpus(particle, *, spread=False, turns=24):
+    import random as _random
+
+    voice, rng = Communicator(), _random.Random(5)
+    for index in range(turns):
+        verb = rng.choice(VERBS)
+        voice.hear(f"{particle} the thing{index} {verb}?")
+        voice.hear(f"The thing{index} {verb}.")
+        if spread:
+            voice.hear(f"{particle} the other{index} {rng.choice(VERBS)}.")
+    for index in range(turns):
+        voice.hear(f"The item{index} {rng.choice(VERBS)}.")
+    return voice
+
+
+def test_a_word_nobody_glossed_gets_its_function_from_what_its_turns_do():
+    """The Master's fourth test: nothing here is demonstrated, only overheard."""
+    voice = _particle_corpus("zik")
+    found = {f.word: f.marks for f in voice.functions()}
+    assert found.get("zik") == "polar-question"
+    assert not (set(found) & set(VERBS))       # and no content word came with it
+
+
+def test_a_particle_spread_across_two_kinds_of_turn_marks_nothing():
+    voice = _particle_corpus("zug", spread=True)
+    assert {f.word: f.marks for f in voice.functions()}.get("zug", "") == ""
+    assert "marks nothing in particular" in voice.induction.function("zug").why
+
+
+def test_a_transcript_with_no_contrast_distinguishes_nothing():
+    """In a transcript where every turn is an assertion, every word "marks assertions"."""
+    voice = Communicator()
+    for index in range(24):
+        voice.hear(f"The item{index} moved.")
+    assert voice.functions() == []
+    assert "the same kind" in voice.induction.function("the").why
+
+
+def test_a_word_a_reading_accounts_for_is_not_a_marker():
+    voice = _particle_corpus("zik")
+    assert voice.induction.contentful("moved")
+    assert not voice.induction.contentful("zik")
+
+
+def test_one_accidental_reading_does_not_kill_a_candidate():
+    """Struck off on a single occurrence, a particle lived or died on whether any one of its
+    twenty-four sentences happened to parse."""
+    voice = _particle_corpus("zik")
+    voice.induction.content["zik"] = 1          # one turn read it as content
+    assert not voice.induction.contentful("zik")
+    voice.induction.content["zik"] = 20
+    assert voice.induction.contentful("zik")
+
+
+def test_a_word_seen_too_little_is_not_judged():
+    voice = Communicator()
+    voice.hear("qua the box moved?")
+    voice.hear("The box moved.")
+    assert "not judged" in voice.induction.function("qua").why

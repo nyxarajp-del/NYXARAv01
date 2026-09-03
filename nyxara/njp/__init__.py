@@ -367,6 +367,7 @@ from nyxara.njp.discourse import (
     Exchange,
     Expectation,
     Footing,
+    Induction,
     Link,
     Reply,
     Resolution,
@@ -504,7 +505,7 @@ __all__ = [
     "CorpusReading", "CorpusRecord", "CorpusSolver", "CorpusVerdict", "verify_corpus_answer",
     # NJP V.26 — what was meant, and by whom (njp/discourse.py)
     "ActLearner", "Alternation", "TurnAnticipation", "Claim", "ClaimVerdict", "ClosedClassLearner", "Communicator", "Connective", "Expectation",
-    "Exchange", "Figure", "Footing", "Interpretation", "ClaimLedger", "Link", "Minds", "Readings", "Reference",
+    "Exchange", "Figure", "Footing", "Induction", "Interpretation", "ClaimLedger", "Link", "Minds", "Readings", "Reference",
     "Register", "Reply", "Resolution", "Retelling", "Scale", "Standing", "TurnSurprise", "Uptake",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",

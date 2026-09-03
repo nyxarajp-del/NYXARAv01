@@ -34,7 +34,7 @@ four is now a subject on the report card with a floor, a lesson and a gain. The 
 — the pronouns, the copula, the factive subordinators, the time words — are the closed class
 :mod:`nyxara.njp.semantics` already defends, where a list is the honest representation.
 
-Fifteen organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather
+Sixteen organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather
 than a new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
 something nobody demonstrated; where two readings survive the answer is that there are two.**
 
@@ -107,7 +107,23 @@ lacks, the reading is flagged figurative and nothing is filed. Where there are n
 the new subject's kinds are unknown, **nothing is claimed** — with an empty store no sentence is
 figurative, and that is the correct answer rather than a limitation to apologise for.
 
-**7 · Where two speakers stand to each other, and what a turn conveys without saying it**
+**7 · A word nobody glossed, read off what its turns do** (:class:`Induction`). The Master's
+fourth test asks for a construction that was never in training, whose function she infers **from
+context**. Everything else here learns from a demonstration — somebody says *this surface does
+this* — and that is not what he asked for. Nothing is demonstrated in this one: she is exposed to
+conversations, and a word she has no gloss for gets its function from the **acts of the turns it
+appears in**. That is not a trick, it is what a function is; a particle that only ever appears in
+turns that get answered is a question marker, and nothing about that fact lives in the particle.
+
+Four filters, each put there by a measurement: a word spread across kinds of turn marks nothing; a
+word seen too little is not judged; a word a reading **accounts for** is content rather than a
+marker (by share, not by one occurrence — struck off on one, a particle lived or died on whether
+any of its twenty-four sentences happened to parse); and a marker keeps company with many
+different words. And the honest limit: the content filter works on sentences the compiler can
+read, so in a language wholly unreadable to it a confined content word cannot be told from a
+marker by distribution alone.
+
+**8 · Where two speakers stand to each other, and what a turn conveys without saying it**
 (:class:`Standing`, :class:`Scale`). The Master's sixth test says meaning depends on speaker,
 listener, **relationship** and goal, and the relationship was the half this module could not
 touch. Two things in a transcript bear on it and both were already tracked: who complies with
@@ -124,7 +140,7 @@ implicature. A scale must be demonstrated in two different sentences before it i
 implicature is **reported and never filed** — *"some passed, in fact all did"* is not a
 contradiction, and a store that had filed it would have made it one.
 
-**8 · Which of a language's words are its closed class, found rather than typed**
+**9 · Which of a language's words are its closed class, found rather than typed**
 (:class:`ClosedClassLearner`). :mod:`nyxara.njp.semantics` argues that the closed class is the
 half of a language that does not grow and that a list of it is honest. It does not argue — because
 it cannot — that the list should be **hand-written for every language**: 242 words, 197 Latin and
@@ -134,13 +150,13 @@ verb of a language with few verbs; *frequency* alone is worse. It is the product
 fitted where the answer is known — English — and applied to a language she has only overheard, and
 what transfers is the **criterion**, never the words. Unfitted she claims nothing.
 
-**9 · And a translation carries what it can, and says what it cannot** (:class:`Retelling`).
+**10 · And a translation carries what it can, and says what it cannot** (:class:`Retelling`).
 :meth:`~nyxara.njp.language.LanguageFaculty.translate` carries the roles, the polarity, the tense
 and the mood, verified by reading its own output back. The **act** does not cross, and this reports
 that rather than hiding it: an indirect request is a convention of a speech community, and a
 community that has not been shown one does not have it.
 
-**10 · Why, and what for** (:class:`Connective`). The Master's anchor names eleven slots and six
+**11 · Why, and what for** (:class:`Connective`). The Master's anchor names eleven slots and six
 were reachable — entity, relation, time, belief, uncertainty, and space through ``is_at``. The
 three that were not are here. **Cause** is the interesting one: nothing structural separates
 *"A because B"* from *"B so A"*, both being two clauses with a word between, and which of them
@@ -159,7 +175,7 @@ was dark``. And the winner is the **best-supported** candidate rather than the l
 the rule :mod:`nyxara.njp.semantics` and :mod:`nyxara.njp.compile` both state and which this
 class was breaking.
 
-**11 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
+**12 · The same meaning, said a different way round** (:class:`Alternation`). Four ordinary English
 shapes came back unreadable or worse: *"The window was opened by Ravi."*, *"Ravi has been opening
 the door."*, *"He was tired."* and *"Ravi opened the door and Arun the window."* — the last of
 which had a **wrong** reading rather than none, a single claim whose object was ``door arun
@@ -177,7 +193,7 @@ is what *"He was tired."* is. **As a fallback and never an override** — put ah
 it read *"When I visited Delhi last year I was tired."* as a claim about ``tired`` and lost the
 claim the speaker actually made.
 
-**12 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
+**13 · A turn is a reply, and what it replies to decides what it is** (:class:`Exchange`,
 :mod:`nyxara.social.common_ground`). The Master listed seventeen things a conversation does and
 eleven of them were unreachable, for one reason: this module read every turn **alone**. What makes
 a turn a clarification rather than an answer is the turn before it. So adjacency pairs are induced
@@ -192,7 +208,7 @@ says and the hearer's next turn acknowledges it, which is Clark's mechanism run 
 implements it. Measured: the same meaning to the same hearer, eighteen words the first time and
 two the second, with the claim itself unchanged — and a fresh hearer still told everything.
 
-**13 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
+**14 · She expects the turn before it arrives, and is corrected by it** (:class:`Anticipation`).
 The Master's fifth deep mechanism — ``PREDICTION → OBSERVATION → ERROR → MODEL UPDATE`` — and
 this module did not have it at all. Three things are predicted about a turn before it is looked
 at: what the speaker will be *doing*, what they will be *about*, and what it will do to the
@@ -210,7 +226,7 @@ prediction against a reading it wrote is the same self-confirming loop :class:`F
 to have. Measured with that loop closed: the control exchange's act distribution collapsed to one
 successor and reported 1.00 confidence on a sequence built to be unpredictable.
 
-**14 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
+**15 · And where one sentence has two readings, it has two** (:func:`attachment`). *"I saw the man
 with the telescope."* The evidence that there is an ambiguity at all is in
 :mod:`nyxara.njp.semantics`'s own output: it has no frame for a prepositional phrase after an
 object, so it fuses the two noun phrases into one object string — ``man telescope``, with ``with
@@ -243,7 +259,7 @@ __all__ = [
     "GAP", "MORE", "LEVELS", "REGISTERS", "LICENCE", "UNIVERSAL",
     "Readings", "attachment", "AttachLearner", "Marker", "MarkerLearner",
     "Anticipation", "Expectation", "Surprise", "Exchange", "Pair", "Reply",
-    "Standing", "Footing", "Scale", "Implied",
+    "Standing", "Footing", "Scale", "Implied", "Induction", "Function",
     "Alternation", "Frame", "Mapping", "frames_of",
     "Connective", "Link", "CAUSE_BEFORE", "CAUSE_AFTER", "GOAL_AFTER",
     "ClosedClassLearner", "Retelling",
@@ -2343,7 +2359,189 @@ def attachment(surface: str, meaning: Optional[Meaning] = None, *,
 
 
 # --------------------------------------------------------------------------- #
-# 8 · standing — who defers to whom, read off the transcript
+# 8 · a word nobody glossed, read off what its turns do
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class Function:
+    """What an unglossed word appears to be **for**, and the evidence behind it."""
+
+    word: str = ""
+    #: The act the turns carrying it perform, when they concentrate on one.
+    marks: str = ""
+    confidence: float = 0.0
+    seen: int = 0
+    spread: Tuple[Tuple[str, int], ...] = ()
+    why: str = ""
+
+    @property
+    def settled(self) -> bool:
+        return bool(self.marks)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"word": self.word, "marks": self.marks,
+                "confidence": round(self.confidence, 4), "seen": self.seen,
+                "spread": [list(pair) for pair in self.spread], "why": self.why}
+
+
+class Induction:
+    """A word nobody has glossed, whose **function is read off what its turns do**.
+
+    The Master's fourth test: invent a construction that was never in training, and she should
+    infer its function from context. Everything else in this module learns from a demonstration —
+    somebody says *this surface does this* — and that is not what he asked for. Here nothing is
+    demonstrated at all. She is exposed to conversations, and a word she has no gloss for gets its
+    function from the **acts of the turns it appears in** and from the replies those turns get.
+
+    That is not a trick: it is what a function *is*. A particle that only ever appears in turns
+    that get answered is a question marker, and nothing about that fact lives in the particle. The
+    two things it is read off — the act of the turn and the relation of the reply — are exactly
+    what :class:`ActLearner` and :class:`Exchange` already keep, so this needs no new evidence,
+    only a different question asked of it.
+
+    **Three filters, and each one was put there by a measurement.** A word that turns up in every
+    kind of turn marks nothing (:attr:`floor`). A word seen fewer than :attr:`min_seen` times is
+    not judged. And a word that has ever been part of a reading's **content** is struck off
+    permanently — a marker is precisely what a reading does not account for, and without that a
+    corpus where each verb happened to be used in one kind of turn reported four verbs as markers.
+    A fourth filter lives in :meth:`Communicator.functions`: a marker keeps company with many
+    different words and a content word does not.
+
+    **What it needs, and does not pretend otherwise.** The content filter works on sentences the
+    compiler can read. In a language wholly unreadable to it, a content word confined to one kind
+    of turn is indistinguishable from a marker by distribution alone, and this will report it.
+    That is a real limit and the honest scope of the claim: she infers a function from context in
+    a language she can partly read, which is the situation the test describes.
+    """
+
+    #: How concentrated the distribution must be before a word is said to mark anything.
+    floor = 0.8
+    #: And how many turns it takes before the question is worth asking.
+    min_seen = 4
+
+    def __init__(self, *, floor: Optional[float] = None,
+                 min_seen: Optional[int] = None) -> None:
+        if floor is not None:
+            self.floor = float(floor)
+        if min_seen is not None:
+            self.min_seen = max(1, int(min_seen))
+        #: ``word → act → count``, over the turns the word appeared in.
+        self.seen: Dict[str, Dict[str, int]] = {}
+        #: ``word → relation → count``, over what those turns were replied with.
+        self.replies: Dict[str, Dict[str, int]] = {}
+        #: ``word → the other words it has shared a turn with``. Sentence-level rather than
+        #: adjacent, because that is the signal a **marker** has and a content word does not: a
+        #: question particle keeps company with everything the language can ask about, while
+        #: ``thing3`` keeps company with the two turns it was in. Adjacency is the wrong measure
+        #: here and measurably so — a sentence-initial particle has exactly one right neighbour.
+        self.company: Dict[str, Set[str]] = {}
+        #: ``word → how many of its turns a reading accounted for it in``. A marker is what a
+        #: reading does not account for, and without this a corpus where each verb was used in
+        #: exactly one kind of turn reported four verbs as markers.
+        #:
+        #: A **share**, not a single occurrence. Struck off on one, a particle survived or died on
+        #: whether any one of its twenty-four sentences happened to parse — measured, two of four
+        #: minted particles were killed by a single accidental reading, and which two depended on
+        #: the draw rather than on anything about them.
+        self.content: Dict[str, int] = {}
+        self.turns = 0
+
+    def observe(self, surface: str, *, act: str, glossed: Any = (),
+                content: Any = ()) -> None:
+        """One turn. Every word in it that nothing has glossed is a candidate.
+
+        ``content`` is what the turn's reading accounted for, and those words are struck off the
+        candidate list permanently: a marker is precisely what a reading does **not** account for.
+        """
+        try:
+            self.turns += 1
+            known = {str(w).lower() for w in (glossed or ())}
+            for word in {str(w).lower() for w in (content or ())}:
+                self.content[word] = self.content.get(word, 0) + 1
+            words = [t.text for t in tag_tokens(surface)]
+            for token in words:
+                if token in known:
+                    continue
+                bucket = self.seen.setdefault(token, {})
+                bucket[act] = bucket.get(act, 0) + 1
+                self.company.setdefault(token, set()).update(w for w in words if w != token)
+        except Exception:  # noqa: BLE001
+            return
+
+    def observe_reply(self, surface: str, *, relation: str, glossed: Any = ()) -> None:
+        """What the turn carrying these words was replied with."""
+        try:
+            if not relation:
+                return
+            known = {str(w).lower() for w in (glossed or ())}
+            for token in tag_tokens(surface):
+                if token.text in known:
+                    continue
+                bucket = self.replies.setdefault(token.text, {})
+                bucket[relation] = bucket.get(relation, 0) + 1
+        except Exception:  # noqa: BLE001
+            return
+
+    def function(self, word: str) -> Function:
+        """What this word appears to be for, or a reading that says it does not know."""
+        out = Function(word=str(word or "").lower())
+        try:
+            # A function is a **contrast**. In a transcript where every turn is an assertion,
+            # every word "marks assertions" — true of the corpus and empty of content. Measured
+            # without this, a flat corpus reported ``the`` as an assertion marker.
+            acts = {act for buckets in self.seen.values() for act in buckets}
+            if len(acts) < 2:
+                out.why = ("every turn heard so far is the same kind, so nothing in them "
+                           "distinguishes anything")
+                return out
+            spread = self.seen.get(out.word, {})
+            total = sum(spread.values())
+            out.seen = total
+            out.spread = tuple(sorted(spread.items(), key=lambda pair: (-pair[1], pair[0])))
+            if total < self.min_seen:
+                out.why = f"seen {total} times, below {self.min_seen} — not judged"
+                return out
+            best, count = out.spread[0]
+            share = count / total
+            out.confidence = share
+            if share < self.floor:
+                out.why = (f"spread across {len(spread)} kinds of turn, the commonest at "
+                           f"{share:.0%} — it marks nothing in particular")
+                return out
+            out.marks = best
+            out.why = (f"{count} of {total} turns carrying it are {best!r}, "
+                       f"and nobody has said what it means")
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    #: How much of a word's traffic a reading may account for before it stops being a candidate.
+    content_share = 0.25
+
+    def contentful(self, word: str) -> bool:
+        """Has a reading accounted for this word often enough to call it content?"""
+        word = str(word or "").lower()
+        total = sum(self.seen.get(word, {}).values())
+        return bool(total) and (self.content.get(word, 0) / total) >= self.content_share
+
+    def keeps_company(self, word: str) -> int:
+        """How many different words this one has shared a turn with."""
+        return len(self.company.get(str(word or "").lower(), ()))
+
+    def unglossed(self, glossed: Any = ()) -> List[Function]:
+        """Every word she has a function for and no gloss."""
+        known = {str(w).lower() for w in (glossed or ())}
+        found = [self.function(word) for word in sorted(self.seen)
+                 if word not in known and not self.contentful(word)]
+        return [f for f in found if f.settled]
+
+    def stats(self) -> Dict[str, Any]:
+        return {"turns": self.turns, "words": len(self.seen),
+                "settled": len(self.unglossed())}
+
+
+# --------------------------------------------------------------------------- #
+# 9 · standing — who defers to whom, read off the transcript
 # --------------------------------------------------------------------------- #
 
 @dataclass
@@ -3669,6 +3867,8 @@ class Communicator:
         self.standing = Standing()
         #: Which words sit below which on a scale — see :class:`Scale`.
         self.scale = Scale()
+        #: What an unglossed word appears to be for — see :class:`Induction`.
+        self.induction = Induction()
         #: What both parties have taken as established. Driven from :meth:`hear`, which is the
         #: thing :mod:`nyxara.social.common_ground` has never had: it has been a real model of
         #: given-versus-new since it was written and nothing in this package could put a sentence
@@ -3686,6 +3886,9 @@ class Communicator:
         self.figure = Figure(kinds)
         self.reference.plausible = self.figure.plausible
         self.speaker = str(speaker)
+        #: Which language this conversation is in, for the vocabulary's counts. A name, not a
+        #: claim — nothing here decides what language anything is.
+        self.tongue = "spoken"
         self.turn = 0
         self.max_history = max(1, int(max_history))
         self.history: List[Uptake] = []
@@ -3798,6 +4001,14 @@ class Communicator:
                                               confidence=0.7, frame="structural")
                         break
             out.interpretation = self.acts.read(out.surface, meaning=out.meaning)
+            # Every word of this turn, against what the turn is doing. Nothing is glossed and
+            # nothing is demonstrated — see :class:`Induction`. The same turn also goes to the
+            # vocabulary, which is what tells a **marker** from a content word that happens to
+            # have been confined to one kind of turn: a marker stands beside many different
+            # words and a content word does not.
+            self.induction.observe(out.surface, act=out.interpretation.intended,
+                                   content=_content_of(out.meaning))
+            self.vocabulary.hear(out.surface, language=self.tongue)
             out.figurative = self.figure.judge(out.meaning)
             self.figure.note_exception(out.figurative)
             out.readings = attachment(out.rewritten, out.meaning, learner=self.attach)
@@ -3870,6 +4081,9 @@ class Communicator:
                     and out.interpretation is not None:
                 out.reply = self.exchange.read(before.interpretation.intended,
                                                out.interpretation.intended)
+                self.induction.observe_reply(
+                    before.surface,
+                    relation=out.reply.relation if out.reply is not None else "")
                 self.standing.observe(
                     speaker=out.speaker, act=out.interpretation.intended,
                     before_speaker=before.speaker,
@@ -4037,6 +4251,28 @@ class Communicator:
         except Exception:  # noqa: BLE001
             return out
 
+    def functions(self) -> List[Function]:
+        """Every unglossed word she has a function for **and** distributional grounds to call a
+        marker.
+
+        Two filters, and the second is what stops this being a list of coincidences. A word whose
+        turns concentrate on one act has a *candidate* function; a word that also stands beside
+        many different words is a **marker**, and a content word confined to one kind of turn is
+        not. Measured without it, ``arrived`` came back marking assertions — true of the corpus
+        and nothing to do with the word.
+        """
+        try:
+            company = {word: self.induction.keeps_company(word)
+                       for word in self.induction.company}
+            if not company:
+                return []
+            ranked = sorted(company.values())
+            middle = ranked[int(len(ranked) * 0.75)]
+            return [found for found in self.induction.unglossed()
+                    if company.get(found.word, 0) > middle]
+        except Exception:  # noqa: BLE001
+            return []
+
     def strategy(self, surface: str) -> Tuple[str, ...]:
         """What reading this turn **requires**, named before any of it is done.
 
@@ -4102,7 +4338,7 @@ class Communicator:
                 "connective": self.connective.stats(),
                 "vocabulary": self.vocabulary.stats(),
                 "exchange": self.exchange.stats(), "standing": self.standing.stats(),
-                "scale": self.scale.stats(),
+                "scale": self.scale.stats(), "induction": self.induction.stats(),
                 "ground": ground,
                 "anticipation": self.anticipation.stats(),
                 "markers": self.markers.stats(), "attach": self.attach.stats(),

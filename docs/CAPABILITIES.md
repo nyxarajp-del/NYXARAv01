@@ -3126,6 +3126,49 @@ implicature as a claim would have made it one, and a test asserts the ledger sta
     standing      a floor, and half its paper is abstention
     implicature   0.50 -> 1.00     scales {'some': 'all', 'warm': 'hot'}
 
+#### NJP V.34 — a word nobody glossed
+
+The gap report named the Master's fourth test as unanswered: *invent a construction that was never
+in training, and she should infer its function from context*. Everything in this package learns
+from a **demonstration** — somebody says *this surface does this* — and that is not what the test
+asks for.
+
+`Induction` demonstrates nothing. She is exposed to conversations carrying a particle minted after
+the lesson was written, and its function comes from the **acts of the turns it appears in**. That
+is not a trick; it is what a function is. A particle that only ever appears in turns that get
+answered is a question marker, and nothing about that fact lives in the particle.
+
+```
+overheard: "zik the thing3 moved?"   ×24, never glossed, never demonstrated
+           "The thing3 moved."       ×24
+           "The item7 rose."         ×24
+inferred:  zik → polar-question, 24 of 24, confidence 1.00
+```
+
+**Four filters, and every one was put there by a measurement that failed without it.**
+
+| filter | what it stops |
+|---|---|
+| the distribution must **concentrate** | a word in every kind of turn marks nothing |
+| a **minimum** of turns | one sighting is not a function |
+| a word a reading **accounts for** is content | a corpus where each verb was used in one kind of turn reported four verbs as markers |
+| a marker **keeps company** with many words | `thing3` shares its turns with three words; the particle with thirty-three |
+
+The third took two tries. Struck off on a **single** occurrence, a particle lived or died on
+whether any one of its twenty-four sentences happened to parse — two of four minted particles were
+killed that way, and which two depended on the draw. It is a share now, not an occurrence.
+
+**And a fifth thing, which is a refusal rather than a filter.** In a transcript where every turn is
+an assertion, *every* word "marks assertions" — true of the corpus and empty of content. A function
+is a **contrast**, and with no contrast in the transcript she reports nothing at all.
+
+The honest limit: the content filter works on sentences the compiler can read. In a language wholly
+unreadable to it, a content word confined to one kind of turn cannot be told from a marker by
+distribution alone. The claim is that she infers a function from context in a language she can
+partly read — which is the situation the test describes.
+
+    inferred   a floor, and three of its six items are refusals
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -3147,6 +3190,7 @@ implicature as a claim would have made it one, and a test asserts the ledger sta
   unseen             0.50   1.00   +0.50       0  (fixed at the subordinator)
   method             1.00   1.00   +0.00       0  already
   retraining         0.00   1.00   +1.00      12  LEARNED
+  inferred           1.00   1.00   +0.00       0  already (three of six items are refusals)
   standing           1.00   1.00   +0.00       0  already (half its paper is abstention)
   implicature        0.50   1.00   +0.50       4  LEARNED
   reference          0.80   1.00   +0.20       9  LEARNED
@@ -3159,12 +3203,12 @@ implicature as a claim would have made it one, and a test asserts the ledger sta
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      26/26 subjects
+  mastered      27/27 subjects
   learned       16 subject(s) moved by teaching
-  overall       225/225 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       233/233 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       225/225 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       233/233 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
 **Four of those floors did not exist before the second pass.** `reference`, `contradiction`,

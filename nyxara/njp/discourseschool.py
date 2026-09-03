@@ -61,7 +61,7 @@ __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
     "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
     "Anticipating", "ExchangeSubject", "Alternations", "Anchor", "Vocabulary", "Retell",
-    "StandingSubject", "Implicature", "Adversarial", "CrossDomain", "Unseen", "Method",
+    "Inferred", "StandingSubject", "Implicature", "Adversarial", "CrossDomain", "Unseen", "Method",
     "Retraining", "Grounded", "Tongue", "Wiring",
     "DiscourseSchool", "SUBJECTS", "main",
 ]
@@ -759,6 +759,65 @@ class Alternations(DiscourseSubject):
         who, what = mint.word(), mint.word()
         self.mark(score, misses, got=voice.alternation.read(f"{who} opened the {what}."),
                   want=None, item="an active sentence reaches no mapping", silence=object())
+        return score, misses
+
+
+class Inferred(DiscourseSubject):
+    """The Master's fourth test: a construction nobody glossed, its function read off context.
+
+    Everything else in this syllabus learns from a demonstration — somebody says *this surface
+    does this*. **Nothing is demonstrated here.** She is exposed to conversations carrying a
+    particle minted after the lesson was written, and the particle's function comes from what the
+    turns carrying it *do*.
+
+    Three of the six items are refusals, and they are what make the other three worth anything: a
+    content word must not be reported however confined it looks, a particle spread across two
+    kinds of turn marks nothing, and a transcript where every turn is the same kind distinguishes
+    nothing at all.
+    """
+
+    id = "inferred"
+    title = "a word nobody glossed"
+    teaches = "nothing is demonstrated — the function comes from what its turns do"
+    items = 6
+
+    VERBS = ("moved", "rose", "fell", "turned", "shifted", "waited", "sank", "flew")
+
+    def _expose(self, mint: Mint, particle: str, *, spread: bool = False) -> Communicator:
+        voice, rng = Communicator(), mint.rng
+        for _ in range(24):
+            thing, verb = mint.word(), rng.choice(self.VERBS)
+            voice.hear(f"{particle} the {thing} {verb}?")
+            voice.hear(f"The {thing} {verb}.")
+            if spread:                            # the same particle in assertions too
+                voice.hear(f"{particle} the {mint.word()} {rng.choice(self.VERBS)}.")
+        for _ in range(24):
+            voice.hear(f"The {mint.word()} {rng.choice(self.VERBS)}.")
+        return voice
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        score, misses = Score(), []
+        for _ in range(2):
+            particle = mint.word()
+            voice = self._expose(mint, particle)
+            found = {f.word: f.marks for f in voice.functions()}
+            self.mark(score, misses, got=found.get(particle, ""), want="polar-question",
+                      item=f"{particle}: never glossed, and only ever in questions", silence="")
+            self.mark(score, misses, got=any(word in self.VERBS for word in found),
+                      want=False, item="and no content word is reported with it")
+        for _ in range(2):                        # the same particle in two kinds of turn
+            particle = mint.word()
+            voice = self._expose(mint, particle, spread=True)
+            found = {f.word: f.marks for f in voice.functions()}
+            self.mark(score, misses, got=found.get(particle, ""), want="",
+                      item=f"{particle}: spread across two kinds, so it marks nothing",
+                      silence=object())
+        for _ in range(2):                        # a transcript with no contrast in it at all
+            voice = Communicator()
+            for _ in range(24):
+                voice.hear(f"The {mint.word()} {mint.rng.choice(self.VERBS)}.")
+            self.mark(score, misses, got=voice.functions(), want=[],
+                      item="every turn the same kind — nothing distinguishes anything")
         return score, misses
 
 
@@ -1683,7 +1742,7 @@ class Wiring(DiscourseSubject):
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
     Acts, Transfer, Repair, FigurativeSubject, Attachment, Anticipating, ExchangeSubject,
-    Alternations, Anchor, Vocabulary, Retell, StandingSubject, Implicature,
+    Alternations, Anchor, Vocabulary, Retell, Inferred, StandingSubject, Implicature,
     Adversarial, CrossDomain, Unseen, Method, Retraining,
     ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject, Grounded,
     Tongue, Wiring,

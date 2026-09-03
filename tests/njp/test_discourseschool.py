@@ -66,7 +66,7 @@ def test_the_floor_subjects_teach_nothing_and_say_so(taught):
     _brain, transcript = taught
     for result in transcript.results:
         if result.subject in ("minds", "register", "ground", "retell", "unseen", "method",
-                              "standing", "wiring"):
+                              "standing", "inferred", "wiring"):
             assert result.taught == 0
             assert "floor" in result.note or "measures" in result.teaches
 
@@ -168,10 +168,10 @@ def test_the_attachment_lesson_finds_one_preposition_and_not_the_other():
     assert voice.attach.ambiguous == {"with"}
 
 
-def test_the_syllabus_is_twenty_six_subjects_with_unique_ids():
+def test_the_syllabus_is_twenty_seven_subjects_with_unique_ids():
     made = [factory() for factory in SUBJECTS]
-    assert len(made) == 26
-    assert len({subject.id for subject in made}) == 26
+    assert len(made) == 27
+    assert len({subject.id for subject in made}) == 27
     assert all(isinstance(subject, DiscourseSubject) for subject in made)
 
 
