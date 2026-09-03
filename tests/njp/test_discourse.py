@@ -30,17 +30,45 @@ from nyxara.njp.discourse import (
     LEVELS,
     REGISTERS,
     UNKNOWN,
+    LICENCE,
+    UNIVERSAL,
     ActLearner,
+    AttachLearner,
     Communicator,
     Figure,
     Ledger,
+    MarkerLearner,
     Minds,
+    Reference,
+    Referent,
     Register,
     proposition,
     read_claim,
     shapes_of,
 )
+from nyxara.njp.discourse import attachment as read_attachment
 from nyxara.njp.semantics import compile_meaning
+
+
+#: Demonstrated verdicts, varied so that what is induced is the marker and not the preposition.
+#: Nothing in the module knows that "now" licenses a change or that "never" quantifies over all
+#: times; these six pairs are where it finds out.
+VERDICTS = (
+    ("The key is in the drawer.", "The key is now on the table.", "updates"),
+    ("The lamp is on the shelf.", "The lamp is now under the box.", "updates"),
+    ("The book is under the bed.", "The book is now beside the chair.", "updates"),
+    ("I never visited Delhi.", "When I visited Delhi last year I was tired.", "contradicts"),
+    ("Sara never entered Pune.", "When Sara entered Pune in April Sara was calm.", "contradicts"),
+    ("The cup is in the sink.", "The cup is on the rack.", "contradicts"),
+    ("Ravi owns the boat.", "Ravi owns the boat.", "corroborates"),
+)
+
+
+def taught_markers():
+    learner = MarkerLearner()
+    for first, second, verdict in VERDICTS:
+        learner.show(first, second, verdict)
+    return learner
 
 
 # --------------------------------------------------------------------------- #
@@ -172,10 +200,42 @@ def test_only_the_third_person_is_substituted_into_the_surface():
 # 3 · the ledger
 # --------------------------------------------------------------------------- #
 
+def test_the_markers_are_induced_and_nothing_else_survives():
+    """Six demonstrated verdicts, and the two words that carry them fall out of the differences."""
+    learner = taught_markers()
+    assert learner.role("now") == LICENCE
+    assert learner.role("never") == UNIVERSAL
+    # The copula is in both sentences of every pair, and the prepositions are varied, so neither
+    # survives. That is the whole mechanism: what differs *and* agrees across demonstrations.
+    assert learner.role("is") == ""
+    assert learner.role("on") == ""
+    assert learner.role("the") == ""
+
+
+def test_a_marker_demonstrated_two_ways_is_contested_and_never_consulted():
+    learner = MarkerLearner()
+    learner.show("The key is in the drawer.", "The key is now on the table.", "updates")
+    learner.show("The lamp is on the shelf.", "The lamp is now under the box.", "updates")
+    assert learner.role("now") == LICENCE
+    learner.show("The cup is in the sink.", "The cup is now on the rack.", "contradicts")
+    assert learner.role("now") == ""
+    assert "now" in learner.contested
+
+
+def test_untaught_no_word_licenses_anything():
+    """The honest floor: a listener who has never heard anybody signal a change."""
+    claim = read_claim("The key is now on the table.", turn=1)
+    assert claim is not None
+    assert not claim.change and not claim.universal
+    assert "now" in claim.markers
+
+
 def test_a_universal_cannot_be_updated_away_by_an_instance():
+    markers = taught_markers()
     ledger = Ledger()
-    ledger.note(read_claim("I never visited Delhi.", turn=1))
-    verdict = ledger.note(read_claim("When I visited Delhi last year I was tired.", turn=2))
+    ledger.note(read_claim("I never visited Delhi.", turn=1, markers=markers))
+    verdict = ledger.note(read_claim("When I visited Delhi last year I was tired.", turn=2,
+                                     markers=markers))
     assert verdict.kind == "contradicts"
     assert verdict.question
     # Both claims are kept, and `holds` refuses to pick one.
@@ -184,26 +244,37 @@ def test_a_universal_cannot_be_updated_away_by_an_instance():
 
 
 def test_a_marked_change_is_an_update_and_an_unmarked_one_is_not():
+    markers = taught_markers()
     marked = Ledger()
-    marked.note(read_claim("The key is in the drawer.", turn=1))
-    assert marked.note(read_claim("The key is now on the table.", turn=2)).kind == "updates"
+    marked.note(read_claim("The key is in the drawer.", turn=1, markers=markers))
+    assert marked.note(read_claim("The key is now on the table.", turn=2,
+                                  markers=markers)).kind == "updates"
     assert marked.holds("key", "is_at") == "table"
 
     plain = Ledger()
-    plain.note(read_claim("The key is in the drawer.", turn=1))
+    plain.note(read_claim("The key is in the drawer.", turn=1, markers=markers))
     # Nothing has yet shown this relation to hold one value at a time, so a second value is more
     # information rather than a conflict. Claiming otherwise would be an ontology, not a reading.
-    assert plain.note(read_claim("The key is on the table.", turn=2)).kind == "new"
+    assert plain.note(read_claim("The key is on the table.", turn=2,
+                                 markers=markers)).kind == "new"
+
+    # And with nothing induced, the marked pair reads as the unmarked one — the capability comes
+    # from the demonstrations rather than from the module.
+    untaught = Ledger()
+    untaught.note(read_claim("The key is in the drawer.", turn=1))
+    assert untaught.note(read_claim("The key is now on the table.", turn=2)).kind == "new"
 
 
 def test_which_relations_are_stateful_is_learned_from_the_transcript():
+    markers = taught_markers()
     ledger = Ledger()
-    ledger.note(read_claim("The key is in the drawer.", turn=1))
-    ledger.note(read_claim("The key is now on the table.", turn=2))
+    ledger.note(read_claim("The key is in the drawer.", turn=1, markers=markers))
+    ledger.note(read_claim("The key is now on the table.", turn=2, markers=markers))
     assert "is_at" in ledger.stateful
     # And now the same unmarked reversion that was `new` above is a conflict, because the speaker
     # has demonstrated that this relation holds one value at a time.
-    assert ledger.note(read_claim("The key is in the drawer.", turn=3)).kind == "contradicts"
+    assert ledger.note(read_claim("The key is in the drawer.", turn=3,
+                                  markers=markers)).kind == "contradicts"
     assert ledger.holds("key", "is_at") == ""
 
 
@@ -221,6 +292,8 @@ def test_a_question_puts_nothing_on_the_ledger():
 
 def test_four_turns_and_the_fact_is_in_the_third():
     voice = Communicator()
+    for first, second, verdict in VERDICTS:
+        voice.show_change(first, second, verdict)
     voice.hear("The key is in the drawer.")
     voice.hear("The lamp lit the room.")
     voice.hear("The key is now on the table.")
@@ -270,6 +343,104 @@ def test_depth_that_repeats_the_level_below_is_not_stored():
     minds.hear("ravi thinks arun thinks the box has the blue ball.")
     assert minds.attributes("ravi", "arun", "box|have") == "blue ball"
     assert minds.deepest <= minds.max_depth
+
+
+def test_an_attitude_verb_is_read_by_structure_and_not_from_a_list():
+    """`reckons` was in no table, and *"opened"* is in none either."""
+    minds = Minds()
+    minds.hear("The box has the red ball.")
+    minds.hear("ravi reckons the box has the blue ball.")
+    assert minds.false_belief("ravi", "box|have")
+
+    # And what must NOT be read as an attitude: a noun phrase is not a clause, however much the
+    # compiler's bare `np-verb` frame would like to make one out of two nouns in a row.
+    quiet = Minds()
+    quiet.hear("ravi opened the box in the room")
+    assert quiet.believes("ravi", "box|is_at") is None
+    quiet.hear("ravi gave arun the book")
+    assert quiet.believes("ravi", "arun|book") is None
+
+
+def test_a_clause_needs_a_predicate_of_its_own():
+    from nyxara.njp.discourse import clause_proposition
+
+    assert clause_proposition("the box has the red ball")[0] == "box|have"
+    assert clause_proposition("the box is in the room")[0] == "box|is_at"
+    assert clause_proposition("the wolf eats the meat")[0] == "wolf|eat"
+    assert clause_proposition("the box in the room")[0] == ""
+    assert clause_proposition("arun the book")[0] == ""
+
+
+def test_which_prepositions_attach_two_ways_is_discovered_from_disagreement():
+    learner = AttachLearner()
+    assert not read_attachment("I saw the man with the telescope.", learner=learner).ambiguous
+
+    learner.show("I cut the rope with the knife.", "event")
+    learner.show("I opened the tin with the blade.", "event")
+    learner.show("I met the woman with the scar.", "object")
+    learner.show("I found the box with the lock.", "object")
+    # Demonstrated one way only, so it stays unambiguous however often it is seen.
+    learner.show("I walked to the shop.", "event")
+    learner.show("I ran to the house.", "event")
+    assert learner.ambiguous == {"with"}
+
+    both = read_attachment("I saw the man with the telescope.", learner=learner)
+    assert both.ambiguous
+    assert [score for _text, score in both.interpretations] == [0.5, 0.5]
+    assert not read_attachment("I walked to the shop.", learner=learner).ambiguous
+
+
+def test_the_resolver_cue_weights_are_fitted_rather_than_tuned():
+    """Recency is held constant in these cases, so a cue has to do the work or nothing does."""
+    cases = [
+        ([Referent("ravi", 1, "subject")], "he", "subject", "", "ravi"),
+        ([Referent("sara", 1, "subject")], "she", "subject", "", "sara"),
+        ([Referent("ravi", 1, "subject"), Referent("arun", 1, "object")],
+         "he", "subject", "", ""),
+        ([Referent("mira", 1, "subject"), Referent("devi", 1, "object")],
+         "she", "subject", "", ""),
+        ([Referent("ravi", 1, "subject"), Referent("arun", 1, "object")],
+         "him", "object", "arun", "ravi"),
+        ([Referent("ravi", 1, "subject", False, 2), Referent("arun", 1, "object")],
+         "he", "subject", "", "ravi"),
+    ]
+    resolver = Reference()
+    assert resolver.cues == {"parallel": 0.0, "topical": 0.0}
+    before = resolver.score(cases)
+    fitted = resolver.fit(cases)
+    assert fitted["fitted"] == 1.0
+    assert fitted["fitted"] > before
+    # And what it finds is not what was hand-tuned here first: role parallelism earns nothing on
+    # evidence that controls for recency.
+    assert resolver.cues["topical"] > 0.0
+    assert resolver.cues["parallel"] == 0.0
+
+
+def test_resolutions_alone_leave_abstention_unconstrained():
+    """The ambiguous cases are what rule out the settings that never abstain.
+
+    Not that a resolution-only fit *must* stop abstaining — the search returns the smallest
+    weights that fit, so it often will not. The claim is the weaker and true one: on resolutions
+    alone, settings that destroy abstention fit the data perfectly and nothing excludes them. Add
+    one case the discourse does not settle and they stop fitting.
+    """
+    resolving_only = [
+        ([Referent("ravi", 1, "subject", False, 2), Referent("arun", 1, "object")],
+         "he", "subject", "", "ravi"),
+        ([Referent("mira", 1, "subject", False, 2), Referent("devi", 1, "object")],
+         "she", "subject", "", "mira"),
+    ]
+    ambiguous = ([Referent("ravi", 1, "subject"), Referent("arun", 1, "object")],
+                 "he", "subject", "", "")
+
+    reckless = Reference()
+    reckless.cues, reckless.margin = {"parallel": 0.6, "topical": 0.4}, 0.05
+    assert reckless.score(resolving_only) == 1.0        # perfect, and it never abstains
+    assert reckless.score(resolving_only + [ambiguous]) < 1.0
+
+    balanced = Reference()
+    balanced.fit(resolving_only + [ambiguous])
+    assert balanced.score(resolving_only + [ambiguous]) == 1.0
 
 
 def test_a_clause_is_keyed_on_subject_and_relation_with_the_object_as_its_value():
@@ -353,15 +524,20 @@ def test_a_metaphor_never_becomes_the_evidence_for_the_next_one():
 # 7 · a conversation, and what it is not allowed to do
 # --------------------------------------------------------------------------- #
 
-def test_a_new_conversation_keeps_the_conventions_and_drops_the_referents():
+def test_a_new_conversation_keeps_everything_learned_about_the_language():
     voice = Communicator()
     voice.show("Can you open the window?", "request")
     voice.show("Could you shut the gate?", "request")
+    for first, second, verdict in VERDICTS:
+        voice.show_change(first, second, verdict)
+    voice.reference.cues = {"parallel": 0.1, "topical": 0.4}
     voice.hear("ravi met arun.")
     voice.reset()
     assert voice.reference.referents == []
     assert voice.ledger.claims == []
     assert voice.acts.read("Would you send the file?").intended == "request"
+    assert voice.markers.role("now") == LICENCE
+    assert voice.reference.cues == {"parallel": 0.1, "topical": 0.4}
 
 
 def test_growth_is_bounded():
@@ -449,8 +625,19 @@ def test_a_location_is_answered_from_the_conversation_and_a_dispute_is_not():
     settled.think("The key is now on the table.")
     assert settled.think("Where is the key?").answer == "table"
 
+    # The dispute needs the markers: without them nothing has shown her that `now` signals a
+    # change, so the relation is never known to hold one value at a time and the reversion is
+    # more information rather than a conflict. Taught, it is a conflict.
     disputed = NJPBrain()
+    for first, second, verdict in VERDICTS:
+        disputed.show_change(first, second, verdict)
     disputed.think("The key is in the drawer.")
     disputed.think("The key is now on the table.")
     disputed.think("The key is in the drawer.")
     assert "which of those holds" in disputed.think("Where is the key?").answer
+
+    untaught = NJPBrain()
+    untaught.think("The key is in the drawer.")
+    untaught.think("The key is now on the table.")
+    untaught.think("The key is in the drawer.")
+    assert "which of those holds" not in untaught.think("Where is the key?").answer

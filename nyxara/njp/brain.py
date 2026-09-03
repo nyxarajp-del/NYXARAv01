@@ -1958,6 +1958,35 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return False
 
+    def show_change(self, first: str, second: str, verdict: str) -> None:
+        """Demonstrate what a speaker would call this pair of claims — ``updates``,
+        ``contradicts`` or ``corroborates``. What word carried the verdict is induced rather than
+        stated; see :class:`~nyxara.njp.discourse.MarkerLearner`."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_change(str(first or ""), str(second or ""), str(verdict or ""))
+        except Exception:  # noqa: BLE001
+            return
+
+    def show_attachment(self, surface: str, site: str) -> None:
+        """Demonstrate which site a prepositional phrase attached to — ``event`` or ``object``.
+        A preposition demonstrated both ways is one this language uses both ways."""
+        try:
+            if self.discourse is not None:
+                self.discourse.show_attachment(str(surface or ""), str(site or ""))
+        except Exception:  # noqa: BLE001
+            return
+
+    def fit_reference(self, cases: Any) -> Any:
+        """Move the pronoun resolver's cue weights to whatever answers these demonstrations
+        best — see :meth:`~nyxara.njp.discourse.Reference.fit`."""
+        try:
+            if self.discourse is None:
+                return {}
+            return self.discourse.fit_reference(cases)
+        except Exception:  # noqa: BLE001
+            return {}
+
     def say_to(self, meaning: Any, *, audience: str = "student") -> Any:
         """One meaning said for one hearer, parsed back before it is returned — see
         :class:`~nyxara.njp.discourse.Register`."""

@@ -2749,6 +2749,60 @@ and everybody agrees it is; *"Ravi met Arun in the garden"* is technically two a
 module that flagged every trailing prepositional phrase would turn abstention — the property this
 package spends everything else to keep — into a tic.
 
+#### The second pass: four tables that were still scripts
+
+The version above shipped, and the Master's answer to it was the same sentence he had opened with:
+*scripts mat banana, real seekho.* He was right about a specific part of it, and the audit is
+short enough to print. `discourse.py` as first written held nine module-level tables. Five are the
+closed class `semantics.py` already defends — pronouns, the copula, subordinators, time words —
+where a list **is** the honest representation, because that half of a language does not grow.
+
+The other four were not that:
+
+| shipped as a constant | what it actually was |
+|---|---|
+| `_CHANGE = {"now", "currently", "anymore", …}` | a claim that *these particular words mean the world moved*. Not grammar — **meaning**, in one language, written by hand |
+| `_UNIVERSAL_NEG = {"never"}`, `_UNIVERSAL_POS = {"always"}` | the same, for quantification over time |
+| `_MENTAL` — thirty-odd attitude verbs | documented as "closed in the sense modals are". It is not: the class takes new members, and a sentence embedding a belief with a verb nobody listed was read as a flat assertion |
+| `_AMBIGUOUS_PREP = {"with"}` | one English preposition, chosen by hand, with a docstring defending the narrowness. No measurement could ever have shown it wrong |
+
+Plus three tuned numbers in the resolver — `margin = 0.30`, parallelism `0.35`, topicality `0.15`
+— which is the same objection in numeric form: **a threshold nobody can measure wrong is a
+threshold that is not doing any work.**
+
+All four are gone, and what replaced them is the mechanism this package already had:
+
+* **`MarkerLearner`.** A demonstration is two sentences and the verdict a speaker would give them.
+  What is induced is the words that *differ* between them, in the direction the verdict points: an
+  `updates` pair credits a **licence** to what the second sentence gained, a `contradicts` pair
+  credits a **universal** to what the first sentence had and the second lost, and everything else
+  credits `none`, which is the negative evidence that does most of the work. Two demonstrations
+  minimum, differing in content, unanimous; a word demonstrated two ways is contested and never
+  consulted again. From six demonstrated verdicts it induces exactly `{"now": licence, "never":
+  universal}` — and nothing else, because both sentences of every pair contain the copula and the
+  prepositions are deliberately varied, so neither survives.
+* **Attitude verbs are read by structure.** A word introduces an attitude when somebody is named
+  in front of it and what follows is a whole **clause** — one with a predicate of its own. That is
+  the definition, and it needs no list: `reckons` and `gathers` are read correctly having never
+  been mentioned anywhere, and *"ravi opened the box in the room"* is refused, which the list
+  version got wrong in the other direction. The one thing lost is an intransitive complement,
+  because to this compiler *"the ball breaks"* and *"the box in the room"* are the same shape —
+  and refusing is the safe direction.
+* **Ambiguous prepositions are discovered from demonstrations that disagree.** A preposition
+  demonstrated both as an event modifier and as an object modifier, with different content, is one
+  the language uses both ways — which is what ambiguity *is*. `AttachLearner` is `ActLearner`'s
+  contest mechanism a third time. Untaught, nothing is flagged.
+* **The resolver's weights are fitted**, on a small deterministic grid, against demonstrations
+  whose recency is held constant so a cue has to do the work. What it finds is **not** what was
+  hand-tuned: role parallelism comes out at **zero** — the evidence does not support it at all —
+  and the work is done by topicality at 0.1 with a margin of 0.05. The 0.35 was never measured.
+
+**Untaught, all four degrade honestly rather than falling over.** No word licenses anything, so a
+polarity flip on the same object is still a contradiction (nothing had to be marked for that) and
+a second value for a relation is *new information*; no preposition is ambiguous, so nothing is
+questioned; the resolver ranks on recency alone and abstains wherever recency ties. That is what a
+listener who has never heard anybody signal a change would conclude, and it is the correct floor.
+
 #### The syllabus, and what a floor is worth
 
 `python -m nyxara.njp.discourseschool --seed 26 --rounds 2 --retention`
@@ -2759,27 +2813,40 @@ package spends everything else to keep — into a tic.
   transfer           0.25   1.00   +0.75       4  LEARNED
   repair             0.25   1.00   +0.75       4  LEARNED
   figurative         0.50   1.00   +0.50       3  LEARNED
-  reference          1.00   1.00   +0.00       0  already
-  contradiction      1.00   1.00   +0.00       0  already
-  memory             1.00   1.00   +0.00       0  already
+  attachment         0.50   1.00   +0.50       7  LEARNED
+  reference          0.80   1.00   +0.20       9  LEARNED
+  contradiction      0.75   1.00   +0.25      10  LEARNED
+  memory             0.50   1.00   +0.50      10  LEARNED
   minds              1.00   1.00   +0.00       0  already
   register           1.00   1.00   +0.00       0  already
   tongue             0.50   1.00   +0.50       3  LEARNED
   wiring             1.00   1.00   +0.00       0  already
 
-  mastered      11/11 subjects
-  overall       100/100 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  mastered      12/12 subjects
+  learned       9 subject(s) moved by teaching
+  overall       111/111 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 
   ── teacher off, fresh items, seed 27 ──
-  overall       100/100 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
+  overall       111/111 right, 0 wrong, 0 abstained (accuracy 1.00, precision 1.00)
 ```
 
-**The five floors are the honest half of that table.** `reference`, `contradiction`, `memory`,
-`minds` and `register` are mechanisms rather than conventions — there is nothing to demonstrate,
-and they read their ceiling cold and are printed with `already` beside them exactly as
-`school.Arithmetic` and `corpusschool`'s thirteen doing subjects are. What they are worth is what
-those are worth: an organ that quietly stops working shows up here on the first run rather than
-three versions later as an unexplained dip.
+**Four of those floors did not exist before the second pass.** `reference`, `contradiction`,
+`memory` and `attachment` all read **1.00 cold** in the first version, and that was not her
+knowing anything — it was the module holding the answer. They are 0.80, 0.75, 0.50 and 0.50 now,
+and the gain is the measurement. Nine of twelve subjects move by teaching.
+
+**The three that remain floors are honest ones.** `minds` and `register` are mechanisms rather
+than conventions — there is nothing to demonstrate — and `wiring` measures whether the organ is
+reachable from a turn. They are printed with `already` beside them exactly as `school.Arithmetic`
+and `corpusschool`'s thirteen doing subjects are, and what they are worth is what those are worth:
+an organ that quietly stops working shows up here on the first run rather than three versions later
+as an unexplained dip.
+
+**One more contamination, found by the same audit.** `memory` and `contradiction` are two
+questions about one organ, so whichever sat second inherited the other's lesson and reported a
+floor of 1.00 — the `transfer` / `acts` defect again. `memory` now sits its paper with a
+communicator this syllabus has not taught, which costs the shared-student property it did not
+need and makes both floors real.
 
 **And `tongue` asserts the opposite of the usual transfer claim.** An indirect request is a fact
 about a speech community, not about language in general, and a school that rewarded an English
@@ -2815,9 +2882,17 @@ too late.
 | `When I visited Delhi last year I was tired.` | `you told me i never visit delhi, and also i visit delhi — which of those holds?` |
 | `Ravi met Arun.` / `He was tired.` | `when you say 'he', do you mean ravi or arun?` |
 | `The key is in the drawer.` … `now on the table.` / `Where is the key?` | `table` |
-| the same, with an unmarked reversion | `you told me key is at table, and also key is at drawer — which of those holds?` |
-| `I saw the man with the telescope.` | `did i saw the man using the telescope, or does the man have the telescope?` |
+| the same, with an unmarked reversion, **after the markers are taught** | `you told me key is at table, and also key is at drawer — which of those holds?` |
+| the same, **untaught** | `drawer` — nothing has shown her that a speaker can signal a change |
+| `I saw the man with the telescope.`, **after `with` is demonstrated both ways** | `did i saw the man using the telescope, or does the man have the telescope?` |
+| the same, **untaught** | `noted: Master saw man telescope` |
 | `The market swallowed the shock.` (with the kinds taught) | flagged figurative; **nothing filed** |
+
+The untaught rows are not a regression — they are the point. A fresh `NJPBrain` starts knowing no
+conventions, no markers, no ambiguous prepositions and no cue weights, and `go_to_discourse_school()`
+or the `show_*` methods are how it comes to. Before the second pass those three rows read the same
+whether anything had been taught or not, which is exactly what it means for a capability to have
+been shipped rather than learned.
 
 #### What is NOT claimed
 
@@ -2828,6 +2903,12 @@ ledger keys on `subject`/`relation` as the compiler produced them, so two wordin
 that the grounder's alias table would unify are two relations here. Attachment ambiguity is read
 for **one** preposition. `Who was tired?` after an unresolved `he` is still silence, which is
 correct and is not an answer.
+
+**The closed-class tables that remain are still tables**, and they are: the pronoun sets, the
+copula, the factive subordinators, the time words. `semantics.py` argues that case and this module
+inherits the argument — that half of a language is a few hundred words and changes over centuries.
+It is not the same defence as the four that were removed, and if any of them turns out to carry a
+*semantic* claim rather than a grammatical one, it belongs in a learner too.
 
 **Relationship is not modelled.** The speaker and the hearer are identified and a convention is
 learned per shape; who is senior to whom, what is owed, and what may be asked of whom do not enter

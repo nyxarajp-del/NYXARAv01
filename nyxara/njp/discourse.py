@@ -24,6 +24,16 @@ agrees with what they said twenty turns ago, and what they believe that is not s
 * ``"The market swallowed the shock."`` → ``noted: market swallow shock``, filed into the
   knowledge store as a fact about the world at the same confidence as a fact she was taught.
 
+**Nothing that is a claim about *meaning* is written down here.** The first version of this module
+shipped four tables that were: which words license an update, which quantify over all times, which
+verbs take a belief, and which preposition attaches two ways — plus three tuned numbers in the
+pronoun resolver. They are gone. What replaced them is :class:`MarkerLearner`,
+:class:`AttachLearner`, :func:`clause_proposition` and :meth:`Reference.fit`, and the difference is
+not cosmetic: a table cannot be wrong in a way any measurement could show, and every one of those
+four is now a subject on the report card with a floor, a lesson and a gain. The tables that remain
+— the pronouns, the copula, the factive subordinators, the time words — are the closed class
+:mod:`nyxara.njp.semantics` already defends, where a list is the honest representation.
+
 Six organs, one discipline, and it is the discipline of :mod:`nyxara.njp.language` rather than a
 new one: **a lesson leaves a shape, never an answer; a shape is kept only once it has read
 something nobody demonstrated; where two readings survive the answer is that there are two.**
@@ -127,7 +137,9 @@ from nyxara.njp.semantics import (Meaning, Tag, compile_meaning,  # noqa: F401
 from nyxara.njp.semantics import _lemma as _lemma_of
 
 __all__ = [
-    "GAP", "MORE", "LEVELS", "REGISTERS", "Readings", "attachment",
+    "GAP", "MORE", "LEVELS", "REGISTERS", "LICENCE", "UNIVERSAL",
+    "Readings", "attachment", "AttachLearner", "Marker", "MarkerLearner",
+    "free_words", "clause_proposition",
     "shapes_of", "fillers_of", "literal_act",
     "Act", "Interpretation", "ActLearner",
     "Referent", "Resolution", "Reference",
@@ -168,44 +180,17 @@ _THIRD_SG: frozenset = frozenset((
 _THIRD_PL: frozenset = frozenset((
     "they", "them", "their", "theirs", "unka", "unki", "unhone", "unko"))
 
-#: The markers by which a speaker signals that time has moved — the **change licence**. Closed,
-#: small, and the single thing that separates :class:`Ledger`'s ``updates`` from its
-#: ``contradicts``. A bare re-statement with a different object carries none of these and is
-#: therefore not licensed to overwrite anything.
-_CHANGE: frozenset = frozenset((
-    "now", "currently", "anymore", "ab", "abhi", "longer", "since", "moved", "became",
-    "अब"))
-
-#: Negations and adverbs that quantify over **all** times. A universal cannot be updated away by
-#: a later instance: *"I never visited Delhi"* and *"I visited Delhi last year"* are not a world
-#: that changed, they are a speaker who is wrong once.
-_UNIVERSAL_NEG: frozenset = frozenset(("never", "कभी"))
-_UNIVERSAL_POS: frozenset = frozenset(("always", "hamesha", "हमेशा"))
-
-#: Attitude verbs. A closed class in the sense modals are — a few dozen words in any language,
-#: changing over centuries — and listing them is the same move :mod:`nyxara.njp.semantics` makes
-#: for determiners and auxiliaries, not the open-verb list that module exists to avoid.
-_MENTAL: Dict[str, str] = {}
-
-
-def _mental(forms: Sequence[str], strength: str) -> None:
-    """Load one attitude verb's forms, exactly as :mod:`nyxara.njp.semantics` loads a tag."""
-    for form in forms:
-        _MENTAL[form] = strength
-
-
-_mental(("think", "thinks", "thought", "thinking"), "believe")
-_mental(("believe", "believes", "believed"), "believe")
-_mental(("assume", "assumes", "assumed"), "believe")
-_mental(("suppose", "supposes", "supposed"), "believe")
-_mental(("expect", "expects", "expected"), "believe")
-_mental(("reckon", "reckons", "reckoned"), "believe")
-_mental(("know", "knows", "knew"), "know")
-_mental(("realise", "realises", "realised", "realize", "realizes", "realized"), "know")
-_mental(("sochta", "sochti", "sochte", "maanta", "maanti", "maante"), "believe")
-_mental(("jaanta", "jaanti", "jaante", "pata"), "know")
-_mental(("सोचता", "मानता"), "believe")
-_mental(("जानता",), "know")
+#: The two roles a learned marker can carry — see :class:`MarkerLearner`.
+#:
+#: **Neither is shipped.** V.26 as first written held ``_CHANGE = {"now", "currently", …}`` and
+#: ``_UNIVERSAL_NEG = {"never"}``, and those are not closed-class tables like the pronouns below:
+#: they are *semantic claims about particular words*, written by hand, in one language. A module
+#: that ships them has not learned that ``now`` licenses an update — it has been told, and it can
+#: never be told anything else. Both are now induced from demonstrated verdicts by the same rule
+#: everything else here is kept by: two demonstrations minimum, differing in content, unanimous,
+#: and dropped the moment one demonstration disagrees.
+LICENCE = "licence"
+UNIVERSAL = "universal"
 
 #: The value stored for *attributed ignorance* — "Ravi thinks I do not know". It is not the same
 #: object as a belief whose content is false, and storing it as one is how a false-belief test
@@ -319,6 +304,160 @@ def literal_act(surface: str, meaning: Optional[Meaning] = None) -> str:
         return "assertion"
     except Exception:  # noqa: BLE001
         return ""
+
+
+def _content_of(meaning: Optional[Meaning]) -> Set[str]:
+    """Every word the reading claimed, so what is left over is the sentence's *marking*."""
+    words: Set[str] = set()
+    try:
+        if meaning is None:
+            return words
+        for part in (meaning.subject, meaning.relation, meaning.object, meaning.verb):
+            for token in str(part or "").split():
+                words.add(token)
+        for filler in (meaning.roles or {}).values():
+            for token in str(filler).split():
+                words.add(token)
+    except Exception:  # noqa: BLE001
+        return words
+    return words
+
+
+def free_words(surface: str, meaning: Optional[Meaning] = None) -> Set[str]:
+    """The words of a sentence that its reading did **not** account for.
+
+    A claim is what the reading extracted; everything else in the sentence is how the speaker
+    *marked* that claim — the tense, the negator, the adverb that says time has moved. Those
+    leftovers are the candidates a marker can be induced from, and taking them as *whatever the
+    reading did not use* means no list decides which words may be markers.
+    """
+    try:
+        meaning = compile_meaning(surface) if meaning is None else meaning
+        claimed = _content_of(meaning)
+        return {t.text for t in tag_tokens(surface) if t.text not in claimed}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+@dataclass
+class Marker:
+    """One word induced as carrying a verdict, with the demonstrations behind it."""
+
+    word: str = ""
+    role: str = ""
+    demonstrations: Tuple[Tuple[str, ...], ...] = ()
+
+    @property
+    def support(self) -> int:
+        return len(set(self.demonstrations))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"word": self.word, "role": self.role, "support": self.support}
+
+
+class MarkerLearner:
+    """Which words license an update, and which make a claim immune to one — **induced**.
+
+    This class exists because the first version of this module did not have it. It shipped
+    ``{"now", "currently", "anymore", …}`` and ``{"never", "always"}`` as constants, and those
+    are not the closed-class tables :mod:`nyxara.njp.semantics` defends: a determiner list is a
+    statement about a language's grammar, and *"``now`` means the world moved"* is a statement
+    about what a word **means**. Written by hand it is a script with a mechanism's name on it,
+    and it cannot be wrong in a way that any measurement could show.
+
+    **What a demonstration is.** Two sentences and the verdict a speaker would give them:
+    ``updates``, ``contradicts``, or ``corroborates``. Nothing says which word did it.
+
+    **What is induced.** The words that *differ* between the two sentences, in the direction the
+    verdict points:
+
+    * an ``updates`` demonstration credits :data:`LICENCE` to the words the **second** sentence
+      has that the first does not — a licence is something the later claim carries;
+    * a ``contradicts`` demonstration credits :data:`UNIVERSAL` to the words the **first**
+      sentence has that the second does not — a universal is what makes the earlier claim refuse
+      to be superseded;
+    * every other demonstration credits the same differences to ``none``, which is the negative
+      evidence that does most of the work here.
+
+    **Why the differences and not the whole sentence.** Both sentences of *"the key is in the
+    drawer"* / *"the key is now on the table"* contain ``is``, so crediting whole sentences would
+    make the copula a change marker and every copular claim licensed. The difference is ``now``
+    and the preposition — and the preposition is contested away the moment two demonstrations
+    vary it, which is exactly why the syllabus varies it.
+
+    **Nothing is kept on one demonstration.** Two minimum, differing in content, unanimous in
+    role. A word demonstrated two ways is contested and is never consulted again — the rule
+    :class:`ActLearner` applies to conventions and :class:`~nyxara.njp.language.Grammar` applies
+    to constructions, applied here to markers.
+
+    **Untaught, it says nothing, and that degrades honestly.** With no markers induced, no claim
+    carries a licence and none is universal — so a polarity flip on the same object is still a
+    contradiction (nothing had to be marked for that), and a second value for a relation is
+    *new information* rather than an update. That is the right floor: it is what a listener who
+    has never heard anybody signal a change would conclude.
+    """
+
+    min_support = 2
+
+    def __init__(self, *, min_support: Optional[int] = None) -> None:
+        if min_support is not None:
+            self.min_support = max(1, int(min_support))
+        #: ``word → role → [content signature, …]``, everything ever demonstrated.
+        self.seen: Dict[str, Dict[str, List[Tuple[str, ...]]]] = {}
+        self.kept: Dict[str, Marker] = {}
+        self.contested: Set[str] = set()
+        self.shown = 0
+
+    def show(self, first: str, second: str, verdict: str) -> None:
+        """One demonstration: these two sentences, and what a speaker would call the pair."""
+        try:
+            verdict = str(verdict or "").strip().lower()
+            before, after = free_words(first), free_words(second)
+            gained, lost = after - before, before - after
+            signature = tuple(sorted(_content_of(compile_meaning(first))
+                                     | _content_of(compile_meaning(second))))
+            role_of: List[Tuple[Set[str], str]] = []
+            if verdict == "updates":
+                role_of = [(gained, LICENCE), (lost, "none")]
+            elif verdict == "contradicts":
+                role_of = [(lost, UNIVERSAL), (gained, "none")]
+            else:
+                role_of = [(gained, "none"), (lost, "none")]
+            for words, role in role_of:
+                for word in words:
+                    self.seen.setdefault(word, {}).setdefault(role, []).append(signature)
+            self.shown += 1
+            self._settle()
+        except Exception:  # noqa: BLE001
+            return
+
+    def _settle(self) -> None:
+        kept: Dict[str, Marker] = {}
+        contested: Set[str] = set()
+        for word, roles in self.seen.items():
+            live = [role for role, demos in roles.items() if demos]
+            if len(live) > 1:
+                contested.add(word)
+                continue
+            role = live[0]
+            if role == "none":
+                continue
+            demos = tuple(roles[role])
+            if len(set(demos)) < self.min_support:
+                continue
+            kept[word] = Marker(word=word, role=role, demonstrations=demos)
+        self.kept, self.contested = kept, contested
+
+    def role(self, word: str) -> str:
+        found = self.kept.get(str(word or "").strip().lower())
+        return found.role if found is not None else ""
+
+    def carries(self, words: Sequence[str], role: str) -> bool:
+        return any(self.role(word) == role for word in words)
+
+    def stats(self) -> Dict[str, Any]:
+        return {"shown": self.shown, "kept": {w: m.role for w, m in self.kept.items()},
+                "contested": len(self.contested)}
 
 
 # --------------------------------------------------------------------------- #
@@ -633,10 +772,25 @@ class Reference:
     #: long-lived brain from carrying every noun it has ever heard as a live candidate.
     max_referents = 256
 
-    #: How far apart the top two candidates must be before a pronoun is treated as settled. At
-    #: 0.30, *"Ravi met Arun. He was tired."* comes back ambiguous with both ranked — which is the
-    #: honest reading of that discourse, and the reading a confident resolver would destroy.
+    #: How far apart the top two candidates must be before a pronoun is treated as settled, and
+    #: how much each cue is worth. **Starting values, not constants** — :meth:`fit` moves all
+    #: three from demonstrations, and until it is called these are a prior rather than a claim.
+    #:
+    #: They were three hand-tuned numbers in the first version of this module, which is the same
+    #: objection the marker tables answered: a threshold nobody can measure wrong is a threshold
+    #: that is not doing any work. At the fitted values *"Ravi met Arun. He was tired."* comes back
+    #: ambiguous with both ranked, which is the honest reading of that discourse and the one a
+    #: confident resolver would destroy.
     margin = 0.30
+    #: **Neutral until fitted.** Both cues start at zero, so an untaught resolver ranks on recency
+    #: alone and abstains wherever recency ties — which is the honest floor and is what makes the
+    #: syllabus's ``reference`` subject a lesson rather than a report that the constants shipped
+    #: were already right. What :meth:`fit` finds from demonstrations is *not* what was hand-tuned
+    #: here first: topicality turns out to be worth several times role parallelism, and the
+    #: here first: fitted on demonstrations whose recency is controlled, role parallelism comes
+    #: out at **zero** — the evidence does not support it at all — and the whole of the work is
+    #: done by topicality and by a much narrower margin. The hand-tuned 0.35 was not measured.
+    cues: Dict[str, float] = {"parallel": 0.0, "topical": 0.0}
 
     def __init__(self, *, speaker: str = "Master", addressee: str = "NYXARA",
                  margin: Optional[float] = None) -> None:
@@ -724,9 +878,9 @@ class Reference:
                 back = max(0, at - referent.turn)
                 score = 1.0 / (1.0 + back)
                 if referent.role == role:
-                    score += 0.35
+                    score += float(self.cues.get("parallel", 0.0))
                 if referent.mentions > 1:
-                    score += 0.15
+                    score += float(self.cues.get("topical", 0.0))
                 scored.append((referent.name, score))
             if not scored:
                 out.why = "no candidate referent has been introduced"
@@ -822,8 +976,56 @@ class Reference:
             return text, resolutions
         return text, resolutions
 
+    # -- learning the weights ------------------------------------------------ #
+    def fit(self, cases: Sequence[Tuple[Sequence[Referent], str, str, str, str]]) -> Dict[str, Any]:
+        """Move :attr:`cues` and :attr:`margin` to whatever answers these demonstrations best.
+
+        A case is ``(referents, pronoun, role, clause_subject, expected)``, where ``expected`` is
+        the name the discourse settles on or ``""`` when it settles on nothing. **Both kinds are
+        needed**, and the reason is weaker and more exact than it first looks: on cases that all
+        resolve, a setting that *never* abstains fits the data perfectly and nothing excludes it.
+        The search returns the smallest weights that fit, so it often will not choose one — but it
+        is not being stopped from it. One case the discourse does not settle rules the whole family
+        out, which is why the ambiguous cases are half the lesson exactly as they are half the
+        exam.
+
+        A small deterministic grid rather than anything cleverer. Three parameters and a few dozen
+        demonstrations do not support more, and a search that reported a better number than the
+        data can carry would be the same dishonesty as a hand-tuned constant with a formula in
+        front of it.
+        """
+        best = (self.score(cases), dict(self.cues), self.margin)
+        for parallel in [i / 20 for i in range(0, 13)]:
+            for topical in [i / 20 for i in range(0, 9)]:
+                for margin in [i / 20 for i in range(1, 13)]:
+                    scratch = Reference(speaker=self.speaker, addressee=self.addressee)
+                    scratch.plausible = self.plausible
+                    scratch.cues = {"parallel": parallel, "topical": topical}
+                    scratch.margin = margin
+                    got = scratch.score(cases)
+                    if got > best[0]:
+                        best = (got, dict(scratch.cues), scratch.margin)
+        self.cues, self.margin = best[1], best[2]
+        return {"fitted": best[0], "cues": dict(self.cues), "margin": self.margin,
+                "cases": len(cases)}
+
+    def score(self, cases: Sequence[Tuple[Sequence[Referent], str, str, str, str]]) -> float:
+        """How many of these demonstrations the current weights get right, as a rate."""
+        right = 0
+        for referents, pronoun, role, clause_subject, expected in cases:
+            scratch = Reference(speaker=self.speaker, addressee=self.addressee)
+            scratch.plausible = self.plausible
+            scratch.cues, scratch.margin = dict(self.cues), self.margin
+            scratch.referents = list(referents)
+            scratch.turn = max([r.turn for r in referents] or [0]) + 1
+            got = scratch.resolve(pronoun, role=role, clause_subject=clause_subject)
+            if (got.referent if got.settled else "") == expected:
+                right += 1
+        return right / len(cases) if cases else 0.0
+
     def stats(self) -> Dict[str, Any]:
         return {"referents": len(self.referents), "turn": self.turn,
+                "cues": dict(self.cues), "margin": round(self.margin, 4),
                 "names": [r.name for r in self.referents[-8:]]}
 
 
@@ -857,13 +1059,17 @@ class Claim:
     relation: str = ""
     object: str = ""
     negated: bool = False
-    #: The claim quantifies over **all** times — ``never``, ``always``. A universal is not an
-    #: instance and cannot be superseded by one.
+    #: The claim quantifies over **all** times. A universal is not an instance and cannot be
+    #: superseded by one. Set from a word :class:`MarkerLearner` induced, never from a list.
     universal: bool = False
     #: The speaker signalled that time has moved — see :data:`_CHANGE`. This is the licence that
     #: makes a later claim an update rather than a contradiction, and it has to be **in the
     #: sentence**: inferring it from the topic is how a store silently overwrites its evidence.
     change: bool = False
+    #: The words of this sentence its own reading did not account for — see :func:`free_words`.
+    #: This is what a marker is looked up in, and it is carried on the claim so that a learner
+    #: taught **after** the claim was filed still sees the evidence it needs.
+    markers: Tuple[str, ...] = ()
     temporal: str = ""
     turn: int = 0
     surface: str = ""
@@ -1014,13 +1220,17 @@ def _asserted_clauses(surface: str) -> List[str]:
     return out
 
 
-def read_claim(surface: str, meaning: Optional[Meaning] = None, *, turn: int = 0
-               ) -> Optional[Claim]:
-    """A sentence read as a claim, with its universal and its change licence read off the tokens.
+def read_claim(surface: str, meaning: Optional[Meaning] = None, *, turn: int = 0,
+               markers: Optional["MarkerLearner"] = None) -> Optional[Claim]:
+    """A sentence read as a claim, with its universal and its change licence **looked up**.
 
     Returns ``None`` for anything that is not a complete assertion — a question asserts nothing,
     and a claim built out of one would put the questioner's presupposition on the ledger as
     though they had stated it.
+
+    ``markers`` is the induced table. Passing ``None`` means no word licenses anything, which is
+    the correct reading for a listener who has never been shown a speaker signalling a change —
+    not a degraded one.
     """
     try:
         found: Optional[Meaning] = None
@@ -1036,11 +1246,9 @@ def read_claim(surface: str, meaning: Optional[Meaning] = None, *, turn: int = 0
         if found is None:
             return None
         meaning = found
-        words = [t.text for t in tag_tokens(surface)]
-        universal = any(w in _UNIVERSAL_NEG for w in words)
-        if not universal and not meaning.negated:
-            universal = any(w in _UNIVERSAL_POS for w in words)
-        change = any(w in _CHANGE for w in words)
+        marking = tuple(sorted(free_words(surface, meaning)))
+        universal = bool(markers is not None and markers.carries(marking, UNIVERSAL))
+        change = bool(markers is not None and markers.carries(marking, LICENCE))
         subject, relation, obj = (_untimed(_bare(meaning.subject)), meaning.relation,
                                   _untimed(_bare(meaning.object)))
         placed = _locative(surface)
@@ -1048,7 +1256,7 @@ def read_claim(surface: str, meaning: Optional[Meaning] = None, *, turn: int = 0
             subject, relation, obj = placed
         return Claim(subject=subject, relation=relation,
                      object=obj, negated=bool(meaning.negated),
-                     universal=bool(universal), change=bool(change),
+                     universal=bool(universal), change=bool(change), markers=marking,
                      temporal=meaning.temporal, turn=int(turn), surface=str(surface or ""))
     except Exception:  # noqa: BLE001
         return None
@@ -1242,6 +1450,37 @@ def _possessive(surface: str) -> Optional[Tuple[str, str, str]]:
         return None
 
 
+def clause_proposition(clause: str) -> Tuple[str, str]:
+    """:func:`proposition`, but only for a string that is genuinely a **clause**.
+
+    This is what replaced the attitude-verb list. A complement is a clause when it has a
+    predicate of its own — a copula (:func:`_locative`), a possessive (:func:`_possessive`), or a
+    transitive reading with a real object. What it must **not** be is the compiler's bare
+    ``np-verb`` frame, which fires on any two nouns in a row: *"the box in the room"* reads as
+    ``box --room-->`` and *"arun the book"* as ``arun --book-->``, so accepting that frame made
+    *"ravi opened the box in the room"* an attributed belief.
+
+    A verb list is not needed for this and never was. *"Thinks"* is not an attitude verb because
+    it is in a table; it is one because what follows it is a whole proposition, and *"opened"* is
+    not one because what follows it is a noun phrase.
+    """
+    try:
+        text = str(clause or "").strip()
+        for reader in (_locative, _possessive):
+            found = reader(text)
+            if found is not None:
+                subject, relation, obj = found
+                return f"{subject}|{relation}", _untimed(obj)
+        meaning = compile_meaning(text)
+        if meaning.readable and meaning.complete and meaning.frame != "np-verb":
+            key = f"{_untimed(_bare(meaning.subject))}|{meaning.relation}"
+            value = _untimed(_bare(meaning.object))
+            return key, (f"¬{value}" if meaning.negated else value)
+        return "", ""
+    except Exception:  # noqa: BLE001
+        return "", ""
+
+
 def proposition(clause: str) -> Tuple[str, str]:
     """A clause as ``(key, value)`` — ``"box|have"`` and ``"red ball"``.
 
@@ -1267,15 +1506,32 @@ def proposition(clause: str) -> Tuple[str, str]:
         return "", ""
 
 
-def _attitude(surface: str) -> Optional[Tuple[str, str, bool, str]]:
-    """``(holder, strength, negated, clause)`` for ``X thinks/knows …``, or ``None``."""
+def _attitude(surface: str) -> Optional[Tuple[str, bool, str]]:
+    """``(holder, negated, clause)`` for a sentence that embeds one, or ``None``.
+
+    **Structural, with no verb list.** A word introduces an attitude when somebody is named in
+    front of it and what follows it is a whole clause — see :func:`clause_proposition`. That is
+    the definition of a clausal complement, and it is the same move this package makes
+    everywhere: *"tag the closed class exhaustively, treat everything else as open material,
+    match over the structure rather than over the words."*
+
+    V.26 as first written held a dictionary of thirty-odd attitude verbs and called it closed in
+    the sense modals are. It is not: ``think``, ``believe``, ``reckon``, ``suspect``, ``gather``,
+    ``figure``, ``hold``, ``maintain``, ``sochta``, ``maanta`` — the class takes new members, it
+    differs by register, and a sentence embedding a belief with a verb nobody listed was read as
+    a flat assertion. It is now read by what it does.
+
+    The one thing lost with the list is that an **intransitive** complement — *"ravi thinks the
+    ball breaks"* — is refused, because to this compiler it is indistinguishable from two nouns
+    in a row. Refusing is the safe direction: the alternative reads *"ravi opened the box in the
+    room"* as a belief.
+    """
     try:
         tokens = tag_tokens(surface)
         for index, token in enumerate(tokens):
-            if token.text not in _MENTAL or index == 0:
+            if index == 0 or token.tag != Tag.WORD:
                 continue
             head = tokens[:index]
-            negated = any(t.tag == Tag.NEG for t in head)
             holder = [t for t in head if t.tag in (Tag.WORD, Tag.PRON)]
             if not holder:
                 continue
@@ -1283,9 +1539,10 @@ def _attitude(surface: str) -> Optional[Tuple[str, str, bool, str]]:
             while rest and rest[0].text in ("that", "ki", "कि"):
                 rest = rest[1:]
             clause = " ".join(t.text for t in rest).strip()
-            if not clause:
+            if not clause or not clause_proposition(clause)[0]:
                 continue
-            return holder[-1].text, _MENTAL[token.text], negated, clause
+            negated = any(t.tag == Tag.NEG for t in head)
+            return holder[-1].text, negated, clause
         return None
     except Exception:  # noqa: BLE001
         return None
@@ -1340,14 +1597,14 @@ class Minds:
                 found = _attitude(clause)
                 if found is None:
                     break
-                holder, strength, negated, clause = found
+                holder, negated, clause = found
                 path.append(self._name(holder))
-                if negated and strength == "know":
-                    ignorant = True
-                    break
                 if negated:
-                    # "Ravi does not think X" attributes no belief in X, which is a different
-                    # state from believing not-X and is stored as the one it is.
+                    # *"Ravi does not think X"* and *"Ravi thinks I do not know X"* both attribute
+                    # **no belief** in X, which is a different state from believing not-X and is
+                    # stored as the one it is. The distinction between ``think`` and ``know`` was
+                    # carried in the verb table and was never read: both branches set this flag,
+                    # so the table's second column did nothing and has gone with it.
                     ignorant = True
                     break
             key, value = proposition(clause)
@@ -1714,12 +1971,59 @@ class Figure:
 # the meaning adversary — two readings of one sentence
 # --------------------------------------------------------------------------- #
 
-#: The prepositions this module will call an attachment ambiguity on. **One**, and the narrowness
-#: is deliberate. *"I saw the man with the telescope"* is genuinely two sentences and everybody
-#: agrees it is; *"Ravi met Arun in the garden"* is technically two and nobody asks. A module that
-#: flagged every trailing prepositional phrase would turn abstention — the property this package
-#: spends everything else to keep — into a tic.
-_AMBIGUOUS_PREP: frozenset = frozenset(("with",))
+class AttachLearner:
+    """Which prepositions attach two ways — **discovered from demonstrations that disagree**.
+
+    V.26 as first written held ``_AMBIGUOUS_PREP = {"with"}`` and defended the narrowness in a
+    docstring. That is a script: one English preposition, chosen by hand, and no measurement could
+    ever have shown it wrong.
+
+    Here a demonstration is a surface and which site the phrase attached to — ``event`` (it
+    modifies what happened) or ``object`` (it modifies the thing). A preposition demonstrated
+    **both ways, with different content**, is one the language genuinely uses both ways, and that
+    is what ambiguity *is*. The mechanism is :class:`ActLearner`'s contest, reused a third time:
+    a shape two lessons disagree about is not a shape this package reads confidently.
+
+    Untaught, nothing is ambiguous and no sentence is questioned — which is right. A listener who
+    has only ever heard *"with"* used one way has no reason to ask.
+    """
+
+    min_support = 2
+
+    def __init__(self, *, min_support: Optional[int] = None) -> None:
+        if min_support is not None:
+            self.min_support = max(1, int(min_support))
+        self.seen: Dict[str, Dict[str, List[Tuple[str, ...]]]] = {}
+        self.ambiguous: Set[str] = set()
+        self.shown = 0
+
+    def show(self, surface: str, attachment_site: str) -> None:
+        """One demonstration: in this sentence the phrase modified the event, or the object."""
+        try:
+            site = str(attachment_site or "").strip().lower()
+            tokens = tag_tokens(surface)
+            fillers = fillers_of(surface)
+            for token in tokens:
+                if token.tag != Tag.PREP:
+                    continue
+                self.seen.setdefault(token.text, {}).setdefault(site, []).append(fillers)
+            self.shown += 1
+            self._settle()
+        except Exception:  # noqa: BLE001
+            return
+
+    def _settle(self) -> None:
+        found: Set[str] = set()
+        for word, sites in self.seen.items():
+            live = [site for site, demos in sites.items()
+                    if len(set(demos)) >= self.min_support]
+            if len(live) > 1:
+                found.add(word)
+        self.ambiguous = found
+
+    def stats(self) -> Dict[str, Any]:
+        return {"shown": self.shown, "ambiguous": sorted(self.ambiguous),
+                "prepositions": len(self.seen)}
 
 
 @dataclass
@@ -1740,7 +2044,8 @@ class Readings:
                 "question": self.question}
 
 
-def attachment(surface: str, meaning: Optional[Meaning] = None) -> Readings:
+def attachment(surface: str, meaning: Optional[Meaning] = None, *,
+               learner: Optional[AttachLearner] = None) -> Readings:
     """*"I saw the man with the telescope."* — read both ways, and neither chosen.
 
     The evidence that there is an ambiguity at all is **in the compiler's own output**: it has no
@@ -1748,6 +2053,9 @@ def attachment(surface: str, meaning: Optional[Meaning] = None) -> Readings:
     object string — ``man telescope``, with ``with the`` silently dropped. That fusion is a
     reliable signal, and reading it back out gives both attachment sites without needing a parser
     this package does not have.
+
+    **Which prepositions this fires on is learned** — see :class:`AttachLearner`. Untaught, none
+    of them, so a fused object is read exactly as it was before this function existed.
 
     Nothing here picks a winner. The two interpretations come back at 0.50 each and the question
     comes back with them, which is the Master's specification exactly: a genuinely ambiguous
@@ -1759,8 +2067,9 @@ def attachment(surface: str, meaning: Optional[Meaning] = None) -> Readings:
         if not meaning.readable or not meaning.object:
             return out
         tokens = tag_tokens(surface)
+        known = learner.ambiguous if learner is not None else frozenset()
         preps = [i for i, t in enumerate(tokens)
-                 if t.tag == Tag.PREP and t.text in _AMBIGUOUS_PREP]
+                 if t.tag == Tag.PREP and t.text in known]
         if not preps:
             return out
         at = preps[0]
@@ -1865,6 +2174,12 @@ class Communicator:
                  kinds: Optional[Callable[[str], Sequence[str]]] = None,
                  max_history: int = 64) -> None:
         self.acts = ActLearner()
+        #: Which words license an update and which make a claim immune to one. Induced, empty
+        #: until demonstrated — see :class:`MarkerLearner`.
+        self.markers = MarkerLearner()
+        #: Which prepositions attach two ways. Discovered from demonstrations that disagree,
+        #: empty until then — see :class:`AttachLearner`.
+        self.attach = AttachLearner()
         self.reference = Reference(speaker=speaker, addressee=addressee)
         self.ledger = Ledger()
         self.minds = Minds(speaker=speaker)
@@ -1890,6 +2205,21 @@ class Communicator:
         """Witness one literal filler, so the selectional evidence has somewhere to come from."""
         self.figure.witness(str(kind), str(name))
 
+    def show_change(self, first: str, second: str, verdict: str) -> None:
+        """Demonstrate what a speaker would call this pair of claims —
+        see :meth:`MarkerLearner.show`."""
+        self.markers.show(first, second, verdict)
+
+    def show_attachment(self, surface: str, site: str) -> None:
+        """Demonstrate which site a prepositional phrase attached to —
+        see :meth:`AttachLearner.show`."""
+        self.attach.show(surface, site)
+
+    def fit_reference(self, cases: Sequence[Any]) -> Dict[str, Any]:
+        """Move the resolver's cue weights to whatever answers these demonstrations best —
+        see :meth:`Reference.fit`."""
+        return self.reference.fit(cases)
+
     # -- one turn ------------------------------------------------------------ #
     def hear(self, surface: str, *, speaker: Optional[str] = None) -> Uptake:
         out = Uptake(surface=str(surface or ""), speaker=str(speaker or self.speaker))
@@ -1903,11 +2233,11 @@ class Communicator:
                            if out.rewritten != out.surface else first)
             out.interpretation = self.acts.read(out.surface, meaning=out.meaning)
             out.figurative = self.figure.judge(out.meaning)
-            out.readings = attachment(out.rewritten, out.meaning)
+            out.readings = attachment(out.rewritten, out.meaning, learner=self.attach)
             literal_assertion = (out.interpretation.intended in ("assertion", "exclamation")
                                  or out.interpretation.literal == "assertion")
             if literal_assertion and out.literal:
-                claim = read_claim(out.rewritten, turn=self.turn)
+                claim = read_claim(out.rewritten, turn=self.turn, markers=self.markers)
                 out.verdict = self.ledger.note(claim)
                 if claim is not None:
                     self.figure.witness(claim.relation, claim.subject)
@@ -1947,13 +2277,16 @@ class Communicator:
         """A new conversation, the same learned conventions.
 
         The ledger, the referents and the other minds are **about this conversation** and start
-        empty; the speech-act shapes, the witnessed subjects and the kinds are **about the
-        language** and survive. Conflating the two would mean either that a convention had to be
+        empty; the speech-act shapes, the induced markers, the ambiguous prepositions, the fitted
+        cue weights, the witnessed subjects and the kinds are **about the language** and survive.
+        Conflating the two would mean either that a convention had to be
         re-taught every time somebody new spoke, or that one conversation's referents could answer
         a pronoun in the next — and the second of those is how a resolver invents an antecedent.
         """
+        cues, margin = dict(self.reference.cues), self.reference.margin
         self.reference = Reference(speaker=self.reference.speaker,
                                    addressee=self.reference.addressee)
+        self.reference.cues, self.reference.margin = cues, margin
         self.reference.plausible = self.figure.plausible
         self.ledger = Ledger()
         self.minds = Minds(speaker=self.speaker)
@@ -1980,6 +2313,7 @@ class Communicator:
 
     def stats(self) -> Dict[str, Any]:
         return {"turns": self.turn, "acts": self.acts.stats(),
+                "markers": self.markers.stats(), "attach": self.attach.stats(),
                 "reference": self.reference.stats(), "ledger": self.ledger.stats(),
                 "minds": self.minds.stats(), "register": self.register.stats(),
                 "figure": self.figure.stats()}

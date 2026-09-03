@@ -7,18 +7,28 @@ doing by saying that, what "he" names, whether what they just said can be true a
 what they said twenty turns ago, what they believe that is not so, and how much of an answer this
 particular hearer has asked to carry.
 
-**Eleven subjects, and they are three kinds.**
+**Twelve subjects, and they are three kinds.**
 
-*Four are taught.* ``acts``, ``transfer``, ``repair`` and ``figurative`` have a floor, a lesson and
-a ceiling, and the number that matters on them is the **gain**: an indirect request is a
-convention, and a convention that could be read before it was demonstrated was not learned here,
-it was shipped. Every item is minted, so a lesson and an exam cannot share a word.
+*Eight are taught.* ``acts``, ``transfer``, ``repair``, ``figurative``, ``attachment``,
+``reference``, ``contradiction`` and ``memory`` have a floor, a lesson and a ceiling, and the
+number that matters on them is the **gain**: a convention that could be read before it was
+demonstrated was not learned here, it was shipped. Every item is minted, so a lesson and an exam
+cannot share a word.
 
-*Five are floors.* ``reference``, ``contradiction``, ``memory``, ``minds`` and ``register`` are
-mechanisms rather than conventions — there is nothing to demonstrate, and they read their ceiling
-cold and are printed with ``already`` beside them exactly as :class:`~nyxara.njp.school.Arithmetic`
-is. What they are worth is what that is worth: an organ that quietly stops working shows up here on
-the first run rather than three versions later as an unexplained dip.
+**Four of those eight were floors when this syllabus was first written, and that was a report card
+telling the truth about the wrong thing.** ``contradiction``, ``memory``, ``reference`` and
+``attachment`` read 1.00 cold because the module held hand-written tables — which words license an
+update, which quantify over all times, which prepositions attach two ways, what each resolution cue
+is worth. Those are not closed-class tables like the pronouns: they are semantic claims about
+particular words in one language, and a module that ships them has not learned anything, it has
+been told. With the tables gone and the same facts induced from demonstrated verdicts, the four
+have floors again and the gain is the measurement.
+
+*Two are floors.* ``minds`` and ``register`` are mechanisms rather than conventions — there is
+nothing to demonstrate, and they read their ceiling cold and are printed with ``already`` beside
+them exactly as :class:`~nyxara.njp.school.Arithmetic` is. What they are worth is what that is
+worth: an organ that quietly stops working shows up here on the first run rather than three
+versions later as an unexplained dip.
 
 *Two are controls on the other nine.* ``tongue`` asks whether a convention taught in one language
 leaks into another — and the answer this school reports is **no**, because an indirect request
@@ -42,14 +52,14 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from nyxara.njp.discourse import REGISTERS, Communicator
+from nyxara.njp.discourse import REGISTERS, Communicator, Referent, attachment
 from nyxara.njp.school import ExamConditions, Mint, Score, Subject, Taught, Transcript
 from nyxara.njp.semantics import compile_meaning
 
 __all__ = [
     "DiscourseSubject", "Acts", "Transfer", "Repair", "ReferenceSubject", "Contradiction",
-    "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Tongue", "Wiring",
-    "DiscourseSchool", "SUBJECTS", "main",
+    "LongMemory", "OtherMinds", "RegisterSubject", "FigurativeSubject", "Attachment",
+    "Tongue", "Wiring", "DiscourseSchool", "SUBJECTS", "main",
 ]
 
 
@@ -86,6 +96,20 @@ class DiscourseSubject(Subject):
         except Exception:  # noqa: BLE001
             pass
         return spoken
+
+    @staticmethod
+    def private(brain: Any) -> Communicator:
+        """A student this syllabus has not taught yet.
+
+        For the one subject that needs it. ``memory`` and ``contradiction`` are two questions
+        about the same organ, so whichever sits second inherits the other's lesson and reports a
+        floor of 1.00 — the ``transfer`` / ``acts`` contamination again, and it is not worth
+        having twice. Giving ``memory`` its own communicator makes both floors honest; it costs
+        the shared-student property, which that subject does not need because what it examines is
+        a conversation from end to end.
+        """
+        _ = brain
+        return Communicator()
 
     @staticmethod
     def fresh(brain: Any) -> Communicator:
@@ -368,11 +392,45 @@ class ReferenceSubject(DiscourseSubject):
 
     id = "reference"
     title = "what 'he' names, or that nothing says"
-    teaches = "resolution on structure, and abstention where structure runs out"
-    items = 12
+    teaches = "the cue weights, fitted from resolutions rather than tuned by hand"
+    items = 15
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        """Demonstrated resolutions, with recency held constant so a cue has to do the work.
+
+        **Both kinds of case are in here.** On discourses that all resolve, a setting that never
+        abstains fits perfectly and nothing rules it out; one discourse that settles on nothing
+        rules the whole family out. The ambiguous cases are half the lesson for exactly the reason
+        they are half the exam.
+        """
+        voice = self.voice(brain)
+        cases = []
+        for _ in range(3):                       # one candidate: resolves whatever the weights
+            one = mint.word()
+            cases.append(([Referent(one, 1, "subject")], "he", "subject", "", one))
+        for _ in range(3):                       # two, tied on recency: nothing may settle it
+            first, second = mint.word(), mint.word()
+            cases.append(([Referent(first, 1, "subject"), Referent(second, 1, "object")],
+                          "he", "subject", "", ""))
+        for _ in range(3):                       # two, tied on recency, one of them the topic
+            first, second = mint.word(), mint.word()
+            cases.append(([Referent(first, 1, "subject", False, 2),
+                           Referent(second, 1, "object")], "he", "subject", "", first))
+        fitted = voice.fit_reference(cases)
+        return Taught(len(cases), f"cues {fitted['cues']}, margin {fitted['margin']} "
+                                  f"({fitted['fitted']:.2f} of the demonstrations)")
 
     def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
         score, misses = Score(), []
+        for _ in range(3):                       # the topic, against a rival tied on recency
+            first, second = mint.word(), mint.word()
+            voice = self.fresh(brain)
+            voice.hear(f"{first} met {second}.")
+            voice.reference.referents[0].mentions = 2
+            got = voice.hear("He was tired.").resolutions
+            name = got[0].referent if got else ""
+            self.mark(score, misses, got=name, want=first,
+                      item=f"{first} (topic) vs {second} / He was tired.")
         for _ in range(3):                       # a lone candidate
             one = mint.word()
             voice = self.fresh(brain)
@@ -418,8 +476,43 @@ class Contradiction(DiscourseSubject):
 
     id = "contradiction"
     title = "a denial is not a change of mind"
-    teaches = "contradiction, update, corroboration and novelty kept apart"
+    teaches = "the words that license an update and the words that refuse one, induced"
     items = 12
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        """Demonstrated verdicts, and the variation is the mechanism.
+
+        Every pair varies its preposition and its content, because the marker is induced as *what
+        differs between the two sentences* and anything that differs by accident has to be
+        contested away. Three ``updates`` pairs whose prepositions all went ``in`` → ``on`` would
+        teach that ``on`` licenses a change.
+        """
+        voice = self.voice(brain)
+        shown = 0
+        for here, there in (("in", "on"), ("on", "under"), ("under", "beside")):
+            what = mint.word()
+            voice.show_change(f"The {what} is {here} the {mint.word()}.",
+                              f"The {what} is now {there} the {mint.word()}.", "updates")
+            shown += 1
+        for _ in range(3):
+            who, where = mint.word(), mint.word()
+            voice.show_change(f"{who} never visited {where}.",
+                              f"When {who} visited {where} last year {who} was tired.",
+                              "contradicts")
+            shown += 1
+        # Negative evidence, and it is not optional: without a contradiction that carries no
+        # universal, whatever happens to differ in the pairs above is credited with being one.
+        for here, there in (("in", "on"), ("beside", "under")):
+            what = mint.word()
+            voice.show_change(f"The {what} is {here} the {mint.word()}.",
+                              f"The {what} is {there} the {mint.word()}.", "contradicts")
+            shown += 1
+        for _ in range(2):
+            said = f"{mint.word()} owns the {mint.word()}."
+            voice.show_change(said, said, "corroborates")
+            shown += 1
+        kept = voice.markers.stats()["kept"]
+        return Taught(shown, f"induced {kept or 'nothing'} from demonstrated verdicts")
 
     def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
         score, misses = Score(), []
@@ -468,11 +561,29 @@ class LongMemory(DiscourseSubject):
     teaches = "belief tracked across a conversation rather than retrieved from its first mention"
     items = 8
 
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        """The same demonstrations :class:`Contradiction` gives, to a student it has not taught.
+
+        Its own lesson rather than the previous subject's: a syllabus where one subject silently
+        inherits another's teaching cannot report a floor for the second, which is the defect
+        ``transfer`` had against ``acts`` and it is not worth having twice. See
+        :meth:`DiscourseSubject.private` for what that costs.
+        """
+        return Contradiction().teach(_Student(self.student), mint, coder=coder)
+
+    @property
+    def student(self) -> Communicator:
+        found = getattr(self, "_voice", None)
+        if found is None:
+            found = Communicator()
+            self._voice = found              # noqa: attribute defined outside __init__
+        return found
+
     def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
         score, misses = Score(), []
         for _ in range(4):
             what, first, second = mint.word(), mint.word(), mint.word()
-            voice = self.fresh(brain)
+            voice = self.fresh(_Student(self.student))
             voice.hear(f"The {what} is in the {first}.")
             voice.hear(f"The {mint.word()} {mint.word()} the {mint.word()}.")
             voice.hear(f"The {what} is now on the {second}.")
@@ -480,7 +591,7 @@ class LongMemory(DiscourseSubject):
                       item=f"{what}: {first} → now {second}", silence=None)
         for _ in range(4):
             what, first, second = mint.word(), mint.word(), mint.word()
-            voice = self.fresh(brain)
+            voice = self.fresh(_Student(self.student))
             voice.hear(f"The {what} is in the {first}.")
             voice.hear(f"The {what} is now on the {second}.")
             voice.hear(f"The {what} is in the {first}.")
@@ -563,6 +674,49 @@ class RegisterSubject(DiscourseSubject):
             widths = [spread[a].words for a in REGISTERS]
             self.mark(score, misses, got=widths == sorted(widths), want=True,
                       item=f"{item} — {widths}")
+        return score, misses
+
+
+class Attachment(DiscourseSubject):
+    """*"I saw the man with the telescope."* — and which prepositions do that is not shipped.
+
+    A preposition attaches two ways when the language has been demonstrated using it both ways.
+    That is :class:`Acts`' contest mechanism a third time: a shape two lessons disagree about is
+    not one this package reads confidently, and here the disagreement **is** the finding.
+
+    Half the paper is the control, and it is the half that matters. A preposition demonstrated one
+    way only must **not** be flagged, or every trailing phrase becomes a question and abstention
+    turns into a tic.
+    """
+
+    id = "attachment"
+    title = "two readings, and neither chosen"
+    teaches = "which prepositions attach two ways, discovered from demonstrations that disagree"
+    items = 8
+
+    def teach(self, brain: Any, mint: Mint, *, coder: Any = None) -> Taught:
+        voice = self.voice(brain)
+        for _ in range(2):
+            voice.show_attachment(f"I {mint.word()} the {mint.word()} with the {mint.word()}.",
+                                  "event")
+            voice.show_attachment(f"I {mint.word()} the {mint.word()} with the {mint.word()}.",
+                                  "object")
+        for _ in range(3):
+            voice.show_attachment(f"I {mint.word()} the {mint.word()} to the {mint.word()}.",
+                                  "event")
+        return Taught(7, f"ambiguous: {sorted(voice.attach.ambiguous) or 'none yet'}")
+
+    def exam(self, brain: Any, mint: Mint, *, coder: Any = None) -> Tuple[Score, List[str]]:
+        voice = self.voice(brain)
+        score, misses = Score(), []
+        for _ in range(4):
+            item = f"I {mint.word()} the {mint.word()} with the {mint.word()}."
+            got = attachment(item, learner=voice.attach)
+            self.mark(score, misses, got=got.ambiguous, want=True, item=item)
+        for _ in range(4):
+            item = f"I {mint.word()} the {mint.word()} to the {mint.word()}."
+            got = attachment(item, learner=voice.attach)
+            self.mark(score, misses, got=got.ambiguous, want=False, item=item)
         return score, misses
 
 
@@ -670,10 +824,18 @@ class Wiring(DiscourseSubject):
 #: The syllabus, in the order it is sat. Conventions first, because the mechanisms behind them do
 #: not depend on having been taught anything and the conventions do.
 SUBJECTS: Tuple[Any, ...] = (
-    Acts, Transfer, Repair, FigurativeSubject,
+    Acts, Transfer, Repair, FigurativeSubject, Attachment,
     ReferenceSubject, Contradiction, LongMemory, OtherMinds, RegisterSubject,
     Tongue, Wiring,
 )
+
+
+class _Student:
+    """A brain-shaped holder for one communicator, so a subject can examine a private student
+    through the same :meth:`DiscourseSubject.voice` path every other subject uses."""
+
+    def __init__(self, voice: Communicator) -> None:
+        self.discourse = voice
 
 
 class DiscourseSchool:

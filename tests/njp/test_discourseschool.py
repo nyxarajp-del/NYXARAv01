@@ -22,9 +22,9 @@ import pytest
 
 from nyxara.njp.brain import NJPBrain
 from nyxara.njp.discourse import Communicator
-from nyxara.njp.discourseschool import (SUBJECTS, Acts, DiscourseSchool, DiscourseSubject,
-                                        LongMemory, ReferenceSubject, Tongue, Transfer,
-                                        Wiring, _plural)
+from nyxara.njp.discourseschool import (SUBJECTS, Acts, Attachment, Contradiction,
+                                        DiscourseSchool, DiscourseSubject, LongMemory,
+                                        ReferenceSubject, Tongue, Transfer, Wiring, _plural)
 from nyxara.njp.school import ExamConditions, Mint
 
 SEED = 26
@@ -46,18 +46,23 @@ def test_every_subject_is_mastered_and_the_taught_ones_moved(taught):
 
 
 def test_the_taught_subjects_have_a_real_floor(taught):
-    """A convention that could be read before it was demonstrated was shipped, not learned."""
+    """A convention that could be read before it was demonstrated was shipped, not learned.
+
+    Four of these eight were floors of 1.00 when this syllabus was first written, and that was the
+    module holding hand-written tables rather than her knowing anything. They are here now.
+    """
     _brain, transcript = taught
     floors = {r.subject: r.pre.accuracy for r in transcript.results}
-    for subject in ("acts", "transfer", "repair", "figurative", "tongue"):
+    for subject in ("acts", "transfer", "repair", "figurative", "attachment",
+                    "reference", "contradiction", "memory", "tongue"):
         assert floors[subject] < 0.9, f"{subject} floor {floors[subject]}"
 
 
 def test_the_floor_subjects_teach_nothing_and_say_so(taught):
+    """Two of them, now. `minds` and `register` are mechanisms; `wiring` measures reachability."""
     _brain, transcript = taught
     for result in transcript.results:
-        if result.subject in ("reference", "contradiction", "memory", "minds", "register",
-                              "wiring"):
+        if result.subject in ("minds", "register", "wiring"):
             assert result.taught == 0
             assert "floor" in result.note or "measures" in result.teaches
 
@@ -119,20 +124,50 @@ def test_a_minted_plural_is_one_a_shape_rule_can_see():
 
 
 def test_the_long_memory_subject_scores_silence_as_right_where_nothing_holds():
-    """Half its items are contested pairs, where returning either claim is a coin flip."""
-    score, misses = LongMemory().exam(_Holder(Communicator()), Mint(random.Random(12)))
+    """Half its items are contested pairs, where returning either claim is a coin flip.
+
+    And it needs its lesson first: without the induced markers nothing has shown her that a
+    speaker can signal a change, so the reversion is more information rather than a conflict.
+    """
+    subject, brain = LongMemory(), _Holder(Communicator())
+    assert subject.exam(brain, Mint(random.Random(12)))[0].accuracy < 1.0
+    subject.teach(brain, Mint(random.Random(120)))
+    score, misses = subject.exam(brain, Mint(random.Random(12)))
     assert score.accuracy == 1.0, misses
 
 
 def test_reference_is_examined_on_both_resolution_and_refusal():
-    score, misses = ReferenceSubject().exam(_Holder(Communicator()), Mint(random.Random(13)))
+    subject, brain = ReferenceSubject(), _Holder(Communicator())
+    assert subject.exam(brain, Mint(random.Random(13)))[0].accuracy < 1.0
+    subject.teach(brain, Mint(random.Random(130)))
+    score, misses = subject.exam(brain, Mint(random.Random(13)))
     assert score.accuracy == 1.0, misses
 
 
-def test_the_syllabus_is_eleven_subjects_with_unique_ids():
+def test_the_markers_are_induced_by_the_contradiction_lesson():
+    """`now` and `never` are in no table any more; six demonstrated verdicts put them there."""
+    voice = Communicator()
+    brain = _Holder(voice)
+    assert voice.markers.kept == {}
+    Contradiction().teach(brain, Mint(random.Random(14)))
+    assert voice.markers.kept["now"].role == "licence"
+    assert voice.markers.kept["never"].role == "universal"
+    # The prepositions are varied across the demonstrations precisely so they cannot survive.
+    assert set(voice.markers.kept) == {"now", "never"}
+
+
+def test_the_attachment_lesson_finds_one_preposition_and_not_the_other():
+    voice = Communicator()
+    brain = _Holder(voice)
+    assert voice.attach.ambiguous == set()
+    Attachment().teach(brain, Mint(random.Random(15)))
+    assert voice.attach.ambiguous == {"with"}
+
+
+def test_the_syllabus_is_twelve_subjects_with_unique_ids():
     made = [factory() for factory in SUBJECTS]
-    assert len(made) == 11
-    assert len({subject.id for subject in made}) == 11
+    assert len(made) == 12
+    assert len({subject.id for subject in made}) == 12
     assert all(isinstance(subject, DiscourseSubject) for subject in made)
 
 
