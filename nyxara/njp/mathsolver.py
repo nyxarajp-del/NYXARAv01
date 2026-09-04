@@ -399,6 +399,64 @@ class Problem:
         return " ; ".join(c.text() for c in self.constraints)
 
 
+#: engine → the topic vocabulary :class:`nyxara.njp.mathematics.Mathematician` already uses.
+#:
+#: This map exists because the two solvers returned **different shapes** from one public method.
+#: :meth:`~nyxara.njp.brain.NJPBrain.do_maths` asks this module first and ``mathematics`` second,
+#: its docstring promises a solution "carrying the topic", and this class had no such field — so
+#: which attributes a caller got depended on which solver happened to answer. That is a broken
+#: contract rather than a missing feature, and it was caught by a test asserting the topic of a
+#: quadratic.
+#:
+#: An engine is a *reader* — ``read_equation``, ``primes``, ``shoelace`` — and a topic is what the
+#: question was about. Naming the second in terms of the first is a translation and is written out
+#: rather than guessed, because an engine this map does not know reports ``""`` and an empty topic
+#: is honest where a wrong one is not.
+ENGINE_TOPIC: Dict[str, str] = {
+    # The twenty-two engines, which name a *method*.
+    "read_equation": "algebra", "roots": "algebra", "zeros": "algebra",
+    "diophantine": "algebra", "value": "algebra",
+    "primes": "number", "divisor_count": "number", "divisor_sum": "number",
+    "modpow": "number", "crt": "number", "same_remainder": "number",
+    "choose": "probability", "permute": "probability", "arrangements": "probability",
+    "geometric": "sequence", "harmonic": "sequence", "sum_range": "sequence",
+    "count_range": "sequence", "count_kind": "sequence",
+    "shoelace": "geometry", "diagonals": "geometry", "pi": "geometry",
+    "ratio": "ratio", "pick": "",
+    # And the sixty readers, whose ``__name__`` reaches `engine` when a reading settles the
+    # problem itself. Both kinds land in the same field, which is why both are here — a map
+    # covering only the engines reported an empty topic for most of what this module solves.
+    "read_prime_count": "number", "read_divisor_question": "number", "read_modular": "number",
+    "read_mixed_remainders": "number", "read_same_remainder": "number",
+    "read_remainder_search": "number", "read_digits": "number", "read_digit_operation": "number",
+    "read_consecutive": "number", "read_factorial_zeros": "number",
+    "read_general_gcd": "number", "read_factorised_gcd": "number", "read_lcm_hcf_pair": "number",
+    "read_number_relations": "number", "read_predicate_search": "number",
+    "read_diophantine": "algebra", "read_equation_system": "algebra",
+    "read_exponential_equation": "algebra", "read_symmetric_roots": "algebra",
+    "read_function_value": "algebra", "read_inverse_closed_form": "algebra",
+    "read_bracket_product": "algebra", "read_reciprocal_identity": "algebra",
+    "read_arrangements": "probability", "read_cards": "probability", "read_dice_sum": "probability",
+    "read_draws": "probability", "read_at_least_one": "probability",
+    "read_stars_and_bars": "probability", "read_chessboard": "probability",
+    "read_progression": "sequence", "read_geometric_progression": "sequence",
+    "read_infinite_series": "sequence", "read_series_difference": "sequence",
+    "read_sum_over_range": "sequence", "read_count_over_range": "sequence",
+    "read_sum_of_powers": "sequence",
+    "read_coordinate_area": "geometry", "read_inscribed": "geometry",
+    "read_rectangle_from_two": "geometry", "read_rectangle_relation": "geometry",
+    "read_square_from_measure": "geometry", "read_angle_ratio": "geometry",
+    "read_ratio_chain": "ratio", "read_inverse_proportion": "ratio",
+    "read_age_ratio": "ratio", "read_age_multiple": "ratio",
+    "read_interest_back": "commerce", "read_interest_multiple": "commerce",
+    "read_si_ci_difference": "commerce", "read_markup_discount": "commerce",
+    "read_two_selling_prices": "commerce", "read_percentage_transfer": "percent",
+    "read_average_speed": "word", "read_train": "word", "read_boat": "word",
+    "read_pipes": "word", "read_work_chain": "word", "read_average_change": "statistics",
+    "read_mean_shift": "statistics",
+}
+
+
 @dataclass
 class Solution:
     """A solved problem, with the assignment, the working, and how it was reached."""
@@ -427,6 +485,16 @@ class Solution:
     #: into silence. This one only ever protects the store — a problem she cannot solve is still
     #: not a fact about the world — and never decides who gets to answer.
     task: bool = False
+
+    @property
+    def topic(self) -> str:
+        """What the question was **about**, in the vocabulary ``mathematics`` already uses.
+
+        A property rather than a field so every construction site in this module gets it without
+        one of them being forgotten — which is exactly how the two shapes drifted apart in the
+        first place.
+        """
+        return ENGINE_TOPIC.get(self.engine, "")
 
     @property
     def ok(self) -> bool:

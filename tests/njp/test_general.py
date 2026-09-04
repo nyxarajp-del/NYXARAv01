@@ -439,12 +439,37 @@ def test_a_list_item_containing_and_is_not_split_in_half():
 
 
 def test_a_qualifier_cannot_be_swallowed_by_a_substring():
-    """"the largest ocean" is not inside "the second largest ocean" as whole words."""
+    """"the largest ocean" is not inside "the second largest ocean" as whole words.
+
+    Called as the bound classmethod, not unwrapped. The test above it uses
+    ``__dict__[...].__func__`` because ``_items`` is a **staticmethod**, and this one was written
+    the same way — but ``_contains`` is a **classmethod** and genuinely uses ``cls._stem`` to
+    compare stems, so unwrapping handed back a function still wanting ``cls`` and every call
+    failed with a missing argument. The code was right and the test had drifted behind it.
+    """
     from nyxara.njp.puzzle import PuzzleSolver
 
-    contains = PuzzleSolver.__dict__["_contains"].__func__
-    assert contains("the second largest ocean", "largest ocean")
-    assert not contains("the second largest ocean", "the largest ocean")
+    assert PuzzleSolver._contains("the second largest ocean", "largest ocean")
+    assert not PuzzleSolver._contains("the second largest ocean", "the largest ocean")
+    # And the stem comparison it is a classmethod *for*: plural against singular.
+    assert PuzzleSolver._contains("the largest oceans", "largest ocean")
+
+
+def test_every_solver_helper_is_reachable_the_way_the_tests_call_it():
+    """The drift this file has now been bitten by once: a helper changing binding silently.
+
+    A ``staticmethod`` unwrapped with ``__func__`` and a ``classmethod`` unwrapped the same way
+    look identical at the call site and differ by one argument at run time. This asserts which is
+    which, so the next change to either is a failure here rather than fifteen lines away.
+    """
+    import inspect
+
+    from nyxara.njp.puzzle import PuzzleSolver
+
+    assert isinstance(PuzzleSolver.__dict__["_items"], staticmethod)
+    assert isinstance(PuzzleSolver.__dict__["_contains"], classmethod)
+    assert "cls" in inspect.signature(
+        PuzzleSolver.__dict__["_contains"].__func__).parameters
 
 
 def test_the_second_tier_of_hard_forms(brain):
