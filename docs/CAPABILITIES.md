@@ -60,6 +60,8 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39m | Concept genome (a concept as eight named slots — roles, relations, constraints, causal, temporal, transformations, exceptions, invariants — so a comparison says **where** two concepts differ rather than only how much. The fingerprint holds no vocabulary at all, so kinship is found across vocabularies that share nothing; an unclassified relation is dropped rather than absorbed; and the common structure is never given a name) | `nyxara.njp.genome` | NEW |
+| 39l | Impossibility and boundary (what *cannot* work under a set of constraints, with the **unsatisfiable core** — the smallest responsible subset, found by removal — and the derivation that reached it; plus a pruning funnel that names which constraint eliminated what and which never bound. Nothing is concluded from an absence: unstated is unknown, not false) | `nyxara.njp.boundary` | NEW |
 | 39k | Invariant → law → executable theory (what survives across situations whose **vocabularies share nothing** — found by structural alignment, not by recurring names — refused when one situation, when it could not have failed, or when an exception would have to be hidden. Then compiled: `Theory.predict` takes a situation never seen, aligns it, and says what the law requires to be there, which is a falsifiable claim produced by a rule nobody wrote) | `nyxara.njp.theory` | NEW |
 | 39j | Cognitive immune system (a new claim that would make an existing question unanswerable is **quarantined** — kept, retrievable, out of the store — while everything that merely adds is admitted, and standing is *earned* by having quarantined claims confirmed rather than declared. Built against a measured regression and it repairs it: the broad corpus's 130,274 subjects kept in full, `recall` back to the curated level, 8.8% of claims isolated. The response runs both ways: a challenger that outranks the incumbent displaces it) | `nyxara.njp.immune` + `nyxara.njp.general` | NEW |
 | 39i | Auditable conclusions (every claim carries the path that produced it — facts, edges, inferences, assumptions — and a claim with no path is `UNKNOWN` rather than weak. Blame ranks by exclusivity rather than frequency, so the lone assumption is named and not the fact four other standing claims also rest on; and a failure is stored with its culprit, so a *completely differently worded* problem reasoned through the same assumption raises a warning) | `nyxara.njp.provenance` + `nyxara.njp.loop` | NEW |
@@ -4293,6 +4295,89 @@ scope**: induced from three-variable situations, it declines a five-variable one
 guessing.
 
 Run it: `Hunter().hunt(situations)`, `law.compile().predict(unseen)`, `Theory.check`.
+
+
+#### NJP V.46 — what cannot work, and exactly why
+
+Every reasoning organ here answers *what is the case* or *what would follow*. None answered the
+other half:
+
+> Intelligence is not only "what solution works?" It is also "what solutions cannot possibly work?"
+
+Those are not one question from opposite ends. A search for what works explores; a search for what
+cannot **eliminates**, and eliminating is what makes a large space tractable.
+
+`njp/boundary.py` does three things. **Closure** derives what must also hold, and each `Necessary`
+carries the chain that produced it — with `derived` False for anything merely asserted, because a
+closure that proudly returns its own inputs looks like it did work and did none.
+
+**Contradiction with a core.** The answer to an unsatisfiable set is not `False`; it is the
+**smallest set of constraints that still conflicts**, found by removing them one at a time and
+seeing whether the conflict survives:
+
+```
+NO SOLUTION: D and C cannot both hold
+  because of 4 constraint(s):
+    [A] A          [A→D] A → D          [C] C          [D⊗C] D ⊗ C
+  reached by:
+    D  (derived: [A] A ; [A→D] A → D)
+```
+
+Eight constraints in, four responsible out. `B→E`, `E→F` and an unused rule are correctly dropped.
+A core of four out of eight is a fixable problem; *"unsatisfiable"* is not.
+
+**Pruning with a funnel**, and the funnel *is* the product:
+
+```
+1000 candidates
+  ↓ even  (−500)      500
+  ↓ div by 5  (−400)  100
+  ↓ > 900  (−91)        9
+never binding: always true
+```
+
+It names the constraint doing the work — and names the ones that never bind at all, which a bare
+survivor count cannot.
+
+One refusal matters most: **nothing is concluded from an absence.** An unstated literal is
+*unknown*, not false. This is a monotone closure, not a database, and treating the first as the
+second is how a planner starts proving things impossible because nobody mentioned them.
+
+#### NJP V.47 — what a concept is made of, before it is called anything
+
+`fusion` matches on **edges**, which is enough to find a resemblance and not enough to say what two
+things *are*. A set of edges cannot distinguish *"has a part that does X"* from *"turns into
+something that does X"* — different concepts, same edge count.
+
+`njp/genome.py` gives a concept the Master's eight slots — roles, relations, constraints, causal,
+temporal, transformations, exceptions, invariants — so a fingerprint can say **where** two concepts
+differ rather than only how much:
+
+```
+CONCEPT pump
+  roles            has_part=impeller
+  constraints      requires=energy
+  causal           causes=flow
+  temporal         occurs_when=the motor turns
+  invariants       has_property=conserves mass
+
+pump ~ heart   aligned  (1.00)
+  roles     impeller ↔ ventricle       constraints  energy ↔ oxygen
+  causal    flow ↔ circulation         temporal     the motor turns ↔ the muscle contracts
+```
+
+**The fingerprint contains no vocabulary** — only shapes — and a test asserts no name appears in
+it. Two genomes with the same fingerprint are *candidates*; kinship is then established by a
+bijection, because a fingerprint match is a filter and never a finding.
+
+Three refusals. An unclassified relation is **dropped, not swept into `relations`** — that slot
+would absorb everything and the fingerprint would stop discriminating, which is the failure
+`related_to` has in ConceptNet. A partial match is **not** a match. And **the common structure is
+never named**: calling it *"feedback regulation"* would be the module supplying the insight it
+claims to have found. Structure first, label second — a test checks the gloss for invented words.
+
+Run it: `Boundary(constraints).render()`, `Boundary().prune(candidates, tests)`,
+`read_genome(explainer, "pump").compare(read_genome(explainer, "heart"))`.
 
 
 ### Reachable over the wire

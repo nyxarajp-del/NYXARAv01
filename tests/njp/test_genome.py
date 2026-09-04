@@ -1,149 +1,117 @@
-"""The Reasoning Genome: does she notice that she keeps re-deriving the same thing?
-
-What matters here is not that traces are stored — it is that the tallies cannot be won cheaply.
-A shape that is frequent and wrong must not be promoted, a shape that is short must not look like
-a saving, and a shape learned from her own imagination must never become a primitive she then
-applies to real questions.
-"""
-
+"""What a concept is made of, before it is called anything (NJP V.47)."""
 from __future__ import annotations
 
 import pytest
 
-from nyxara.njp.brain import NJPBrain
-from nyxara.njp.core import Derivation
-from nyxara.njp.genome import ReasoningGenome, Shape, shape_of
-
-CHAINS = [("aag", "garmi", "pasina"), ("baadal", "baarish", "keechad"),
-          ("dhuan", "khansi", "dard"), ("thand", "kapkapi", "bukhar")]
+from nyxara.njp.explain import Explainer
+from nyxara.njp.genome import SLOT_RELATIONS, SLOTS, Genome, read_genome
 
 
-def _chain(hops: int = 2, predicate: str = "causes") -> Derivation:
-    support = [(f"s{i}", predicate, f"s{i + 1}") for i in range(hops)]
-    return Derivation(answer="x", kind="composed", confidence=0.44, support=support)
+class T:
+    __slots__ = ("object", "confidence", "superseded")
+
+    def __init__(self, obj):
+        self.object, self.confidence, self.superseded = obj, 1.0, False
 
 
-# --------------------------------------------------------------------------- #
-# The shape is the reusable part
-# --------------------------------------------------------------------------- #
-def test_the_same_reasoning_through_different_subjects_is_one_shape():
-    """Strip the entities and what is left is the form — the thing worth naming once."""
-    a = Derivation(kind="composed", support=[("aag", "causes", "garmi"),
-                                             ("garmi", "causes", "pasina")])
-    b = Derivation(kind="composed", support=[("garmi", "causes", "pasina"),
-                                             ("pasina", "causes", "pyaas")])
-    assert shape_of(a) == shape_of(b) == ("causes", "causes")
+class Store:
+    def __init__(self, rows):
+        self.facts = {}
+        for a, r, b in rows:
+            self.facts.setdefault((a.lower(), r), []).append(T(b))
+
+    def _key(self, text):
+        return " ".join(str(text or "").split()).lower()
 
 
-def test_a_one_hop_lookup_is_not_a_shape():
-    """A direct answer's "chain" is one edge; counting it would swamp every tally."""
-    genome = ReasoningGenome()
-    assert genome.record(Derivation(kind="direct", support=[("a", "causes", "b")])) is None
-    assert genome.stats()["shapes"] == 0
+PUMP = [("pump", "has_part", "impeller"), ("pump", "requires", "energy"),
+        ("pump", "causes", "flow"), ("pump", "occurs_when", "the motor turns"),
+        ("pump", "has_property", "conserves mass")]
+HEART = [("heart", "has_part", "ventricle"), ("heart", "requires", "oxygen"),
+         ("heart", "causes", "circulation"), ("heart", "occurs_when", "the muscle contracts"),
+         ("heart", "has_property", "conserves mass")]
 
 
-# --------------------------------------------------------------------------- #
-# What "worth compressing" costs
-# --------------------------------------------------------------------------- #
-def test_a_shape_must_recur_before_it_is_a_pattern():
-    genome = ReasoningGenome(min_seen=3)
-    for _ in range(2):
-        genome.record(_chain())
-    assert not genome.candidates()
-    genome.record(_chain())
-    assert [s.shape for s in genome.candidates()] == [("causes", "causes")]
-
-
-def test_the_saving_is_arithmetic_rather_than_a_threshold_someone_liked():
-    """``n·k − (k + n)``: re-deriving n times at k steps, versus naming once and applying n times."""
-    shape = Shape(shape=("causes", "causes"), seen=5, total_depth=10)
-    assert shape.depth == pytest.approx(2.0)
-    assert shape.saving == pytest.approx(5 * 2 - (2 + 5))
-
-    # Twice at two steps saves nothing, and says so rather than being quietly promoted.
-    assert Shape(shape=("causes", "causes"), seen=2, total_depth=4).saving == pytest.approx(0.0)
-
-
-def test_a_frequent_shape_that_keeps_being_wrong_is_never_promoted():
-    """Naming it would only teach her to make the same mistake faster."""
-    genome = ReasoningGenome(min_seen=3)
-    for _ in range(6):
-        trace = genome.record(_chain())
-        genome.grade(trace, correct=False)
-    assert not genome.candidates(), "a shape with a failing record became a candidate"
-    assert [s.shape for s in genome.liabilities()] == [("causes", "causes")]
-
-
-def test_a_liability_is_reported_rather_than_merely_excluded():
-    """That it is *frequent* is why it matters, not a reason to stay quiet about it."""
-    genome = ReasoningGenome(min_seen=3)
-    for _ in range(5):
-        genome.grade(genome.record(_chain()), correct=False)
-    assert genome.stats()["liabilities"] == 1
-    assert genome.stats()["worst"]
-
-
-def test_grading_is_recorded_once_and_only_once():
-    genome = ReasoningGenome()
-    trace = genome.record(_chain())
-    genome.grade(trace, correct=True)
-    genome.grade(trace, correct=False)
-    shape = genome.shapes[("causes", "causes")]
-    assert (shape.graded, shape.correct) == (1, 1)
-
-
-def test_an_ungraded_shape_is_not_treated_as_a_failure():
-    """None and 0.0 are different things, and averaging them lies."""
-    genome = ReasoningGenome(min_seen=2)
-    for _ in range(3):
-        genome.record(_chain())
-    assert genome.shapes[("causes", "causes")].success is None
-    assert genome.candidates(), "an ungraded shape was penalised as though it had failed"
+def genomes(rows):
+    ex = Explainer(Store(rows))
+    return ex
 
 
 # --------------------------------------------------------------------------- #
-# Simulation, one rung further up
+# The eight slots
 # --------------------------------------------------------------------------- #
-def test_a_shape_learned_only_from_simulation_is_never_promoted():
-    """A reasoning form learned from her own imagination, then applied to real questions, is the
-    same closed loop `truth.py` refuses one level down."""
-    genome = ReasoningGenome(min_seen=3)
-    for _ in range(6):
-        genome.grade(genome.record(_chain(), simulated=True), correct=True)
-    assert not genome.candidates()
-    # Recorded honestly, though: the uses happened.
-    assert genome.shapes[("causes", "causes")].seen == 6
-    assert genome.shapes[("causes", "causes")].real == 0
+def test_a_genome_has_exactly_the_eight_slots():
+    got = Genome(subject="x")
+    assert tuple(got.slots) == SLOTS and len(SLOTS) == 8
+
+
+def test_each_relation_lands_in_its_own_slot():
+    got = read_genome(genomes(PUMP), "pump")
+    assert got.slots["roles"] == (("has_part", "impeller"),)
+    assert got.slots["constraints"] == (("requires", "energy"),)
+    assert got.slots["causal"] == (("causes", "flow"),)
+    assert got.slots["temporal"] == (("occurs_when", "the motor turns"),)
+    assert got.slots["invariants"] == (("has_property", "conserves mass"),)
+
+
+def test_an_unclassified_relation_is_dropped_not_swept_into_relations():
+    """That slot would absorb everything and the fingerprint would stop discriminating."""
+    got = read_genome(genomes(PUMP + [("pump", "related_to", "anything")]), "pump")
+    assert all("anything" not in obj for slot in SLOTS for _r, obj in got.slots[slot])
+    assert "related_to" not in {r for row in SLOT_RELATIONS.values() for r in row}
+
+
+def test_an_empty_slot_is_empty():
+    got = read_genome(genomes(PUMP), "pump")
+    assert got.slots["transformations"] == () and got.slots["exceptions"] == ()
+    assert "transformations" not in got.filled
 
 
 # --------------------------------------------------------------------------- #
-# Wired, and durable
+# The fingerprint has no names in it
 # --------------------------------------------------------------------------- #
-def test_the_brain_records_the_shape_of_what_it_derives():
-    """The material existed on every derived answer and survived exactly one turn."""
-    brain = NJPBrain()
-    for head, mid, tail in CHAINS:
-        brain.think(f"{head} se {mid} hoti hai")
-        brain.think(f"{mid} se {tail} hoti hai")
-        brain.think(f"why {tail}")
-    stats = brain.stats()["genome"]
-    assert stats["recorded"] >= len(CHAINS)
-    assert stats["shapes"] == 1, "four different chains should share one reasoning form"
-    assert stats["candidates"] == 1
-    assert stats["total_saving"] > 0
+def test_the_fingerprint_contains_no_vocabulary():
+    got = read_genome(genomes(PUMP), "pump")
+    flat = str(got.fingerprint)
+    for word in ("pump", "impeller", "energy", "flow", "motor"):
+        assert word not in flat
 
 
-def test_the_genome_survives_a_restart():
-    """A record of how she reasons is worthless if it starts empty every morning."""
-    brain = NJPBrain()
-    for head, mid, tail in CHAINS:
-        brain.think(f"{head} se {mid} hoti hai")
-        brain.think(f"{mid} se {tail} hoti hai")
-        brain.think(f"why {tail}")
-    before = brain.stats()["genome"]
+def test_two_concepts_sharing_no_word_have_the_same_fingerprint():
+    ex = genomes(PUMP + HEART)
+    assert read_genome(ex, "pump").fingerprint == read_genome(ex, "heart").fingerprint
 
-    revived = NJPBrain()
-    revived.load_dict(brain.to_dict())
-    after = revived.stats()["genome"]
-    assert (after["shapes"], after["recorded"]) == (before["shapes"], before["recorded"])
-    assert after["candidates"] == before["candidates"]
+
+# --------------------------------------------------------------------------- #
+# Kinship, and where it differs
+# --------------------------------------------------------------------------- #
+def test_structural_kinship_is_found_across_vocabularies():
+    ex = genomes(PUMP + HEART)
+    got = read_genome(ex, "pump").compare(read_genome(ex, "heart"))
+    assert got.aligned and got.score == 1.0
+    assert got.mapping["impeller"] == "ventricle"
+    assert got.mapping["energy"] == "oxygen"
+
+
+def test_the_report_says_where_two_concepts_differ():
+    """A single similarity score is exactly the thing that hides this."""
+    ex = genomes(PUMP + [r for r in HEART if r[1] != "occurs_when"]
+                 + [("heart", "becomes", "a scar")])
+    got = read_genome(ex, "pump").compare(read_genome(ex, "heart"))
+    assert "temporal" in got.differs and "transformations" in got.differs
+    assert "roles" not in got.differs
+    assert got.per_slot["roles"] == 1.0 and got.per_slot["temporal"] == 0.0
+
+
+def test_a_partial_match_is_not_called_a_match():
+    ex = genomes(PUMP + [("heart", "has_part", "ventricle")])
+    got = read_genome(ex, "pump").compare(read_genome(ex, "heart"))
+    assert got.aligned is False
+
+
+def test_the_common_structure_is_never_named():
+    ex = genomes(PUMP + HEART)
+    text = read_genome(ex, "pump").compare(read_genome(ex, "heart")).gloss()
+    assert "pump" in text and "heart" in text
+    for invented in ("feedback", "regulation", "mechanism of"):
+        assert invented not in text.lower()

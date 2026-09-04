@@ -405,6 +405,15 @@ from nyxara.njp.theory import (
     Situation,
     Theory,
 )
+# V.46/V.47. `Constraint` is already `njp.puzzle`'s, so it is qualified; the rest are free.
+from nyxara.njp.boundary import (
+    Boundary,
+    Constraint as HardConstraint,
+    Funnel,
+    Impossible,
+    Necessary,
+)
+from nyxara.njp.genome import Genome, Kinship, read_genome
 from nyxara.njp.provenance import (
     Blame,
     Claim as ProvenanceClaim,
@@ -591,6 +600,9 @@ __all__ = [
     "Immune", "Antigen", "ImmuneVerdict", "SourceStanding",
     # NJP V.45 — what never changes, and running what survives
     "Hunter", "Situation", "Invariant", "Law", "Theory", "LawPrediction",
+    # NJP V.46/V.47 — what cannot work, and what a concept is made of
+    "Boundary", "HardConstraint", "Necessary", "Impossible", "Funnel",
+    "Genome", "Kinship", "read_genome",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

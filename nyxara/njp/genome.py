@@ -1,297 +1,256 @@
-"""NYXARA · njp/genome.py — the Reasoning Genome (🧬, NJP V.06).
+"""NYXARA · njp/genome.py — what a concept is made of, before it is called anything (🧬, NJP V.47).
 
-Every other organ in :mod:`nyxara.njp` compresses what she knows about the *world*.
-:mod:`nyxara.njp.concepts` finds the kind behind a set of instances and pays for itself in a
-description-length ratio; :mod:`nyxara.njp.core` finds the schema behind a set of relations. This
-one compresses what she knows about her own **reasoning**.
+:mod:`nyxara.njp.fusion` matches subgraphs across domains and finds that a control system and a
+body's temperature regulation are the same shape. It matches on *edges*, which is enough to find
+the resemblance and not enough to say what the two things **are**. The Master's next form of it:
 
-**The material was already there and was being thrown away.** Every answer the Core derives comes
-back as a :class:`~nyxara.njp.core.Derivation` carrying ``kind``, the chain in ``support``, the
-readable ``steps`` and a ``confidence``. :class:`~nyxara.njp.brain.NJPBrain` attaches it to the
-thought — and nothing anywhere stored it, mined it, or looked at two of them together. A trace is
-the record of *how* an answer was reached, and until now that record survived exactly one turn.
+    Concept
+    ├── roles                 what fills the positions
+    ├── relations             what connects them
+    ├── constraints           what must hold
+    ├── causal behavior       what it does
+    ├── temporal behavior     when it does it
+    ├── transformations       what it turns into
+    ├── exceptions            where it does not hold
+    └── invariants            what never changes
 
-**What a shape is.** Strip the entities out of a chain and what remains is its form::
+    Then compare concepts by **structural fingerprint**, not by words.
+    Structure first. Label second.
 
-    aag   —causes→ garmi , garmi —causes→ pasina   ⇒  ('causes', 'causes')
-    garmi —causes→ pasina, pasina —causes→ pyaas   ⇒  ('causes', 'causes')
+That last line is the whole design and it is the opposite of how a fact store usually works. A
+store keyed on spelling compares *heart* to *heart*; a genome compares what a heart **is made of**
+to what a pump is made of, and finds them nearly the same object with one slot different.
 
-Three different questions, three different subjects, one shape. That is the object worth counting:
-a shape that keeps recurring is a piece of reasoning she keeps re-deriving from scratch, and it is
-the unit :mod:`nyxara.growth.noesis` can turn into a named primitive.
+Eight slots, and why they are not one bag of edges
+---------------------------------------------------
 
-**What "worth compressing" means here, in numbers.** Not an opinion, and not a threshold anyone
-liked the look of. A shape seen ``n`` times, each derivation costing ``k`` steps, costs ``n·k``
-steps to keep re-deriving. Named once and applied ``n`` times it costs ``k + n``. So the saving is
-``n·k − (k + n)``, positive exactly when a shape both recurs and is not trivially short, which is
-the same MDL argument :mod:`nyxara.njp.concepts` already makes about kinds. A shape that recurs
-twice and takes two steps saves nothing and is reported as saving nothing.
+Fusion's ``Pattern`` is a set of edges. That representation cannot distinguish *"this thing has a
+part that does X"* from *"this thing turns into something that does X"*, and those are different
+concepts with the same edge count. Splitting the record into named slots means the fingerprint can
+say **where** two concepts differ, which is what makes a near-match informative rather than a
+number.
 
-**Success is tracked separately from recurrence, and neither alone is enough.** A shape that
-recurs constantly and is usually *wrong* is a habit worth breaking, not a primitive worth naming,
-and promoting it would teach her to make the same mistake faster. :meth:`candidates` requires both,
-and :meth:`liabilities` reports the other case so it is visible rather than merely absent.
+So :meth:`Genome.compare` returns a :class:`Kinship` with a per-slot breakdown. Two concepts that
+agree on roles, relations and causal behaviour and differ only in ``temporal`` are related in a way
+worth knowing about; the single similarity score that would summarise them is exactly the thing
+that hides it.
 
-**Simulated derivations are recorded and never promoted**, for the reason
-:mod:`nyxara.njp.truth` gives at length: a reasoning shape learned from her own imagination, then
-applied to real questions, is the same closed loop one rung further up. They count toward
-``seen`` so the record is honest about what happened, and never toward ``candidates``.
+The fingerprint is vocabulary-free
+-----------------------------------
 
-Pure standard library. Every public entry point is fail-soft: on error it degrades to a null
-result rather than breaking a turn.
+:attr:`Genome.fingerprint` contains **no names** — only shapes: how many roles, which relation
+kinds and how many of each, the degree profile, the count of constraints and exceptions. Two
+genomes with the same fingerprint are *candidates*, and candidacy is cheap; kinship is then
+established by an alignment, exactly as :mod:`nyxara.njp.fusion` does, because a fingerprint match
+is a filter and never a finding.
+
+**A concept is not named here.** :meth:`Kinship.gloss` reports the shape and what fills each role
+on both sides and stops. Calling the common structure *"feedback regulation"* would be the module
+supplying the insight it claims to have found — the same refusal ``fusion.Abstraction`` makes, for
+the same reason.
+
+What it may not do
+------------------
+
+**It may not invent a slot.** Every entry comes from a stated relation; an empty slot is empty.
+
+**It may not compare on names.** :meth:`Genome.compare` never reads a node's spelling except to
+report which node filled which role.
+
+**It may not call a partial match a match.** :attr:`Kinship.aligned` is False unless a bijection
+carries every relation, and the per-slot scores are reported beside it rather than instead of it.
+
+Pure standard library, deterministic.
 """
 
 from __future__ import annotations
 
-import time
+import itertools
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
 
-__all__ = ["Trace", "Shape", "ReasoningGenome"]
+__all__ = ["Genome", "Kinship", "SLOTS", "read_genome", "SLOT_RELATIONS"]
 
-#: A shape has to recur at least this often before it is a pattern rather than a coincidence.
-_MIN_SEEN = 3
+#: The eight slots, in the Master's order. Named as a tuple so a report cannot silently gain one.
+SLOTS: Tuple[str, ...] = (
+    "roles", "relations", "constraints", "causal", "temporal",
+    "transformations", "exceptions", "invariants",
+)
 
-#: And it has to have been right at least this often. A shape that recurs and fails is a habit.
-_MIN_SUCCESS = 0.6
-
-#: Chains shorter than this are not worth naming: a one-hop "derivation" is a lookup, and naming
-#: it buys nothing that the fact store does not already give.
-_MIN_DEPTH = 2
-
-
-def shape_of(derivation: Any) -> Tuple[str, ...]:
-    """The form of a derivation with its entities removed — the part that can be reused.
-
-    Reads ``support``, which the Core fills with the actual ``(subject, predicate, object)`` edges
-    it walked. The predicates in order *are* the shape: two different chains through two different
-    subjects that used the same relations in the same order are the same piece of reasoning.
-    """
-    try:
-        return tuple(str(edge[1]) for edge in (getattr(derivation, "support", None) or ())
-                     if isinstance(edge, (tuple, list)) and len(edge) >= 2)
-    except Exception:  # noqa: BLE001
-        return ()
+#: Which stored relations fill which slot. A relation in no row goes nowhere — an unclassified
+#: edge is not quietly swept into ``relations``, because that slot would then absorb everything
+#: and the fingerprint would stop discriminating.
+SLOT_RELATIONS: Dict[str, Tuple[str, ...]] = {
+    "roles": ("has_part", "consists_of", "has_role"),
+    "relations": ("part_of", "located_in", "involves"),
+    "constraints": ("requires", "excludes", "needs"),
+    "causal": ("causes", "produces", "increases", "decreases", "purpose"),
+    "temporal": ("occurs_when", "precedes", "follows", "has_step", "has_stage"),
+    "transformations": ("becomes", "turns_into", "converts_to"),
+    "exceptions": ("except_when", "unless", "fails_when"),
+    "invariants": ("always", "conserved", "has_property"),
+}
 
 
 @dataclass
-class Trace:
-    """One reasoning event: what was asked, how it was answered, and whether that worked."""
+class Genome:
+    """One concept, as eight slots of stated relations. Holds no name it did not read."""
 
-    question: str = ""
-    kind: str = ""                          # direct | composed | schema | simulated
-    shape: Tuple[str, ...] = ()
-    depth: int = 0
-    confidence: float = 0.0
-    answer: str = ""
-    simulated: bool = False
-    #: None until reality says. Kept as None rather than defaulted to a number, because an
-    #: ungraded derivation and a failed one are different things and averaging them lies.
-    correct: Optional[bool] = None
-    t: float = field(default_factory=time.time)
+    subject: str
+    slots: Dict[str, Tuple[Tuple[str, str], ...]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for slot in SLOTS:
+            self.slots.setdefault(slot, ())
+
+    @property
+    def nodes(self) -> Tuple[str, ...]:
+        seen: List[str] = []
+        for slot in SLOTS:
+            for _relation, obj in self.slots[slot]:
+                if obj not in seen:
+                    seen.append(obj)
+        return tuple(seen)
+
+    @property
+    def size(self) -> int:
+        return sum(len(self.slots[slot]) for slot in SLOTS)
+
+    @property
+    def filled(self) -> Tuple[str, ...]:
+        return tuple(slot for slot in SLOTS if self.slots[slot])
+
+    @property
+    def fingerprint(self) -> Tuple[Any, ...]:
+        """No names. Only shapes — which is what makes two vocabularies comparable at all."""
+        out: List[Any] = []
+        for slot in SLOTS:
+            counts: Dict[str, int] = defaultdict(int)
+            for relation, _obj in self.slots[slot]:
+                counts[relation] += 1
+            out.append((slot, tuple(sorted(counts.items()))))
+        return tuple(out)
+
+    def edges(self) -> FrozenSet[Tuple[str, str, str]]:
+        """The genome as triples over its own nodes, for alignment."""
+        return frozenset((self.subject, relation, obj)
+                         for slot in SLOTS for relation, obj in self.slots[slot])
+
+    def render(self) -> str:
+        lines = [f"CONCEPT {self.subject}"]
+        for slot in SLOTS:
+            entries = self.slots[slot]
+            if entries:
+                body = ", ".join(f"{relation}={obj}" for relation, obj in entries)
+                lines.append(f"  {slot:16} {body}")
+        return "\n".join(lines)
+
+    def compare(self, other: "Genome") -> "Kinship":
+        """Structural kinship, slot by slot, with the alignment that establishes it."""
+        return _compare(self, other)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"question": self.question[:200], "kind": self.kind, "shape": list(self.shape),
-                "depth": self.depth, "confidence": round(self.confidence, 4),
-                "answer": self.answer[:120], "simulated": self.simulated,
-                "correct": self.correct, "t": round(self.t, 3)}
+        return {"subject": self.subject, "size": self.size, "filled": list(self.filled),
+                "slots": {k: [list(p) for p in v] for k, v in self.slots.items()}}
 
 
 @dataclass
-class Shape:
-    """One reasoning form, and its record across every time it was used."""
+class Kinship:
+    """How two concepts are related, and **where** they differ."""
 
-    shape: Tuple[str, ...] = ()
-    seen: int = 0
-    graded: int = 0
-    correct: int = 0
-    simulated: int = 0
-    total_depth: int = 0
-
-    @property
-    def depth(self) -> float:
-        """Mean chain length — the ``k`` in the saving below."""
-        return (self.total_depth / self.seen) if self.seen else 0.0
+    left: str
+    right: str
+    aligned: bool = False
+    mapping: Dict[str, str] = field(default_factory=dict)
+    per_slot: Dict[str, float] = field(default_factory=dict)
+    differs: List[str] = field(default_factory=list)
 
     @property
-    def success(self) -> Optional[float]:
-        """Share of graded uses that were right, or None while nothing has been graded."""
-        return (self.correct / self.graded) if self.graded else None
-
-    @property
-    def real(self) -> int:
-        """Uses that came from real reasoning rather than simulation."""
-        return max(0, self.seen - self.simulated)
-
-    @property
-    def saving(self) -> float:
-        """Steps saved by naming this shape once instead of re-deriving it every time.
-
-        ``n·k − (k + n)``: re-deriving costs a chain of ``k`` steps on each of ``n`` uses; naming
-        it costs ``k`` once to define plus one application per use. Trivially short or barely
-        repeated shapes come out at or below zero and say so.
-        """
-        n, k = float(self.real), self.depth
-        if n <= 0 or k <= 0:
+    def score(self) -> float:
+        if not self.per_slot:
             return 0.0
-        return (n * k) - (k + n)
+        return round(sum(self.per_slot.values()) / len(self.per_slot), 4)
+
+    def gloss(self) -> str:
+        """The shape and what fills it on both sides. **No name for the common structure.**"""
+        lines = [f"{self.left} ~ {self.right}  "
+                 f"{'aligned' if self.aligned else 'not aligned'}  ({self.score:.2f})"]
+        for slot in SLOTS:
+            got = self.per_slot.get(slot)
+            if got is None:
+                continue
+            mark = "=" if got == 1.0 else ("~" if got > 0 else "≠")
+            lines.append(f"  {slot:16} {mark} {got:.2f}")
+        if self.mapping:
+            lines.append("  roles")
+            for a, b in sorted(self.mapping.items()):
+                lines.append(f"    {a} ↔ {b}")
+        if self.differs:
+            lines.append(f"  differs in: {', '.join(self.differs)}")
+        return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"shape": list(self.shape), "seen": self.seen, "real": self.real,
-                "graded": self.graded, "correct": self.correct, "simulated": self.simulated,
-                "depth": round(self.depth, 3),
-                "success": (round(self.success, 4) if self.success is not None else None),
-                "saving": round(self.saving, 3)}
+        return {"left": self.left, "right": self.right, "aligned": self.aligned,
+                "score": self.score, "per_slot": dict(self.per_slot),
+                "differs": list(self.differs), "mapping": dict(self.mapping)}
 
 
-class ReasoningGenome:
-    """The record of how she reasons, and which of those ways is worth naming.
+# --------------------------------------------------------------------------- #
+# Reading one out of a store
+# --------------------------------------------------------------------------- #
+def read_genome(explainer: Any, subject: str) -> Genome:
+    """Build a concept's genome from what the store actually says about it.
 
-    Holds a bounded window of traces and an unbounded tally per shape — the traces are evidence
-    for a person reading the log, the tallies are what the promotion decision is actually made
-    from, and only the second needs to survive a long session.
+    A relation that belongs to no slot is **dropped**, not swept into ``relations``. That slot
+    would otherwise absorb every unclassified edge and the fingerprint would stop discriminating —
+    which is the same failure mode ``related_to`` has in ConceptNet and the reason
+    ``prepare_conceptnet.py`` refuses it.
     """
+    got = Genome(subject=subject)
+    slots: Dict[str, List[Tuple[str, str]]] = {slot: [] for slot in SLOTS}
+    for slot, relations in SLOT_RELATIONS.items():
+        for relation in relations:
+            try:
+                values = explainer._out(subject, relation)
+            except Exception:  # noqa: BLE001
+                values = []
+            for obj, _confidence in values:
+                slots[slot].append((relation, str(obj)))
+    got.slots = {slot: tuple(sorted(set(entries))) for slot, entries in slots.items()}
+    return got
 
-    def __init__(self, *, capacity: int = 512, min_seen: int = _MIN_SEEN,
-                 min_success: float = _MIN_SUCCESS, min_depth: int = _MIN_DEPTH) -> None:
-        self.capacity = max(16, int(capacity))
-        self.min_seen = max(2, int(min_seen))
-        self.min_success = float(min_success)
-        self.min_depth = max(2, int(min_depth))
-        self.traces: List[Trace] = []
-        self.shapes: Dict[Tuple[str, ...], Shape] = {}
-        self.recorded = 0
-        self.graded = 0
 
-    # ---- writing ------------------------------------------------------------ #
-    def record(self, derivation: Any, *, question: str = "", simulated: bool = False) -> Optional[Trace]:
-        """Keep one derivation. Returns the trace, or None if there was no reasoning to keep.
+# --------------------------------------------------------------------------- #
+# Comparison
+# --------------------------------------------------------------------------- #
+def _compare(left: Genome, right: Genome) -> Kinship:
+    out = Kinship(left=left.subject, right=right.subject)
+    for slot in SLOTS:
+        here = [relation for relation, _obj in left.slots[slot]]
+        there = [relation for relation, _obj in right.slots[slot]]
+        if not here and not there:
+            continue
+        shared = len(set(here) & set(there))
+        total = len(set(here) | set(there))
+        out.per_slot[slot] = round(shared / total, 4) if total else 0.0
+        if out.per_slot[slot] < 1.0:
+            out.differs.append(slot)
 
-        A direct answer is deliberately *not* kept as a shape: it is a lookup, its "chain" is one
-        edge, and counting it would swamp the tallies with the one form that needs no compressing.
-        """
-        try:
-            shape = shape_of(derivation)
-            if len(shape) < self.min_depth:
-                return None
-            trace = Trace(
-                question=str(question or "")[:200],
-                kind=str(getattr(derivation, "kind", "") or ""),
-                shape=shape, depth=len(shape),
-                confidence=float(getattr(derivation, "confidence", 0.0) or 0.0),
-                answer=str(getattr(derivation, "answer", "") or "")[:120],
-                simulated=bool(simulated),
-            )
-            self.traces.append(trace)
-            if len(self.traces) > self.capacity:
-                del self.traces[: len(self.traces) - self.capacity]
-
-            got = self.shapes.get(shape)
-            if got is None:
-                got = Shape(shape=shape)
-                self.shapes[shape] = got
-            got.seen += 1
-            got.total_depth += trace.depth
-            if simulated:
-                got.simulated += 1
-            self.recorded += 1
-            return trace
-        except Exception:  # noqa: BLE001
-            return None
-
-    def grade(self, trace: Any, *, correct: bool) -> None:
-        """Tell the genome how a recorded derivation actually turned out."""
-        try:
-            if trace is None or getattr(trace, "correct", None) is not None:
-                return
-            trace.correct = bool(correct)
-            got = self.shapes.get(tuple(getattr(trace, "shape", ()) or ()))
-            if got is None:
-                return
-            got.graded += 1
-            if correct:
-                got.correct += 1
-            self.graded += 1
-        except Exception:  # noqa: BLE001
-            pass
-
-    # ---- reading ------------------------------------------------------------ #
-    def reliability(self, trace: Any) -> Optional[float]:
-        """How often this trace's *shape* has actually held up, or ``None`` if untested.
-
-        ``None`` and ``0.0`` are different answers and the caller must be able to tell them
-        apart: a shape nobody has graded yet has no record, and penalising it for that would
-        punish a new inference for being new. Only a measured failure is a reason to discount.
-
-        Deliberately keyed on the shape rather than the trace, because that is the unit the whole
-        module is about — the question is not "was this answer right" but "does reasoning of this
-        form work", and the second only has an answer once several traces have shared it.
-        """
-        try:
-            shape = self.shapes.get(tuple(getattr(trace, "shape", ()) or ()))
-            if shape is None or shape.graded < self.min_seen:
-                return None
-            return shape.success
-        except Exception:  # noqa: BLE001
-            return None
-
-    def candidates(self) -> List[Shape]:
-        """Shapes worth compressing into a primitive, best saving first.
-
-        Three conditions, and each rules out a different way of being wrong about this: enough
-        real (non-simulated) uses to be a pattern, a success rate that says following it is a good
-        idea, and a positive MDL saving so naming it actually costs less than re-deriving it.
-        """
-        out = [s for s in self.shapes.values()
-               if s.real >= self.min_seen
-               and s.saving > 0.0
-               and (s.success is None or s.success >= self.min_success)]
-        return sorted(out, key=lambda s: s.saving, reverse=True)
-
-    def liabilities(self) -> List[Shape]:
-        """Shapes she keeps using that keep being wrong.
-
-        The mirror of :meth:`candidates`, and reported rather than merely excluded: a recurring
-        reasoning form with a poor record is a habit worth breaking, and the fact that it is
-        *frequent* is the reason it matters rather than a reason to ignore it.
-        """
-        out = [s for s in self.shapes.values()
-               if s.graded >= self.min_seen and (s.success or 0.0) < self.min_success]
-        return sorted(out, key=lambda s: (s.success or 0.0))
-
-    def stats(self) -> Dict[str, Any]:
-        best = self.candidates()
-        worst = self.liabilities()
-        return {
-            "recorded": self.recorded, "graded": self.graded,
-            "traces": len(self.traces), "shapes": len(self.shapes),
-            "candidates": len(best), "liabilities": len(worst),
-            "total_saving": round(sum(s.saving for s in best), 3),
-            "best": [s.to_dict() for s in best[:3]],
-            "worst": [s.to_dict() for s in worst[:2]],
-        }
-
-    # ---- persistence -------------------------------------------------------- #
-    def to_dict(self) -> Dict[str, Any]:
-        return {"shapes": [s.to_dict() for s in self.shapes.values()],
-                "recorded": self.recorded, "graded": self.graded}
-
-    def load_dict(self, data: Dict[str, Any]) -> None:
-        """Restore the tallies. Traces are a window and are deliberately not persisted."""
-        try:
-            self.shapes = {}
-            for row in (data or {}).get("shapes") or []:
-                shape = tuple(str(p) for p in (row.get("shape") or ()))
-                if not shape:
-                    continue
-                got = Shape(shape=shape)
-                got.seen = int(row.get("seen", 0) or 0)
-                got.graded = int(row.get("graded", 0) or 0)
-                got.correct = int(row.get("correct", 0) or 0)
-                got.simulated = int(row.get("simulated", 0) or 0)
-                got.total_depth = int(round(float(row.get("depth", 0) or 0) * got.seen))
-                self.shapes[shape] = got
-            self.recorded = int((data or {}).get("recorded", 0) or 0)
-            self.graded = int((data or {}).get("graded", 0) or 0)
-        except Exception:  # noqa: BLE001
-            pass
+    # Alignment: a bijection over the two genomes' object nodes carrying every relation. Names are
+    # never compared — only which relation connects which position — which is the whole point.
+    ours, theirs = list(left.nodes), list(right.nodes)
+    if len(ours) != len(theirs) or not ours:
+        return out
+    wanted = {(relation, obj) for slot in SLOTS for relation, obj in left.slots[slot]}
+    target = {(relation, obj) for slot in SLOTS for relation, obj in right.slots[slot]}
+    if len(wanted) != len(target):
+        return out
+    for candidate in itertools.permutations(theirs, len(ours)):
+        mapping = dict(zip(ours, candidate))
+        carried = {(relation, mapping[obj]) for relation, obj in wanted}
+        if carried == target:
+            out.aligned = True
+            out.mapping = mapping
+            break
+    return out
