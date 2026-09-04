@@ -4405,6 +4405,34 @@ something` asserts no relation is stored where nothing can read it back — and 
 V.39, is read by `njp/predator.py` rather than by any question. The organ was added to the test's
 list of readers; loosening the assertion would not have been the honest move.
 
+##### And the two that predated the session
+
+Both were a **contract** that had drifted, not a stale expectation, so both were fixed in the code.
+
+`PuzzleSolver._contains` is a **classmethod** — it compares word *stems* through `cls._stem` — and
+the test unwrapped it with `__dict__[...].__func__`, which is right for the `staticmethod` two
+lines above it and hands back a function still wanting `cls` for this one. Every call died on a
+missing argument. The code was right; the test had drifted behind a binding change. It now calls
+the bound classmethod, checks the stem comparison the classmethod exists *for*, and a second test
+asserts which helper has which binding — because a staticmethod and a classmethod unwrapped the
+same way look identical at the call site and differ by one argument at run time.
+
+`NJPBrain.do_maths` asks `mathsolver` first and `mathematics` second, and **the two returned
+different objects**. Only the second carried a `topic` while the method's own docstring promised
+one — so which attributes a caller got depended on which solver happened to recognise the
+sentence, and a quadratic had no topic at all. `mathsolver.Solution` now derives `topic` from its
+engine over **the same vocabulary `Mathematician.SKILLS` uses**, as a property rather than a field
+so no construction site can be forgotten, which is exactly how the two drifted apart. An engine is
+a *reader* and a topic is what the question was *about*, so the map is written out rather than
+guessed: an engine it does not know reports `""`, and an empty topic is honest where a wrong one
+is not. All **82** engines and readers are mapped, and a test asserts none is missing and none
+invents a topic `mathematics` does not have.
+
+`tests/njp` is green apart from `test_every_question_is_answerable_from_a_triple_in_the_same_build`
+— a corpus question in `history.kb` ("What is Age of Exploration?") that no question grammar
+parses, which is a separate matter from either of these.
+
+
 
 ### Reachable over the wire
 
