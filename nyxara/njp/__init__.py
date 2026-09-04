@@ -414,6 +414,17 @@ from nyxara.njp.boundary import (
     Necessary,
 )
 from nyxara.njp.conceptgenome import Genome, Kinship, read_genome
+# V.48. `Demonstration` belongs to `njp.coding` in this namespace and `Shape` to `njp.reasoning`,
+# so both are qualified here rather than shadowing modules that had the name first. `Relation` is
+# free, and it is the right word for what it is: one relation read out of a passage.
+from nyxara.njp.passage import (
+    Demonstration as ReadingLesson,
+    KnowledgeObject,
+    PassageReader,
+    Relation,
+    Shape as ReadingShape,
+    taught_reader,
+)
 from nyxara.njp.provenance import (
     Blame,
     Claim as ProvenanceClaim,
@@ -603,6 +614,8 @@ __all__ = [
     # NJP V.46/V.47 — what cannot work, and what a concept is made of
     "Boundary", "HardConstraint", "Necessary", "Impossible", "Funnel",
     "Genome", "Kinship", "read_genome",
+    "KnowledgeObject", "PassageReader", "Relation", "ReadingLesson", "ReadingShape",
+    "taught_reader",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

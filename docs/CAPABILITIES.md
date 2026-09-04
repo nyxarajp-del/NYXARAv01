@@ -4434,10 +4434,113 @@ parses, which is a separate matter from either of these.
 
 
 
+## V.48 — a passage is not a triple, and reading one is not parsing a sentence
+
+Every fact this package holds arrived as `subject | relation=object`. The 62 files under
+`scripts/knowledge/` were typed that way by hand; the 130,274 ConceptNet subjects arrived that way
+already. Neither is reading. Measured cold, `njp.grounding` on five sentences of ordinary prose:
+
+| passage | what came back | what was lost |
+| --- | --- | --- |
+| *Photosynthesis is the process by which plants convert light energy into chemical energy.* | `photosynthesis is_a process` | `occurs_in=plants`, `uses=light energy`, `produces=chemical energy` |
+| *It reduces the purchasing power of money.* | subject = **`It`** | which concept the claim is about |
+| *Photosynthesis occurs in the chloroplasts of plant cells and requires chlorophyll, water and carbon dioxide.* | subject = `photosynthesis occurs in the chloroplasts of plant cells and`, object = `chlorophyll, water and carbon dioxide` | `occurs_in` entirely; three requirements fused into one |
+
+Three failures with one cause: **the grounder looks for a subject inside each sentence.** A
+relative clause hides its relations behind `by which`; a second sentence names its subject with a
+pronoun; a coordination puts two predicates in one sentence and the subject-finder swallows the
+first one whole. No amount of extra corpus fixes it, because the corpus is written in the form the
+reader already handles.
+
+`njp/passage.py` reads the passage instead. A passage is *about* something, so the concept comes
+from the discourse and a clause only has to supply a relation and a filler — which makes the
+coordination problem disappear rather than solving it. What comes back is a `KnowledgeObject`: the
+concept, its **definition**, the **kind** that definition falls under, the entities, every relation
+with the sentence and the shape that read it, the conditions any of them were stated under, and
+**the passage itself**. `is_a=general rise in prices` was both a definition and a kind in one slot;
+`means="general rise in prices"` and `is_a="rise"` are two things, and the head is derived
+structurally rather than looked up.
+
+**Nothing here is an extraction table.** Shapes are induced from six demonstrations at two levels:
+a *frame* keeps the lesson's own words; a *cued* shape holes every open-class anchor except the one
+that names the relation. Which word that is is not a judgement call — it is the anchor that (a) was
+never demonstrated as a filler, (b) is not a lesson's own concept name, and (c) anchors one
+predicate in more lessons than any other. `requires`, `occurs` and `produces` come out as relation
+words; `convert` does not, because the lessons use it for two relations. A cued shape left with no
+literal anchor is refused, because a pattern of holes matches every clause in the language.
+
+### The exam
+
+`njp/passageschool.py` reads 17 held-out passages from economics, medicine, astronomy, chemistry,
+computing, engineering, law, geology, meteorology, physics, history and geography — subjects in no
+lesson, entities she has never met — and then a **sealed** second set of nine more, written after
+every fix was made and **run once**.
+
+| run | mean | relation recall | precision |
+| --- | --- | --- | --- |
+| `grounding.Grounder` (what she had) | 0.190 | 0.373 | 0.468 |
+| untaught reader | 0.111 | 0.000 | — |
+| **literal frames only** | **0.111** | **0.000** | — |
+| taught reader | **0.919** | 0.780 | 0.979 |
+| sealed set, run once | **0.918** | 0.714 | **1.000** |
+
+Two of those rows matter more than the headline. **Literal frames score 0.000** on every paper but
+restraint: every relation read on an unseen subject came from a shape no lesson contained. And the
+**sealed set scores what the tuned set scores** — 0.918 against 0.919, with zero confabulations —
+which is the evidence that the shapes generalise rather than having been fitted to the exam that
+found the defects.
+
+`kind` moves 0.000 → 1.000, `coordination` 0.000 → 0.778, `pronoun` 0.000 → 1.000, `condition`
+0.000 → 1.000, and `restraint` 0.000 → 1.000: on two passages stating nothing any lesson taught,
+the grounder files claims and the reader is silent. Relations the passages state in predicates
+nobody demonstrated are reported as **coverage gaps**, not marked wrong — scoring her for not
+knowing a relation nobody showed her would be marking the syllabus.
+
+The witness gate is a stated trade rather than a tuned constant: at `min_witnesses=1` recall is
+0.915 and precision 0.818; at 2 it is 0.780 and 0.979. Both runs are printed. The default prefers
+precision, on the standing rule that she may be silent but not confidently wrong.
+
+### Six defects the measurement found
+
+* **The cued abstraction holed the verb**, so `and requires <SLOT>` became `<*> and <*> <SLOT>` — a
+  pattern that reads any coordinated clause as any relation, and did.
+* **A filler ran past the end of its noun phrase**: `requires a temperature to be meaningful` and
+  `requires an expanding money supply and produces a fall in real wages` were both stored whole. A
+  noun phrase ends where a verb begins, and where another relation's word begins.
+* **A coordination inside a clause was split like a list**, turning one definition into two, neither
+  true. Every piece of a list is a bare noun phrase; a piece carrying a preposition or a relative is
+  a clause.
+* **The filler cap was a constant** and truncated any definition longer than the longest lesson. It
+  is learned from the demonstrations now, and an unanchored right edge is bounded by the sentence.
+* **A hole would not match a pronoun**, so `Osmosis ... It requires a partially permeable membrane`
+  matched nothing: the shape refused the sentence on a technicality about how a subject is spelled.
+* **The resolver was constructed unfitted**, which the school caught by the only means that could —
+  the `no_pronouns` ablation changed *no score at all*. An unfitted `Reference` scores role
+  parallelism at zero and abstained on every passage, leaving the topic fallback to do the work and
+  take the credit. The cues are now fitted to pronoun resolutions the lessons themselves
+  demonstrate, including one the teacher says settles on **nothing**.
+
+Two more were in the exam, which is worth as much: it printed a **precision of 1.156**, by summing
+papers that mark the same item twice; and the `no_topic` control did not actually remove the topic,
+so an ablation that was supposed to falsify a mechanism silently re-enabled it.
+
+### And one the reader created
+
+`occurs_in` appeared **nowhere** in `grounding.py` — no alias, no question pattern, no affinity row.
+The reader produces it at volume, so every such fact would have been stored and structurally
+unreachable: exactly the failure `njp.ingest`'s own docstring warns about, committed by the module
+that generates them. A question pattern and two affinity rows make it answerable, and a test asserts
+that a predicate the reader produces can be reached by an English question.
+
+Wired at `NJPBrain.read_passage` (reads, files nothing), `learn_passage` (files each relation
+through the grounder as `source="passage"`, and returns *which* claims entered rather than a count),
+`go_to_passage_school`, and `/v1/njp/passage`. Extraction and filing are kept apart on purpose: a
+method that did both would put the filing decision out of the caller's reach.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
-`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, `/discourse`, `/explain`, and `/{organ}` — so growth and self-rewriting are observable
+`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, `/discourse`, `/explain`, `/passage`, and `/{organ}` — so growth and self-rewriting are observable
 from outside the process,
 not merely asserted in a docstring. On the console: `/njp`, and `/njp think` prints the synapse
 count before and after the turn, which is the claim this whole package has to earn.
