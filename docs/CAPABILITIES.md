@@ -60,6 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39j | Cognitive immune system (a new claim that would make an existing question unanswerable is **quarantined** — kept, retrievable, out of the store — while everything that merely adds is admitted, and standing is *earned* by having quarantined claims confirmed rather than declared. Built against a measured regression and it repairs it: the broad corpus's 130,274 subjects kept in full, `recall` back to the curated level, 8.8% of claims isolated. The response runs both ways: a challenger that outranks the incumbent displaces it) | `nyxara.njp.immune` + `nyxara.njp.general` | NEW |
 | 39i | Auditable conclusions (every claim carries the path that produced it — facts, edges, inferences, assumptions — and a claim with no path is `UNKNOWN` rather than weak. Blame ranks by exclusivity rather than frequency, so the lone assumption is named and not the fact four other standing claims also rest on; and a failure is stored with its culprit, so a *completely differently worded* problem reasoned through the same assumption raises a warning) | `nyxara.njp.provenance` + `nyxara.njp.loop` | NEW |
 | 39h | The closed loop (observations → structure → latent hypothesis → experiment → revision → a prediction nobody asked for, as one runnable cycle: hidden causes proposed and never believed, interventions chosen by how much they move *the question you are about to be asked*, revision in both directions, an autopsy that keeps the edge that carried a failed claim, and five distinct reasons for not knowing. Measured on randomly generated worlds with unobserved variables where **declining is sometimes the only pass**. It beats reconstruction on structure, on latents and on ending with the right kind of world — and the loop does **not close**: 0.125, the same as the reconstructor) | `nyxara.njp.loop` + `nyxara.njp.discovery` | PARTIAL |
 | 39g | Breadth, measured (`njp/breadth.py` asks what no other exam here can: of things a person might name, what fraction does she have any fact about. ConceptNet's English assertions ship as a second corpus — 4,382 subjects become 130,274 — and it is **off by default** because measuring it honestly showed 12× the facts buys 2.8 points on subjects nobody mentioned, nothing on derivation, and costs `recall` 1.00 → 0.70 and 23× the time per question) | `nyxara.njp.breadth` + `nyxara/njp/data/world_broad.jsonl.gz` | NEW |
@@ -4156,6 +4157,70 @@ WARNING: 1 earlier failure(s) rested on the same step
 ```
 
 Run it: `NJPBrain` organs unchanged; `Loop.audit`, `Ledger.blame`, `Ledger.warn`.
+
+
+#### NJP V.44 — the cognitive immune system, and the regression it repairs
+
+This organ exists because of a number. V.41 loaded ConceptNet beside the curated corpus, took
+subjects from 4,382 to 130,274 — and took `recall` on the curated corpus **down**. Nothing was
+broken: `Grounder.answer` behaved exactly as designed, seeing two equally supported readings and
+declining to pick, which has been right since V.13. What went wrong is upstream. **A crowd-sourced
+`is_a` was allowed to stand beside a curated one as though the two had the same standing**, and
+once both were in the store no downstream organ could tell them apart — the provenance the ingest
+records says *how* a claim was got, never *who said it*. So the broad corpus shipped switched off,
+which was honest and was not a fix.
+
+`njp/immune.py` takes the metaphor literally. A body does not reject everything unfamiliar — it
+would starve — and does not accept everything either. It **isolates what is both unfamiliar and
+able to do damage**:
+
+```
+new fact
+   ↓
+is it in contact with anything?  ──no──→  ADMIT      (new subject: nothing to degrade)
+   ↓ yes
+does it compete, or merely add?  ──adds─→  ADMIT     (a fifth `causes` is a fifth cause)
+   ↓ competes
+whose standing is higher?  ──incumbent──→  QUARANTINE
+   ↓ challenger
+ADMIT, and quarantine the incumbent instead
+```
+
+Three consequences follow from taking it seriously. **Most of a large corpus is harmless** — a
+fact about a subject nothing else mentions cannot degrade an answer, which is why this buys
+breadth *and* precision instead of trading them. **Only competing relations are guarded**: a second
+`has_kind` is a second kind, a second `is_a` is a rival answer to the same question, and `COMPETING`
+is that short list. **Standing is earned, not declared**: a source starts at **zero**, not at a
+half — starting it at parity would have let sheer volume outrank a corpus twenty versions of
+examinations have been run against. It gains standing when quarantined claims are confirmed and
+loses it when they are refuted.
+
+And the response runs **both ways**. A challenger that outranks the incumbent is admitted and the
+*incumbent* is quarantined — without that half the organ is only conservatism.
+
+##### Quarantine is not rejection
+
+A quarantined fact is kept, retrievable and marked. It never reaches the fact store so it cannot
+degrade an answer, and it is not lost so it can be released the moment something corroborates it.
+Deleting on arrival would make this a filter; keeping it makes it an immune system, and the
+difference shows up the first time the crowd turns out to be right.
+
+##### What it recovers, measured over 75 items
+
+```
+                        facts    subjects   recall  membership  taxonomy
+curated only           15,848      4,382     0.92      0.96       1.00
+broad, no immune      211,149    130,274     0.84      1.00       0.92
+broad, through it     193,805    130,274     0.92      1.00       0.96
+```
+
+**Every subject kept and the regression gone.** 17,559 of 198,455 claims quarantined — **8.8%** —
+and that is the whole of the damage. The harm was concentrated; isolating it costs almost none of
+the breadth. `load_brain(broad=True)` now goes through the guard by default and
+`load_brain(broad=True, immune=False)` restores the naive load for anyone who wants to re-measure
+it.
+
+Run it: `load_brain(broad=True)`, `Immune.held_against(subject, predicate)`, `Immune.report()`.
 
 
 ### Reachable over the wire

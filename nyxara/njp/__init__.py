@@ -387,6 +387,14 @@ from nyxara.njp.fusion import Abstraction, Analogy, Fusion, Pattern as ShapePatt
 # so every one of them takes a qualified name here. The namespace was checked before they went in,
 # which is the habit V.34 paid seven commits to learn.
 from nyxara.njp.loop import Loop, Model as CausalModel, Reason as UnknownReason
+# V.44. `Verdict` is already `njp.ledger`'s and `Standing` already `njp.discourse`'s, so both are
+# qualified; `Immune` and `Antigen` are free.
+from nyxara.njp.immune import (
+    Antigen,
+    Immune,
+    Standing as SourceStanding,
+    Verdict as ImmuneVerdict,
+)
 from nyxara.njp.provenance import (
     Blame,
     Claim as ProvenanceClaim,
@@ -569,6 +577,8 @@ __all__ = [
     "Loop", "CausalModel", "UnknownReason",
     "ProvenanceLedger", "ProvenanceClaim", "ProvenancePath", "ProvenanceStep",
     "ProvenanceKind", "ProvenanceStatus", "Blame", "PostMortem",
+    # NJP V.44 — quarantine, so one new fact cannot corrupt the graph
+    "Immune", "Antigen", "ImmuneVerdict", "SourceStanding",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

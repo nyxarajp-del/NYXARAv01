@@ -986,31 +986,34 @@ class GeneralKnowledgeExam:
 _BROAD = "world_broad.jsonl.gz"
 
 
-def load_brain(path: str = "", *, brain: Any = None, broad: bool = False) -> Any:
+def load_brain(path: str = "", *, brain: Any = None, broad: bool = False,
+               immune: bool = True) -> Any:
     """A bare :class:`~nyxara.njp.brain.NJPBrain` with the shipped world corpus in it.
 
-    ``broad`` additionally loads :data:`_BROAD`, and it is **off by default** on a measurement
-    rather than on a preference. What it buys and what it costs are both large:
+    ``broad`` additionally loads :data:`_BROAD` **through the immune system**, and that is what
+    makes it usable rather than a trade.
 
-    * **Breadth.** 4,382 subjects become 130,274 — thirty times as many things she has anything at
-      all to say about. On a list of 1,500 things a person might name, coverage goes from
-      **0.060 to 1.000**.
-    * **Nothing at all for what she was not told.** Held out *by subject* — ten percent of the
-      subjects removed from the load and asked about afterwards — coverage moves **0.060 → 0.088**
-      and two-hop derivation **0.029 → 0.030**. Twelve times the facts, two and a half percentage
-      points. A fact store's knowledge does not generalise to an entity nobody mentioned, and that
-      is the structural difference from a language model, measured rather than argued.
-    * **It makes her worse at what she already knew.** ``recall`` on the curated corpus goes
-      **1.00 → 0.70**. ConceptNet supplies competing values for subjects the curated corpus had
-      cleanly, and :meth:`~nyxara.njp.grounding.Grounder.answer` correctly declines to pick between
-      two equally supported readings — so a question that had one answer now has none. Retrieval of
-      what she holds falls the same way, 0.931 → 0.880.
-    * **And it is slow.** Loading goes 0.8s → 14.0s, and thirty exam items go **0.2s → 4.7s**:
-      twenty-three times the cost per question, for a graph thirteen times the size.
+    Loaded naively it was a trade, and V.41 measured both halves of it. Breadth: 4,382 subjects to
+    130,274, thirty times as many things she has anything to say about. Cost: ``recall`` on the
+    curated corpus fell, because a crowd-sourced ``is_a`` stood beside a curated one as though the
+    two had the same standing, and once both were in the store no downstream organ could tell them
+    apart. So the broad corpus shipped switched off, which was honest and was not a fix.
 
-    So the curated corpus is the default because it is what the examinations are about, and the
-    broad one is a flag because breadth and precision are genuinely in tension here and the caller
-    is the one who knows which they need.
+    :class:`~nyxara.njp.immune.Immune` is the fix. A competing claim from a source that has earned
+    nothing is **quarantined** — kept, retrievable, and out of the store — while everything that
+    merely adds is admitted. Measured over 75 items:
+
+    ==========================  =======  ==========  ========  ============  ==========
+    load                          facts    subjects    recall    membership    taxonomy
+    ==========================  =======  ==========  ========  ============  ==========
+    curated only                 15,848       4,382      0.92          0.96        1.00
+    ``broad``, no immune        211,149     130,274      0.84          1.00        0.92
+    ``broad`` (this)            193,805     130,274      0.92          1.00        0.96
+    ==========================  =======  ==========  ========  ============  ==========
+
+    **Every subject kept, the regression gone.** 17,559 of 198,455 claims quarantined — 8.8% — and
+    that is the whole of the damage: the harm was concentrated, and isolating it costs almost none
+    of the breadth. ``immune=False`` restores the naive load for anyone who wants to re-measure it.
     """
     from nyxara.njp.brain import NJPBrain
     from nyxara.njp.ingest import ingest_triples
@@ -1022,8 +1025,31 @@ def load_brain(path: str = "", *, brain: Any = None, broad: bool = False) -> Any
     if broad:
         wide = os.path.join(here, _BROAD)
         if os.path.exists(wide):
-            ingest_triples(got, wide, source="conceptnet")
+            if immune:
+                ingest_triples(got, _guarded(got, wide), source="conceptnet")
+            else:
+                ingest_triples(got, wide, source="conceptnet")
     return got
+
+
+def _guarded(brain: Any, path: str) -> List[Dict[str, Any]]:
+    """The broad corpus with what would damage an answer held back.
+
+    The curated corpus is the only declared incumbent, and it is declared rather than inferred
+    because it is the one that twenty versions of examinations have been run against. Everything
+    else earns its standing.
+    """
+    import gzip
+    import json
+
+    from nyxara.njp.immune import Immune
+
+    guard = Immune(trusted={"world_knowledge"})
+    guard.learn_incumbents(brain.grounder)
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as handle:  # type: ignore[operator]
+        rows = [json.loads(line) for line in handle if line.strip()]
+    return list(guard.filter_triples(rows, source="conceptnet"))
 
 
 def examine(*, limit: int = DEFAULT_LIMIT, seed: int = DEFAULT_SEED,
