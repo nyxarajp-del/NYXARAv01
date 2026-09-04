@@ -1444,6 +1444,24 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         got = brain.hear_turn(req.stimulus)
         return got.to_dict() if hasattr(got, "to_dict") else {"surface": req.stimulus}
 
+    @app.post("/v1/njp/passage", dependencies=auth)
+    def njp_passage(req: NyxThinkRequest) -> dict:
+        """Read a whole **passage** into layers: concept, definition, kind, entities, relations.
+
+        Send prose, not a question. What comes back is the structure the paragraph carries, each
+        relation with the sentence and the induced shape that read it, plus the conditions any of
+        them were stated under — **and the passage itself**, because reading it does not consume
+        it.
+
+        Read-only. Nothing enters the fact store here; that is ``learn_passage`` on the brain, and
+        keeping extraction and filing apart is what leaves the filing decision reachable.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "reader", None) is None:
+            return _off("PASSAGE_ENABLED")
+        got = brain.read_passage(req.stimulus)
+        return got.to_dict() if got is not None else {"concept": "", "relations": []}
+
     @app.post("/v1/njp/explain", dependencies=auth)
     def njp_explain(req: NyxThinkRequest) -> dict:
         """A *why* or a *how*, answered by walking the fact store rather than reading it.

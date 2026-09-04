@@ -1069,7 +1069,14 @@ _PREDICATE_AFFINITY: Dict[str, Dict[str, float]] = {
     "consists_of": {"consists_of": 1.0, "has_part": 0.9, "has_kind": 0.7},
     "causes": {"causes": 1.0, "produces": 0.9, "increases": 0.7, "decreases": 0.7,
                "occurs_when": 0.6},
-    "located_in": {"located_in": 1.0, "part_of": 0.6},
+    "located_in": {"located_in": 1.0, "occurs_in": 0.8, "part_of": 0.6},
+    # V.48. `njp.passage` reads `occurs_in` out of prose at volume — "the process by which plants
+    # convert light" says where photosynthesis happens — and the predicate appeared **nowhere** in
+    # this module: no alias, no question pattern, no affinity row. Every such fact was stored and
+    # structurally unreachable, which is the exact failure `njp.ingest`'s docstring warns about,
+    # committed by the reader that produces them. A place and an event's setting answer for each
+    # other and are not the same thing, so the weights are asymmetric.
+    "occurs_in": {"occurs_in": 1.0, "located_in": 0.8, "part_of": 0.5, "involves": 0.5},
     "purpose": {"purpose": 1.0, "involves": 0.7, "means": 0.6, "is_a": 0.5},
     # "What causes X?" asked about the effect and wants the cause. A forward `causes` edge *from*
     # X answers the opposite question, and answering with it is not a weaker answer — it is a
@@ -1142,6 +1149,10 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
      r"(?:located|situated|found|placed)\b", "located_in"),
     (r"\bwhere\s+(?:was|were)\s+(?P<s>.+?)\s+born\b", "birthplace"),
     (r"\bwhere\s+(?:can\s+)?(?:you|we|one|i)\s+find\s+(?P<s>.+?)\??$", "located_in"),
+    # Asked of a process rather than a thing. Before `where is X`, because that pattern is broad
+    # enough to swallow "where does fermentation occur" if it gets there first.
+    (r"\bwhere\s+do(?:es)?\s+(?P<s>.+?)\s+"
+     r"(?:occur|happen|take\s+place)\b", "occurs_in"),
     (r"\bwhere\s+is\s+(?P<s>.+?)\??$", "located_in"),
     (r"\bwho\s+is\s+(?P<s>.+?)\??$", "is_a"),
 

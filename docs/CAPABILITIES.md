@@ -4434,10 +4434,224 @@ parses, which is a separate matter from either of these.
 
 
 
+## V.48 — a passage is not a triple, and reading one is not parsing a sentence
+
+Every fact this package holds arrived as `subject | relation=object`. The 62 files under
+`scripts/knowledge/` were typed that way by hand; the 130,274 ConceptNet subjects arrived that way
+already. Neither is reading. Measured cold, `njp.grounding` on five sentences of ordinary prose:
+
+| passage | what came back | what was lost |
+| --- | --- | --- |
+| *Photosynthesis is the process by which plants convert light energy into chemical energy.* | `photosynthesis is_a process` | `occurs_in=plants`, `uses=light energy`, `produces=chemical energy` |
+| *It reduces the purchasing power of money.* | subject = **`It`** | which concept the claim is about |
+| *Photosynthesis occurs in the chloroplasts of plant cells and requires chlorophyll, water and carbon dioxide.* | subject = `photosynthesis occurs in the chloroplasts of plant cells and`, object = `chlorophyll, water and carbon dioxide` | `occurs_in` entirely; three requirements fused into one |
+
+Three failures with one cause: **the grounder looks for a subject inside each sentence.** A
+relative clause hides its relations behind `by which`; a second sentence names its subject with a
+pronoun; a coordination puts two predicates in one sentence and the subject-finder swallows the
+first one whole. No amount of extra corpus fixes it, because the corpus is written in the form the
+reader already handles.
+
+`njp/passage.py` reads the passage instead. A passage is *about* something, so the concept comes
+from the discourse and a clause only has to supply a relation and a filler — which makes the
+coordination problem disappear rather than solving it. What comes back is a `KnowledgeObject`: the
+concept, its **definition**, the **kind** that definition falls under, the entities, every relation
+with the sentence and the shape that read it, the conditions any of them were stated under, and
+**the passage itself**. `is_a=general rise in prices` was both a definition and a kind in one slot;
+`means="general rise in prices"` and `is_a="rise"` are two things, and the head is derived
+structurally rather than looked up.
+
+**Nothing here is an extraction table.** Shapes are induced from six demonstrations at two levels:
+a *frame* keeps the lesson's own words; a *cued* shape holes every open-class anchor except the one
+that names the relation. Which word that is is not a judgement call — it is the anchor that (a) was
+never demonstrated as a filler, (b) is not a lesson's own concept name, and (c) anchors one
+predicate in more lessons than any other. `requires`, `occurs` and `produces` come out as relation
+words; `convert` does not, because the lessons use it for two relations. A cued shape left with no
+literal anchor is refused, because a pattern of holes matches every clause in the language.
+
+### The exam
+
+`njp/passageschool.py` reads 17 held-out passages from economics, medicine, astronomy, chemistry,
+computing, engineering, law, geology, meteorology, physics, history and geography — subjects in no
+lesson, entities she has never met — and then a **sealed** second set of nine more, written after
+every fix was made and **run once**.
+
+| run | mean | relation recall | precision |
+| --- | --- | --- | --- |
+| `grounding.Grounder` (what she had) | 0.190 | 0.373 | 0.468 |
+| untaught reader | 0.111 | 0.000 | — |
+| **literal frames only** | **0.111** | **0.000** | — |
+| taught reader | **0.919** | 0.780 | 0.979 |
+| sealed set, run once | **0.918** | 0.714 | **1.000** |
+
+Two of those rows matter more than the headline. **Literal frames score 0.000** on every paper but
+restraint: every relation read on an unseen subject came from a shape no lesson contained. And the
+**sealed set scores what the tuned set scores** — 0.918 against 0.919, with zero confabulations —
+which is the evidence that the shapes generalise rather than having been fitted to the exam that
+found the defects.
+
+`kind` moves 0.000 → 1.000, `coordination` 0.000 → 0.778, `pronoun` 0.000 → 1.000, `condition`
+0.000 → 1.000, and `restraint` 0.000 → 1.000: on two passages stating nothing any lesson taught,
+the grounder files claims and the reader is silent. Relations the passages state in predicates
+nobody demonstrated are reported as **coverage gaps**, not marked wrong — scoring her for not
+knowing a relation nobody showed her would be marking the syllabus.
+
+The witness gate is a stated trade rather than a tuned constant: at `min_witnesses=1` recall is
+0.915 and precision 0.818; at 2 it is 0.780 and 0.979. Both runs are printed. The default prefers
+precision, on the standing rule that she may be silent but not confidently wrong.
+
+### Six defects the measurement found
+
+* **The cued abstraction holed the verb**, so `and requires <SLOT>` became `<*> and <*> <SLOT>` — a
+  pattern that reads any coordinated clause as any relation, and did.
+* **A filler ran past the end of its noun phrase**: `requires a temperature to be meaningful` and
+  `requires an expanding money supply and produces a fall in real wages` were both stored whole. A
+  noun phrase ends where a verb begins, and where another relation's word begins.
+* **A coordination inside a clause was split like a list**, turning one definition into two, neither
+  true. Every piece of a list is a bare noun phrase; a piece carrying a preposition or a relative is
+  a clause.
+* **The filler cap was a constant** and truncated any definition longer than the longest lesson. It
+  is learned from the demonstrations now, and an unanchored right edge is bounded by the sentence.
+* **A hole would not match a pronoun**, so `Osmosis ... It requires a partially permeable membrane`
+  matched nothing: the shape refused the sentence on a technicality about how a subject is spelled.
+* **The resolver was constructed unfitted**, which the school caught by the only means that could —
+  the `no_pronouns` ablation changed *no score at all*. An unfitted `Reference` scores role
+  parallelism at zero and abstained on every passage, leaving the topic fallback to do the work and
+  take the credit. The cues are now fitted to pronoun resolutions the lessons themselves
+  demonstrate, including one the teacher says settles on **nothing**.
+
+Two more were in the exam, which is worth as much: it printed a **precision of 1.156**, by summing
+papers that mark the same item twice; and the `no_topic` control did not actually remove the topic,
+so an ablation that was supposed to falsify a mechanism silently re-enabled it.
+
+### And one the reader created
+
+`occurs_in` appeared **nowhere** in `grounding.py` — no alias, no question pattern, no affinity row.
+The reader produces it at volume, so every such fact would have been stored and structurally
+unreachable: exactly the failure `njp.ingest`'s own docstring warns about, committed by the module
+that generates them. A question pattern and two affinity rows make it answerable, and a test asserts
+that a predicate the reader produces can be reached by an English question.
+
+Wired at `NJPBrain.read_passage` (reads, files nothing), `learn_passage` (files each relation
+through the grounder as `source="passage"`, and returns *which* claims entered rather than a count),
+`go_to_passage_school`, and `/v1/njp/passage`. Extraction and filing are kept apart on purpose: a
+method that did both would put the filing decision out of the caller's reach.
+
+## V.49 — the same reader, on prose it did not write
+
+V.48's reader scores 0.950 on twenty-six passages and 0.939 on a sealed nine. Every one of them
+was written by one hand in one week. `njp/encyclopedia.py` points it at Wikipedia, which was not:
+**2,771 real lead paragraphs across 46 domains**, built offline from an `enwiki` dump by
+`scripts/build_wikipedia_corpus.py`, each with its title, URL, dump date and licence.
+
+The live API was tried first and abandoned, for a reason worth recording: it answers a shared
+address from this container, a burst returns 429 for everybody on it, and at a polite pace the run
+projected past two hours. A dump has no rate limit, does not change between runs, and needs no
+network at test time — a corpus that drifts makes every number taken against it unrepeatable.
+
+### What real prose did to it
+
+Cold, the V.48 reader on the corpus: **a definition for 0.725 of articles** — and 28 points of
+that were the *wrong sentence*. Every Wikipedia lead holds several copulas and only the first is
+about the subject, so the thyroid was defined as `two connected lobes` and the lung as `to extract
+oxygen from the atmosphere`. Both true sentences; neither a definition of the article. Anchoring
+the definition to the concept dropped the number to **0.439** — lower, and true.
+
+| | definition | kind | any relation | sentences read |
+| --- | --- | --- | --- | --- |
+| V.48 reader, cold | 0.725 (28pp of it the wrong sentence) | — | 0.768 | 0.350 |
+| after the structural fixes | 0.615 | 0.613 | 0.791 | 0.381 |
+| **+ seven lessons in the encyclopedia's own voice** | **0.809** | **0.804** | **0.897** | 0.312 |
+
+That middle row to the last one is the finding: **seven real sentences bought more than any fix to
+the reader's own machinery.** Taught only on prose written here, `uses` fired **zero** times across
+2,771 leads. The constructions the lessons had were the ones their author writes; Wikipedia's are
+`are`, `was`, `were`, `refers to`, `is used to`, `consists of` and `occurs when`, and not one
+appeared in a single demonstration. Only the *expectations* of those lessons are written in the
+module — the text is pulled from the corpus by title, so a lesson cannot quietly become a sentence
+that suits the reader better than the one the encyclopedia contains, and a test asserts none of
+them is in either exam slice.
+
+### Marked by hand, twice
+
+Coverage is not accuracy, so **111 relations were marked one at a time** against the sentence each
+came from, over two deterministic and disjoint slices — one the fixes were made against, one never
+looked at until the end.
+
+| | precision |
+| --- | --- |
+| audited slice | **0.868** (33/38) |
+| sealed slice | **0.857** (42/49) |
+| the article's own definition | 0.840 of 25 |
+| the kind it falls under | 0.760 of 25 |
+
+The two slices agreeing is the result. They did not, at first: before the complement test the
+audited slice read 0.750 and the sealed one **0.642**, and that gap was the measurement telling on
+the fixes. A structural rule closed it, which is what distinguishes one from a patch.
+
+The kind is reported apart and lower on purpose. The head of an English noun phrase is not
+recoverable from the closed class alone: `a free and open-source software project` gives `free` to
+any rule with no way to know which of those words is the noun. 0.760 is what that costs, stated
+rather than averaged away.
+
+### Ten defects, all found by real prose
+
+* **the wrong sentence's definition** — anchored to the concept now, by head and by core
+  containment, so `Kemp Town Estate` defines `Kemp Town` and `the relative size and development of
+  the breasts` does not define `Breast`;
+* **the fronted adverbial** — `In computer science, radix sort is …` made the sentence about
+  computer science. The commonest opening in encyclopedic prose, and the largest single class;
+* **the parenthetical** — `Ieoh Ming Pei ( ; ; April 26, 1917 – May 16, 2019) was …` has commas
+  inside brackets, so the subject ended at one and the article was about *April 26*;
+* **the sentence that was not one** — `Dr.` split a sentence in two, and `fifth century BC.` failed
+  to. An abbreviation is capitalised then lower-case; an initialism is not;
+* **the passive read as a copula** — *was released*, *is characterized by*, *regarded as*,
+  *referred to as*, *supported by*. A definition's complement is a noun phrase, and the tests for
+  one are learned from the lessons: a determiner, or a preposition-free head, or — for a
+  determinerless complement — a plural, because a bare noun phrase in English is plural or mass
+  and an adjective phrase is neither;
+* **the predication read as a description** — `The bagpipes are well known`;
+* **the dangling relative** — `a group of banana cultivars in the genus Musa whose fruits`, cut at
+  the relative pronoun unless a preposition governs it, because every lesson definition is built
+  as `the process by which …`;
+* **the semicolon** — crossed, because a lesson definition contains commas and the rule did not
+  distinguish the two marks;
+* **the number that ate the full stop** — `1981.` was one token, so the one lesson teaching the
+  past-plural copula matched nothing and taught nothing;
+* **the subject one token wide** — every lesson has a one-word subject, so the induced pattern had
+  one hole and `Tycho Brahe, generally called Tycho for short, was a Danish astronomer` matched
+  nothing at all. A hole in first position stands for the subject and absorbs a run; a run of
+  leading holes is one subject, not several.
+
+Two mechanisms in `passage.py` came out of this and generalise beyond it. **A closed-class
+alternation**: two cued shapes differing in exactly one closed-class anchor merge, so `<*> is` from
+eight lessons and `<*> was` from one become `<*> is|was` carrying both lessons' witnesses — over
+the forms actually seen and not the whole tag, because `is`, `was`, `has` and `did` share a tag and
+`X has a long history` is not a definition. And a **continuation shape** — one anchored on nothing
+but a comma, a conjunction and holes — may fire only where its own predicate already has; alone it
+turned `whose iconography, functions and myths are virtually identical` into `requires = myths`.
+
+Those two lifted the V.48 exam as well, without being aimed at it: **0.919 → 0.950** on the
+twenty-six, and **0.918 → 0.939** on the sealed nine, at precision 1.000.
+
+### And the thing the numbers say about the plan
+
+Across 2,771 leads: `definition` 4,179, `uses` 32, `requires` 32, `produces` 23, `purpose` 18,
+`occurs_in` 8. **A lead paragraph is a definition genre.** The causal and procedural relations the
+corpus plan wants are in the article *body*, not its opening, and no amount of work on the reader
+will find in a lead what a lead does not state. That is a fact about the source, and it is the
+input the next layer needs rather than a shortcoming of this one.
+
+Wired at `NJPBrain.read_article` (by title, with its citation, files nothing), `learn_encyclopedia`
+(files each claim with the article's URL, date and licence, so it can be dated, cited and
+retracted) and `go_to_encyclopedia_school`. The reader the brain builds is taught on both lesson
+sets when the corpus is present and falls back silently when it is not — a brain must not need a
+data file to read a paragraph.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
-`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, `/discourse`, `/explain`, and `/{organ}` — so growth and self-rewriting are observable
+`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, `/discourse`, `/explain`, `/passage`, and `/{organ}` — so growth and self-rewriting are observable
 from outside the process,
 not merely asserted in a docstring. On the console: `/njp`, and `/njp think` prints the synapse
 count before and after the turn, which is the claim this whole package has to earn.
