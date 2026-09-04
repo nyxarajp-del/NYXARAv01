@@ -395,6 +395,16 @@ from nyxara.njp.immune import (
     Standing as SourceStanding,
     Verdict as ImmuneVerdict,
 )
+# V.45. `Prediction` is already `njp.predict`'s and `Theory` is free; `Situation`, `Invariant`,
+# `Law` and `Hunter` are all free. Checked before adding, as ever.
+from nyxara.njp.theory import (
+    Hunter,
+    Invariant,
+    Law,
+    Prediction as LawPrediction,
+    Situation,
+    Theory,
+)
 from nyxara.njp.provenance import (
     Blame,
     Claim as ProvenanceClaim,
@@ -579,6 +589,8 @@ __all__ = [
     "ProvenanceKind", "ProvenanceStatus", "Blame", "PostMortem",
     # NJP V.44 — quarantine, so one new fact cannot corrupt the graph
     "Immune", "Antigen", "ImmuneVerdict", "SourceStanding",
+    # NJP V.45 — what never changes, and running what survives
+    "Hunter", "Situation", "Invariant", "Law", "Theory", "LawPrediction",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

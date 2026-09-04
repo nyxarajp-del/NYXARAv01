@@ -60,6 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39k | Invariant → law → executable theory (what survives across situations whose **vocabularies share nothing** — found by structural alignment, not by recurring names — refused when one situation, when it could not have failed, or when an exception would have to be hidden. Then compiled: `Theory.predict` takes a situation never seen, aligns it, and says what the law requires to be there, which is a falsifiable claim produced by a rule nobody wrote) | `nyxara.njp.theory` | NEW |
 | 39j | Cognitive immune system (a new claim that would make an existing question unanswerable is **quarantined** — kept, retrievable, out of the store — while everything that merely adds is admitted, and standing is *earned* by having quarantined claims confirmed rather than declared. Built against a measured regression and it repairs it: the broad corpus's 130,274 subjects kept in full, `recall` back to the curated level, 8.8% of claims isolated. The response runs both ways: a challenger that outranks the incumbent displaces it) | `nyxara.njp.immune` + `nyxara.njp.general` | NEW |
 | 39i | Auditable conclusions (every claim carries the path that produced it — facts, edges, inferences, assumptions — and a claim with no path is `UNKNOWN` rather than weak. Blame ranks by exclusivity rather than frequency, so the lone assumption is named and not the fact four other standing claims also rest on; and a failure is stored with its culprit, so a *completely differently worded* problem reasoned through the same assumption raises a warning) | `nyxara.njp.provenance` + `nyxara.njp.loop` | NEW |
 | 39h | The closed loop (observations → structure → latent hypothesis → experiment → revision → a prediction nobody asked for, as one runnable cycle: hidden causes proposed and never believed, interventions chosen by how much they move *the question you are about to be asked*, revision in both directions, an autopsy that keeps the edge that carried a failed claim, and five distinct reasons for not knowing. Measured on randomly generated worlds with unobserved variables where **declining is sometimes the only pass**. It beats reconstruction on structure, on latents and on ending with the right kind of world — and the loop does **not close**: 0.125, the same as the reconstructor) | `nyxara.njp.loop` + `nyxara.njp.discovery` | PARTIAL |
@@ -4221,6 +4222,77 @@ the breadth. `load_brain(broad=True)` now goes through the guard by default and
 it.
 
 Run it: `load_brain(broad=True)`, `Immune.held_against(subject, predicate)`, `Immune.report()`.
+
+
+#### NJP V.45 — the invariant hunter and the theory compiler
+
+Two of the Master's items, built as one pipeline because separating them produces a module that
+*names* a regularity and a module that *runs* one with nothing to run:
+
+```
+#9   examples → what survives every change → invariant → abstract law
+#11  law → formal representation → executable predictor → compare → revise
+```
+
+The line that makes it hard is in the spec: *"system state changes, parameters change, **surface
+vocabulary changes**, but relationship X → Y survives."* So an invariant cannot be found by asking
+which variable names recur — in the interesting case **none of them do**. What recurs is *shape*,
+which is the claim `fusion` makes across domains, made here across **occasions**: fusion asks what
+biology and engineering have in common; this asks what Monday and Thursday have in common when
+Monday's variables are called nothing Thursday's are.
+
+```
+monday    a → b → c,  a requires c
+thursday  p → q → r,  p requires r
+august    x → y → z,  x requires z
+          ↓
+INVARIANT over 3 situations
+role0 —causes→ role1; role0 —requires→ role2; role1 —causes→ role2
+  role0 = august: x, monday: a, thursday: p
+```
+
+Roles are **positions, not names**, for the reason `fusion.Abstraction` leaves its shapes unnamed.
+
+##### Three things that stop it being correlation
+
+**One situation is not an invariant** — anything holds in one. `MIN_SITUATIONS` is three, because
+two can be a coincidence with a name. **A relation that could not have failed is not a finding**:
+if every situation has the edge because every situation has every edge, that describes the
+encoding, not the world, and `Invariant.discriminating` refuses it. **An exception is recorded,
+never hidden.**
+
+That last one was broken by the code that states it. Given four situations where one lacks an
+edge, the hunter preferred the perfect subset — it **dropped** the edge with the counterexample
+and reported an INVARIANT over what was left. Silently removing it turns a checkable law into a
+smaller true one that says less. It now returns both:
+
+```
+INVARIANT over 4 situations          role0 —causes→ role1; role1 —causes→ role2
+LAW (with 1 exception) over 3        role0 —requires→ role2
+                                       EXCEPT in odd
+```
+
+##### And it runs
+
+`Law.compile()` returns a `Theory` with `predict(situation)` — take a situation never seen, align
+it to the roles, and **say what the law requires to be there**:
+
+```
+unseen:  m → n → o        (the `requires` edge withheld)
+predict: aligned, missing ['m', 'requires', 'o']
+```
+
+That is a falsifiable claim about a situation nobody described, produced by a rule nobody wrote.
+`Theory.check` runs it over many and returns `holds` / `invalid` / `incomplete`, which closes the
+Master's theory → simulate → predict → compare loop.
+
+Two refusals: **alignment never sees the edge being predicted** — aligning on the answer and then
+predicting it is the mistake every exam in this package has had to be rescued from at least once,
+so the caller names what is hidden and the search never sees it. And **a law may not widen its own
+scope**: induced from three-variable situations, it declines a five-variable one rather than
+guessing.
+
+Run it: `Hunter().hunt(situations)`, `law.compile().predict(unseen)`, `Theory.check`.
 
 
 ### Reachable over the wire
