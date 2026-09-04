@@ -394,6 +394,9 @@ class NJPBrain:
         self.genome = self._build_genome(c)
         # After the grounder, because `learn_passage` files what it reads through it, and after
         # nothing else: reading a passage consults no other organ.
+        #: Set by `_build_reader` when the Wikipedia corpus is present. `None` otherwise, and
+        #: everything that reads it treats that as "no encyclopedia", never as an error.
+        self.encyclopedia = None
         self.reader = self._build_reader(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
@@ -1878,6 +1881,19 @@ class NJPBrain:
         try:
             from nyxara.njp.passage import taught_reader
 
+            # Taught on the encyclopedia's own sentences too, when the corpus is here. Measured:
+            # on 2,771 real Wikipedia leads the synthetic lessons alone produce a definition for
+            # 0.615 of articles and the two sets together for 0.820 — the constructions a lesson
+            # was written in are the constructions it can read, and the encyclopedia's are not
+            # this package's. Falls back silently when the corpus is absent, because a brain must
+            # not need a data file to read a paragraph.
+            if self._gate("encyclopedia", True):
+                from nyxara.njp.encyclopedia import Encyclopedia, taught_on_wikipedia
+
+                book = Encyclopedia()
+                if book.load():
+                    self.encyclopedia = book
+                    return taught_on_wikipedia(book)
             return taught_reader()
         except Exception:  # noqa: BLE001 — a brain without it still parses sentences
             return None
@@ -2153,6 +2169,51 @@ class NJPBrain:
             except Exception:  # noqa: BLE001
                 out["skipped"].append(f"{subject} | {predicate} = {value}")
         return out
+
+    def read_article(self, title: str) -> Any:
+        """Read one article of the corpus by title, into layers, with its citation. Files nothing."""
+        if self.reader is None or self.encyclopedia is None:
+            return None
+        try:
+            article = next((a for a in self.encyclopedia.load() if a.title == str(title)), None)
+            if article is None:
+                return None
+            return self.encyclopedia.read(article, self.reader)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def learn_encyclopedia(self, *, limit: int = 0, domain: str = "") -> Dict[str, Any]:
+        """Read the corpus and file what it says, article by article.
+
+        Every claim carries the article's URL, the date the dump was taken and its licence, so a
+        fact mined out of prose can be dated, cited and retracted. Returns counts and the domains
+        touched — not the claims, because at corpus scale a list of them is not something a caller
+        can read. `learn_passage` is the per-article call and it does return them.
+        """
+        out: Dict[str, Any] = {"articles": 0, "filed": 0, "read": 0, "domains": {}}
+        if self.reader is None or self.encyclopedia is None:
+            return out
+        try:
+            rows = self.encyclopedia.sample(int(limit), domain=str(domain))
+            for article in rows:
+                got = self.learn_passage(article.text, concept=self.encyclopedia.name_of(article),
+                                         source=article.url or article.source)
+                out["articles"] += 1
+                out["read"] += int(got.get("read") or 0)
+                out["filed"] += len(got.get("filed") or ())
+                out["domains"][article.domain] = out["domains"].get(article.domain, 0) + 1
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def go_to_encyclopedia_school(self) -> Any:
+        """Coverage, audited precision and definition accuracy on real encyclopedia prose."""
+        try:
+            from nyxara.njp.encyclopediaschool import run
+
+            return run().to_dict()
+        except Exception:  # noqa: BLE001
+            return None
 
     def go_to_passage_school(self) -> Any:
         """Sit the passage gauntlet: held-out subjects, the two floors and the ablations."""

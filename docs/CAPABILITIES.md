@@ -4537,6 +4537,117 @@ through the grounder as `source="passage"`, and returns *which* claims entered r
 `go_to_passage_school`, and `/v1/njp/passage`. Extraction and filing are kept apart on purpose: a
 method that did both would put the filing decision out of the caller's reach.
 
+## V.49 — the same reader, on prose it did not write
+
+V.48's reader scores 0.950 on twenty-six passages and 0.939 on a sealed nine. Every one of them
+was written by one hand in one week. `njp/encyclopedia.py` points it at Wikipedia, which was not:
+**2,771 real lead paragraphs across 46 domains**, built offline from an `enwiki` dump by
+`scripts/build_wikipedia_corpus.py`, each with its title, URL, dump date and licence.
+
+The live API was tried first and abandoned, for a reason worth recording: it answers a shared
+address from this container, a burst returns 429 for everybody on it, and at a polite pace the run
+projected past two hours. A dump has no rate limit, does not change between runs, and needs no
+network at test time — a corpus that drifts makes every number taken against it unrepeatable.
+
+### What real prose did to it
+
+Cold, the V.48 reader on the corpus: **a definition for 0.725 of articles** — and 28 points of
+that were the *wrong sentence*. Every Wikipedia lead holds several copulas and only the first is
+about the subject, so the thyroid was defined as `two connected lobes` and the lung as `to extract
+oxygen from the atmosphere`. Both true sentences; neither a definition of the article. Anchoring
+the definition to the concept dropped the number to **0.439** — lower, and true.
+
+| | definition | kind | any relation | sentences read |
+| --- | --- | --- | --- | --- |
+| V.48 reader, cold | 0.725 (28pp of it the wrong sentence) | — | 0.768 | 0.350 |
+| after the structural fixes | 0.615 | 0.613 | 0.791 | 0.381 |
+| **+ seven lessons in the encyclopedia's own voice** | **0.809** | **0.804** | **0.897** | 0.312 |
+
+That middle row to the last one is the finding: **seven real sentences bought more than any fix to
+the reader's own machinery.** Taught only on prose written here, `uses` fired **zero** times across
+2,771 leads. The constructions the lessons had were the ones their author writes; Wikipedia's are
+`are`, `was`, `were`, `refers to`, `is used to`, `consists of` and `occurs when`, and not one
+appeared in a single demonstration. Only the *expectations* of those lessons are written in the
+module — the text is pulled from the corpus by title, so a lesson cannot quietly become a sentence
+that suits the reader better than the one the encyclopedia contains, and a test asserts none of
+them is in either exam slice.
+
+### Marked by hand, twice
+
+Coverage is not accuracy, so **111 relations were marked one at a time** against the sentence each
+came from, over two deterministic and disjoint slices — one the fixes were made against, one never
+looked at until the end.
+
+| | precision |
+| --- | --- |
+| audited slice | **0.868** (33/38) |
+| sealed slice | **0.857** (42/49) |
+| the article's own definition | 0.840 of 25 |
+| the kind it falls under | 0.760 of 25 |
+
+The two slices agreeing is the result. They did not, at first: before the complement test the
+audited slice read 0.750 and the sealed one **0.642**, and that gap was the measurement telling on
+the fixes. A structural rule closed it, which is what distinguishes one from a patch.
+
+The kind is reported apart and lower on purpose. The head of an English noun phrase is not
+recoverable from the closed class alone: `a free and open-source software project` gives `free` to
+any rule with no way to know which of those words is the noun. 0.760 is what that costs, stated
+rather than averaged away.
+
+### Ten defects, all found by real prose
+
+* **the wrong sentence's definition** — anchored to the concept now, by head and by core
+  containment, so `Kemp Town Estate` defines `Kemp Town` and `the relative size and development of
+  the breasts` does not define `Breast`;
+* **the fronted adverbial** — `In computer science, radix sort is …` made the sentence about
+  computer science. The commonest opening in encyclopedic prose, and the largest single class;
+* **the parenthetical** — `Ieoh Ming Pei ( ; ; April 26, 1917 – May 16, 2019) was …` has commas
+  inside brackets, so the subject ended at one and the article was about *April 26*;
+* **the sentence that was not one** — `Dr.` split a sentence in two, and `fifth century BC.` failed
+  to. An abbreviation is capitalised then lower-case; an initialism is not;
+* **the passive read as a copula** — *was released*, *is characterized by*, *regarded as*,
+  *referred to as*, *supported by*. A definition's complement is a noun phrase, and the tests for
+  one are learned from the lessons: a determiner, or a preposition-free head, or — for a
+  determinerless complement — a plural, because a bare noun phrase in English is plural or mass
+  and an adjective phrase is neither;
+* **the predication read as a description** — `The bagpipes are well known`;
+* **the dangling relative** — `a group of banana cultivars in the genus Musa whose fruits`, cut at
+  the relative pronoun unless a preposition governs it, because every lesson definition is built
+  as `the process by which …`;
+* **the semicolon** — crossed, because a lesson definition contains commas and the rule did not
+  distinguish the two marks;
+* **the number that ate the full stop** — `1981.` was one token, so the one lesson teaching the
+  past-plural copula matched nothing and taught nothing;
+* **the subject one token wide** — every lesson has a one-word subject, so the induced pattern had
+  one hole and `Tycho Brahe, generally called Tycho for short, was a Danish astronomer` matched
+  nothing at all. A hole in first position stands for the subject and absorbs a run; a run of
+  leading holes is one subject, not several.
+
+Two mechanisms in `passage.py` came out of this and generalise beyond it. **A closed-class
+alternation**: two cued shapes differing in exactly one closed-class anchor merge, so `<*> is` from
+eight lessons and `<*> was` from one become `<*> is|was` carrying both lessons' witnesses — over
+the forms actually seen and not the whole tag, because `is`, `was`, `has` and `did` share a tag and
+`X has a long history` is not a definition. And a **continuation shape** — one anchored on nothing
+but a comma, a conjunction and holes — may fire only where its own predicate already has; alone it
+turned `whose iconography, functions and myths are virtually identical` into `requires = myths`.
+
+Those two lifted the V.48 exam as well, without being aimed at it: **0.919 → 0.950** on the
+twenty-six, and **0.918 → 0.939** on the sealed nine, at precision 1.000.
+
+### And the thing the numbers say about the plan
+
+Across 2,771 leads: `definition` 4,179, `uses` 32, `requires` 32, `produces` 23, `purpose` 18,
+`occurs_in` 8. **A lead paragraph is a definition genre.** The causal and procedural relations the
+corpus plan wants are in the article *body*, not its opening, and no amount of work on the reader
+will find in a lead what a lead does not state. That is a fact about the source, and it is the
+input the next layer needs rather than a shortcoming of this one.
+
+Wired at `NJPBrain.read_article` (by title, with its citation, files nothing), `learn_encyclopedia`
+(files each claim with the article's URL, date and licence, so it can be dated, cited and
+retracted) and `go_to_encyclopedia_school`. The reader the brain builds is taught on both lesson
+sets when the corpus is present and falls back silently when it is not — a brain must not need a
+data file to read a paragraph.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,

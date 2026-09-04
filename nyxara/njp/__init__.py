@@ -417,6 +417,12 @@ from nyxara.njp.conceptgenome import Genome, Kinship, read_genome
 # V.48. `Demonstration` belongs to `njp.coding` in this namespace and `Shape` to `njp.reasoning`,
 # so both are qualified here rather than shadowing modules that had the name first. `Relation` is
 # free, and it is the right word for what it is: one relation read out of a passage.
+from nyxara.njp.encyclopedia import (
+    Article,
+    Coverage,
+    Encyclopedia,
+    taught_on_wikipedia,
+)
 from nyxara.njp.passage import (
     Demonstration as ReadingLesson,
     KnowledgeObject,
@@ -616,6 +622,7 @@ __all__ = [
     "Genome", "Kinship", "read_genome",
     "KnowledgeObject", "PassageReader", "Relation", "ReadingLesson", "ReadingShape",
     "taught_reader",
+    "Article", "Coverage", "Encyclopedia", "taught_on_wikipedia",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

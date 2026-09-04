@@ -96,8 +96,12 @@ MAX_FILLER = 8
 #: be confidently wrong.
 MIN_WITNESSES = 2
 
-_TOKEN_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9'’\-]*|[,;]")
-_SENTENCE_RX = re.compile(r"(?<=[.!?])\s+")
+# A number ends on a digit. Written to allow an internal separator, the pattern swallowed the
+# full stop that ended the sentence, so the lesson "... formed in New York City in 1981." held a
+# token "1981." that its own expectation ("... in 1981") could never match — and the one lesson
+# teaching the past-plural copula silently taught nothing at all.
+_TOKEN_RX = re.compile(r"[^\W\d_][\w'’\-]*|\d(?:[\d.,]*\d)?|[,;]", re.UNICODE)
+_SENTENCE_RX = re.compile(r"(?<=[.!?])[\"'\u201d\u2019)\]]?\s+")
 
 _PUNCT = "PUNCT"
 _WORD = "WORD"
@@ -126,10 +130,19 @@ def _table() -> Tuple[Dict[str, str], Any]:
 
 @dataclass(frozen=True)
 class Tok:
-    """One token and its closed-class tag."""
+    """One token, its closed-class tag, and where it sits in the text it came from.
+
+    The offsets are what let a filler be returned as the **surface span** the passage actually
+    contains rather than as a detokenised reconstruction of it. Without them the definition of
+    Abac\u00e1 came back as ``textiles abaca cloth or medri aque`` -- lowercased, stripped of its
+    punctuation, and with a character the tokeniser could not hold silently split into two words.
+    A provenance layer that stores a claim the source does not contain is not a provenance layer.
+    """
 
     text: str = ""
     tag: str = _WORD
+    start: int = 0
+    end: int = 0
 
     @property
     def open_class(self) -> bool:
@@ -138,10 +151,12 @@ class Tok:
 
 def _toks(text: str) -> List[Tok]:
     closed, _ = _table()
+    raw = str(text or "")
     out: List[Tok] = []
-    for match in _TOKEN_RX.finditer(str(text or "").lower()):
-        word = match.group(0)
-        out.append(Tok(word, _PUNCT if word in (",", ";") else closed.get(word, _WORD)))
+    for match in _TOKEN_RX.finditer(raw):
+        word = match.group(0).lower()
+        out.append(Tok(word, _PUNCT if word in (",", ";") else closed.get(word, _WORD),
+                       match.start(), match.end()))
     return out
 
 
@@ -161,7 +176,58 @@ def _bare(toks: Sequence["Tok"]) -> List["Tok"]:
 
 
 def _sentences(text: str) -> List[str]:
-    return [s.strip() for s in _SENTENCE_RX.split(str(text or "").strip()) if s.strip()]
+    """Split on sentence enders, but not on the full stop of an abbreviation.
+
+    ``Dr. Henry Walton "Indiana" Jones, Jr., ... is the title character`` split into a first
+    sentence of ``Dr`` and lost the article's definition entirely. The rule needs no list of
+    abbreviations: a short capitalised token before a full stop is an abbreviation, and a
+    sentence does not end on one.
+    """
+    raw = str(text or "").strip()
+    out: List[str] = []
+    held = ""
+    for part in _SENTENCE_RX.split(raw):
+        held = f"{held} {part}".strip() if held else part
+        last = held.rsplit(" ", 1)[-1].rstrip(".")
+        # An abbreviation is capitalised and then lower-case: Dr., Mr., St., Jr. An all-capital
+        # token is an initialism -- BC, AD, US -- and a sentence very often ends on one, which is
+        # how "active in the middle of the fifth century BC. He and Ictinus were architects"
+        # became a single sentence and a single garbled definition.
+        if (held.endswith(".") and len(last) <= 3 and last[:1].isupper()
+                and not last.isupper()):
+            continue
+        if held.strip():
+            out.append(held.strip())
+        held = ""
+    if held.strip():
+        out.append(held.strip())
+    return out
+
+
+def _unparenthesise(text: str) -> str:
+    """Blank out parenthesised asides, keeping every other character where it was.
+
+    Wikipedia opens most of its articles with one: a pronunciation, a native spelling, a pair of
+    dates, an abbreviation. They are asides, and reading them as part of the sentence is what made
+    ``Ieoh Ming Pei ( ; ; April 26, 1917 - May 16, 2019) was a Chinese-American architect`` a
+    sentence whose subject ended at a comma inside the brackets and was therefore about
+    ``April 26``. Replaced by spaces rather than removed, so every offset still points at the
+    character it pointed at and a filler can still be returned as the span the passage contains.
+    """
+    raw = str(text or "")
+    out = list(raw)
+    depth = 0
+    for index, char in enumerate(raw):
+        if char in "([":
+            depth += 1
+            out[index] = " "
+        elif char in ")]":
+            if depth:
+                depth -= 1
+            out[index] = " "
+        elif depth:
+            out[index] = " "
+    return "".join(out)
 
 
 def _words(toks: Sequence[Tok]) -> List[str]:
@@ -232,6 +298,13 @@ class KnowledgeObject:
     sentences: Tuple[str, ...] = ()
     source: str = ""
     domain: str = ""
+    #: Where the passage came from, when it was taken, and under what licence. Empty for prose a
+    #: caller supplied directly; filled by :mod:`nyxara.njp.encyclopedia` for prose she fetched.
+    #: A medical or legal claim without a date is not a weaker claim — the plan is explicit that
+    #: it is a differently shaped one — so the fields are on the object rather than in a log.
+    url: str = ""
+    retrieved: str = ""
+    licence: str = ""
     confidence: float = 0.0
     #: ``sentence -> the shapes that read it``. Empty for a sentence nothing read, which is how
     #: the school finds what the induced grammar still cannot see.
@@ -253,6 +326,7 @@ class KnowledgeObject:
                 "relations": [r.to_dict() for r in self.relations],
                 "conditions": list(self.conditions),
                 "source": self.source, "domain": self.domain,
+                "url": self.url, "retrieved": self.retrieved, "licence": self.licence,
                 "confidence": round(self.confidence, 4),
                 "sentences": list(self.sentences),
                 "unresolved": list(self.unresolved),
@@ -301,6 +375,9 @@ class Shape:
     #: The pattern still contains an open-class word that anchors **this predicate and no other**
     #: anywhere in the demonstrations. Set by :meth:`PassageReader._consolidate`, never by hand.
     relation_word: bool = False
+    #: Anchored on nothing but punctuation, a conjunction and holes -- the tail of a list rather
+    #: than the head of a relation. Such a shape may fire only after its predicate already has.
+    continuation: bool = False
     #: Passages this shape has read that were not the ones it was induced from.
     unseen: int = 0
 
@@ -314,6 +391,10 @@ class Shape:
         return sum(1 for w in self.left + self.right if w != _HOLE)
 
     @property
+    def literals(self) -> Tuple[Any, ...]:
+        return tuple(w for w in self.left + self.right if w != _HOLE)
+
+    @property
     def trusted(self) -> bool:
         return (self.level == "frame" or self.relation_word
                 or len(self.witnesses) >= MIN_WITNESSES)
@@ -323,13 +404,18 @@ class Shape:
         """It has read something nobody demonstrated. The only evidence that it is a shape."""
         return self.unseen > 0
 
+    @staticmethod
+    def _show(pattern: Sequence[Any]) -> str:
+        return " ".join("|".join(sorted(w)) if isinstance(w, frozenset) else str(w)
+                        for w in pattern)
+
     def render(self) -> str:
-        return f"{' '.join(self.left)} <{self.predicate}> {' '.join(self.right)}".strip()
+        return f"{self._show(self.left)} <{self.predicate}> {self._show(self.right)}".strip()
 
     def to_dict(self) -> Dict[str, Any]:
         return {"predicate": self.predicate, "pattern": self.render(), "level": self.level,
                 "witnesses": sorted(self.witnesses), "unseen": self.unseen,
-                "relation_word": self.relation_word,
+                "relation_word": self.relation_word, "continuation": self.continuation,
                 "trusted": self.trusted, "generalises": self.generalises}
 
 
@@ -383,6 +469,23 @@ class PassageReader:
         #: ``requires an expanding money supply and produces a fall in real wages`` came back as
         #: ``requires = produces fall in real wages``.
         self._relation_words: Dict[str, str] = {}
+        #: Two things learned per predicate from the shape of the fillers a teacher pointed at,
+        #: and both were needed the moment the reader met an encyclopedia.
+        #:
+        #: ``_det_headed`` — every demonstrated ``definition`` opens on a determiner ("a food
+        #: additive", "the number of bits"), and nothing else demonstrated does. That is what
+        #: separates a copula from a **passive**: ``X is a species of banana`` defines X and
+        #: ``X was released in May 2000`` does not, and without the test the reader called the
+        #: second one a definition. On Wikipedia that was the single largest error class —
+        #: *released*, *supported by*, *regarded as*, *referred to as*, *characterized by*.
+        #:
+        #: ``_may_cross_comma`` — a demonstrated ``definition`` contains commas of its own
+        #: ("the god of fertility, agriculture, the afterlife, ..."), and a demonstrated
+        #: ``requires`` never does, because there a comma opens the next list item. So the scan
+        #: stops at a comma for one and runs past it for the other. Both are read off the
+        #: lessons; neither is a rule about the word *definition*.
+        self._det_headed: Dict[str, bool] = {}
+        self._may_cross_comma: Dict[str, bool] = {}
         #: Reference cases the lessons themselves demonstrate, and what fitting them found.
         #: Constructing a bare :class:`~nyxara.njp.discourse.Reference` was a real defect and the
         #: school caught it by the only means that could: the ``no_pronouns`` ablation changed
@@ -402,11 +505,17 @@ class PassageReader:
             name = demo.name or demo.text[:32]
             self._taught.add(name)
             self._demo_texts.add(_norm(demo.text))
-            for _predicate, obj in demo.pairs():
+            closed, Tag = _table()
+            for predicate, obj in demo.pairs():
                 self._filler_words.update(_words(_bare(_toks(obj))))
+                first = _words(_toks(obj))[:1]
+                headed = bool(first) and closed.get(first[0]) == Tag.DET
+                self._det_headed[predicate] = self._det_headed.get(predicate, True) and headed
+                if "," in obj:
+                    self._may_cross_comma[predicate] = True
             self._concept_words.update(_words(_bare(_toks(demo.concept))))
             for sentence in _sentences(demo.text):
-                toks = _bare(_toks(sentence))
+                toks = _bare(_toks(_unparenthesise(sentence)))
                 words = _words(toks)
                 for predicate, obj in demo.pairs():
                     span = _find(words, _words(_bare(_toks(obj))))
@@ -444,7 +553,7 @@ class PassageReader:
         anchors: Dict[str, Dict[str, Set[str]]] = {}
         for frame in frames:
             for word in frame.left + frame.right:
-                if not _open_class(word):
+                if not isinstance(word, str) or not _open_class(word):
                     continue
                 if word in self._filler_words or word in self._concept_words:
                     continue                  # an entity, not a relation word
@@ -457,6 +566,8 @@ class PassageReader:
             ranked = sorted(spread.items(), key=lambda kv: (-len(kv[1]), kv[0]))
             if len(ranked) == 1 or len(ranked[0][1]) > len(ranked[1][1]):
                 dominant[word] = ranked[0][0]
+        for frame in frames:
+            frame.continuation = _continuation(frame.left, frame.right)
         rebuilt: Dict[Tuple[str, Tuple[str, ...], Tuple[str, ...], str], Shape] = {
             f.key: f for f in frames}
         for frame in frames:
@@ -473,16 +584,25 @@ class PassageReader:
             right = tuple(hole(w) for w in frame.right)
             if (left, right) == (frame.left, frame.right):
                 continue                      # nothing was abstracted; the frame already is it
+            # A run of holes at the start of the pattern is one subject, not several. The
+            # lessons taught "Plant **cells** are" and "Merge **algorithms** are" — two-word
+            # subjects, so two holes — and the shape then could not read "Bees are winged
+            # insects", whose subject is one word and leaves the first hole nothing to stand for.
+            while len(left) > 1 and left[0] == _HOLE and left[1] == _HOLE:
+                left = left[1:]
             cued = Shape(predicate=frame.predicate, left=left, right=right, level="cued")
             if not cued.anchors:
                 continue                      # all holes — matches every clause, refused
-            cued.relation_word = any(dominant.get(w) == frame.predicate for w in left + right)
+            cued.relation_word = any(isinstance(w, str) and dominant.get(w) == frame.predicate
+                                     for w in left + right)
+            cued.continuation = _continuation(left, right)
             held = rebuilt.get(cued.key)
             if held is None:
                 rebuilt[cued.key] = cued
                 held = cued
             held.witnesses |= frame.witnesses
             held.relation_word = held.relation_word or cued.relation_word
+        self._merge(rebuilt)
         self._relation_words = dict(dominant)
         for key, shape in rebuilt.items():
             was = self.shapes.get(key)
@@ -579,6 +699,57 @@ class PassageReader:
     def taught(self) -> Tuple[str, ...]:
         return tuple(sorted(self._taught))
 
+    @staticmethod
+    def _merge(shapes: Dict[Any, Shape]) -> None:
+        """Two cued shapes that differ in exactly one closed-class anchor become an alternation.
+
+        ``<*> is <SLOT>`` came from eight lessons and ``<*> was <SLOT>`` from one, so the second
+        failed the witness gate and every article whose subject is in the past tense went unread.
+        They are the same construction with the copula inflected, and the evidence for that is in
+        the demonstrations themselves: **the same pattern realised with two different members of
+        one closed class** is what a class-generalisable slot looks like. Merged, the alternation
+        carries both lessons' witnesses, and a third form is a third lesson away rather than a
+        rewrite.
+
+        Deliberately an alternation over the forms actually seen and not over the whole tag:
+        ``is``, ``was``, ``has`` and ``did`` share a tag here, and reading ``X has a long
+        history`` as a definition of X is exactly the confident error the gate exists to stop.
+        """
+        closed, _ = _table()
+        cued = [s for s in shapes.values() if s.level == "cued"]
+        for index, one in enumerate(cued):
+            for other in cued[index + 1:]:
+                if one.predicate != other.predicate:
+                    continue
+                for side in ("left", "right"):
+                    first, second = getattr(one, side), getattr(other, side)
+                    fixed = "right" if side == "left" else "left"
+                    if getattr(one, fixed) != getattr(other, fixed):
+                        continue
+                    if len(first) != len(second):
+                        continue
+                    differ = [k for k in range(len(first)) if first[k] != second[k]]
+                    if len(differ) != 1:
+                        continue
+                    at = differ[0]
+                    a, b = first[at], second[at]
+                    if not (isinstance(a, (str, frozenset)) and isinstance(b, (str, frozenset))):
+                        continue
+                    forms = set()
+                    for value in (a, b):
+                        forms |= set(value) if isinstance(value, frozenset) else {value}
+                    if _HOLE in forms:
+                        continue
+                    tags = {closed.get(f) for f in forms}
+                    if len(tags) != 1 or None in tags:
+                        continue        # not one closed class — nothing licenses the merge
+                    merged = list(first)
+                    merged[at] = frozenset(forms)
+                    setattr(one, side, tuple(merged))
+                    setattr(other, side, tuple(merged))
+                    one.witnesses |= other.witnesses
+                    other.witnesses = set(one.witnesses)
+
     def usable(self) -> List[Shape]:
         """Every frame, plus a cued shape that either kept a relation word or has two witnesses.
 
@@ -614,7 +785,7 @@ class PassageReader:
             seen: Set[Tuple[str, str, str]] = set()
             unseen_passage = _norm(text) not in self._demo_texts
             for turn, sentence in enumerate(sentences):
-                toks = _bare(_toks(sentence))
+                toks = _bare(_toks(_unparenthesise(sentence)))
                 if not toks:
                     continue
                 condition, body = self._condition(toks)
@@ -626,7 +797,7 @@ class PassageReader:
                 if not subject and self.topic_subject:
                     subject = topic
                 read_by: List[str] = []
-                for predicate, filler, shape in self._scan(body):
+                for predicate, filler, shape in self._scan(body, sentence):
                     for one in self._split(filler):
                         relation = Relation(predicate=predicate, object=one, subject=subject,
                                             condition=condition, sentence=sentence,
@@ -648,28 +819,38 @@ class PassageReader:
             obj.concept = topic
             obj.relations = tuple(relations)
             obj.unresolved = tuple(unresolved)
-            obj.definition = self._definition(relations)
-            obj.kind = self._head(obj.definition) or self._kind(relations)
+            obj.definition = self._definition(relations, topic)
+            obj.kind = self._head(obj.definition) or self._kind(relations, topic)
             obj.entities = tuple(dict.fromkeys(e for e in entities if e))
         except Exception:  # noqa: BLE001 — an unreadable passage is read as far as it got
             return obj
         return obj
 
     # -- the pieces reading is made of --------------------------------------- #
-    def _scan(self, toks: Sequence[Tok]) -> List[Tuple[str, str, Shape]]:
-        """Every filler every usable shape finds in this clause, shortest filler per shape."""
+    def _scan(self, toks: Sequence[Tok], source: str = "") -> List[Tuple[str, str, Shape]]:
+        """Every filler every usable shape finds in this clause, shortest filler per shape.
+
+        A **continuation** shape -- one anchored on nothing but a comma, a conjunction and holes --
+        fires only where its own predicate has already fired in this clause. It carries no
+        evidence of *which* relation the list belongs to, so on its own it reads any coordination
+        as any relation: on Wikipedia's Proserpina lead it turned ``whose iconography, functions
+        and myths are virtually identical`` into ``requires = myths``.
+        """
         out: List[Tuple[str, str, Shape]] = []
-        for shape in self.usable():
-            for filler in self._match(shape, toks):
+        opened: Set[str] = set()
+        for shape in sorted(self.usable(), key=lambda s: (s.continuation, s.level != "frame")):
+            if shape.continuation and shape.predicate not in opened:
+                continue
+            for filler in self._match(shape, toks, source):
                 out.append((shape.predicate, filler, shape))
+                opened.add(shape.predicate)
         return out
 
-    def _match(self, shape: Shape, toks: Sequence[Tok]) -> List[str]:
+    def _match(self, shape: Shape, toks: Sequence[Tok], source: str = "") -> List[str]:
         n = len(toks)
         found: List[str] = []
-        width = len(shape.left)
         for i in range(0, n):
-            if not self._pattern(shape.left, toks, i - width):
+            if not self._left_matches(shape.left, toks, i):
                 continue
             # The cap exists to stop an unbounded rightward scan. Where the shape has no right
             # anchor the scan is already bounded by the end of the sentence, so applying the cap
@@ -679,16 +860,74 @@ class PassageReader:
                 if shape.right:
                     if not self._pattern(shape.right, toks, j):
                         continue
-                elif j != n and toks[j].tag != _PUNCT:
+                elif j != n and not (toks[j].tag == _PUNCT
+                                     and (toks[j].text == ";"
+                                          or not self._may_cross_comma.get(shape.predicate))):
                     continue
-                filler = self._clean(toks[i:j], shape.predicate)
-                if filler:
+                filler = self._clean(toks[i:j], shape.predicate, source)
+                if filler and self._well_headed(shape.predicate, toks, i, source):
                     found.append(filler)
                 break
         return found
 
+    def _left_matches(self, pattern: Sequence[Any], toks: Sequence[Tok], before: int) -> bool:
+        """The left anchors, ending immediately before ``before``.
+
+        A hole in **first** position stands for the sentence's subject and absorbs a run rather
+        than one token. The lessons all have a one-word subject, so the induced pattern had one
+        hole there, and ``Tycho Brahe, generally called Tycho for short, was a Danish astronomer``
+        matched nothing: the token before ``was`` is a comma, not a noun. The subject of a
+        sentence is not one token wide, and a pattern that assumed it was could only read
+        sentences whose subject happened to be.
+        """
+        if not pattern:
+            return True
+        if pattern[0] == _HOLE and len(pattern) > 1:
+            tail = pattern[1:]
+            start = before - len(tail)
+            return start >= 1 and self._pattern(tail, toks, start)
+        return self._pattern(pattern, toks, before - len(pattern))
+
+    def _well_headed(self, predicate: str, toks: Sequence[Tok], at: int, source: str) -> bool:
+        """Does this filler open like a thing, or like a verb?
+
+        A determiner is the clearest sign of a noun phrase, and every demonstrated ``definition``
+        has one. It is not the only one: English drops the determiner for bare plurals, so
+        *"Bees are winged insects"* is as much a definition as *"A byte is a unit"* and the
+        determiner test alone threw it away along with the passives it was written for.
+
+        The second test is what a participle does that a noun does not: it takes a preposition
+        almost immediately. *released **in** May*, *characterized **by** its focus*, *supported
+        **by** private funding*, *referred **to** as*, *connected **by** a band* — against
+        *winged insects that form a clade*, where the next tokens are nouns. So a determinerless
+        filler is accepted only when no preposition follows within the head's own span. Both
+        tests are structural; neither knows the word "definition".
+        """
+        if not self._det_headed.get(predicate):
+            return True
+        closed, Tag = _table()
+        before = source[:toks[at].start].rstrip() if source else ""
+        if before:
+            previous = re.split(r"[^\w'\u2019-]+", before)[-1].lower()
+            if closed.get(previous) == Tag.DET:
+                return True
+        # ``as`` is a preposition here and the closed-class table does not list it, so
+        # "referred **to as** Ogg Vorbis", "regarded **as** one of the pioneers" and "selected
+        # **as** Director of Works" all read as definitions. Named once, where the test is.
+        window = toks[at:at + 4]
+        if not window or any(t.tag == Tag.PREP or t.text == "as" for t in window):
+            return False
+        # A determinerless noun phrase in English is plural or mass, and an adjective phrase is
+        # neither. "Bees are **winged insects**" and "The lungs are the **primary organs**" are
+        # definitions; "The bagpipes are **well known**", "They are **generally starchy**",
+        # "These factors are **naturally occurring**" are predications about a subject and say
+        # nothing about what it is. The head of the complement decides, and the only morphology
+        # this asks for is the plural -s.
+        head = self._head(source[window[0].start:window[-1].end] if source else "")
+        return bool(head) and head.endswith("s") and not head.endswith("ss")
+
     @staticmethod
-    def _pattern(pattern: Sequence[str], toks: Sequence[Tok], at: int) -> bool:
+    def _pattern(pattern: Sequence[Any], toks: Sequence[Tok], at: int) -> bool:
         """A hole stands for one nominal: a content word, or a pronoun standing in for one.
 
         Requiring the hole to be open-class alone was a silent recall hole. Every lesson that
@@ -707,11 +946,14 @@ class PassageReader:
             if want == _HOLE:
                 if not (token.open_class or token.tag == Tag.PRON):
                     return False
+            elif isinstance(want, frozenset):
+                if token.text not in want:
+                    return False
             elif token.text != want:
                 return False
         return True
 
-    def _clean(self, toks: Sequence[Tok], predicate: str = "") -> str:
+    def _clean(self, toks: Sequence[Tok], predicate: str = "", source: str = "") -> str:
         """A filler is a noun phrase, and two things end one: a verb, and another relation.
 
         ``a temperature to be meaningful`` is a noun phrase followed by a clause, and reading the
@@ -725,6 +967,15 @@ class PassageReader:
         """
         _, Tag = _table()
         span = list(toks)
+        # A relative clause the filler does not contain whole leaves a dangling fragment: "a group
+        # of banana cultivars in the genus Musa **whose fruits**", "an ancient Roman goddess
+        # **whose iconography**". Cut at the relative pronoun -- unless a preposition governs it,
+        # because "the process **by which** plants convert light" is one phrase and every lesson
+        # definition is built that way.
+        for index, token in enumerate(span):
+            if index and token.tag == Tag.WH and span[index - 1].tag != Tag.PREP:
+                span = span[:index]
+                break
         for index, token in enumerate(span):
             if token.tag in (Tag.AUX, Tag.MODAL):
                 span = span[:index]
@@ -745,6 +996,8 @@ class PassageReader:
         # thing. Reading it as an object is how "occurs in ... and" became a subject.
         if span[0].tag in (Tag.AUX, Tag.SUB, Tag.MODAL, Tag.WH):
             return ""
+        if source:
+            return source[span[0].start:span[-1].end].strip()
         return " ".join(t.text for t in span)
 
     def _split(self, filler: str) -> List[str]:
@@ -810,18 +1063,45 @@ class PassageReader:
                 f"{first.text}: {resolution.why or 'ambiguous'}"
         if not self.topic_subject:
             return "", ""
+        # A subject ends where its verb begins. An auxiliary is one such verb and it is the only
+        # one the closed class can name -- the rest she has to have learned, and she has: a word
+        # induced as the name of a relation is a verb wherever it stands. Without that second
+        # test, "Dialysis requires a semipermeable membrane" had no auxiliary in it at all, so
+        # the whole sentence was read as the subject and the claim was filed under it.
         stop = len(toks)
         for index, token in enumerate(toks):
-            if token.tag in (Tag.AUX, Tag.MODAL):
+            if token.tag in (Tag.AUX, Tag.MODAL) or (index and token.text in self._relation_words):
                 stop = index
                 break
-        head = [t for t in toks[:stop] if t.tag not in (Tag.DET,)]
-        named = " ".join(t.text for t in head).strip()
-        # A clause whose own subject the topic already names is about the topic; anything else
-        # names itself. Both are structural, neither consults a list of entities.
-        if topic and (not named or named in topic or topic in named):
+        span = list(toks[:stop])
+        # A fronted adverbial is not the subject either. "In computer science, radix sort is a
+        # non-comparative sorting algorithm" opens on a preposition, and reading the run up to
+        # the copula made the sentence about *computer science* — so the article's own definition
+        # went unread. This is the single commonest opening in encyclopedic prose and it was the
+        # largest remaining class of misses.
+        if span and span[0].tag == Tag.PREP:
+            for index, token in enumerate(span):
+                if token.tag == _PUNCT:
+                    span = span[index + 1:]
+                    break
+        # An appositive is not part of the subject. "Abac\u00e1, also known as Manila hemp, is a
+        # species of banana" has a subject of one word, and reading the whole run up to the copula
+        # made its head "known" -- so the sentence stopped being about the topic and its
+        # definition went unread. Cut at the first comma, which is where the appositive opens.
+        for index, token in enumerate(span):
+            if token.tag == _PUNCT:
+                span = span[:index]
+                break
+        span = [t for t in span if t.tag != Tag.DET]
+        named = " ".join(t.text for t in span).strip()
+        # Heads, not substrings. "The relative size and development of **the breasts** is a major
+        # secondary sex distinction" contains the topic and is not about it, and a substring test
+        # said it was -- which is how the article on the breast came back defined as a
+        # distinction between the sexes. Compared modulo a plural, because an article titled
+        # "Lung" opens "The lungs are ...".
+        if topic and (not named or _names_same(named, topic)):
             return topic, ""
-        if named and len(head) <= 4 and any(t.open_class for t in head):
+        if named and len(span) <= 8 and any(t.open_class for t in span):
             return named, ""
         return (topic if self.topic_subject else ""), ""
 
@@ -857,34 +1137,53 @@ class PassageReader:
         return round(base * (1.0 if shape.level == "frame" else 0.9), 4)
 
     @staticmethod
-    def _definition(relations: Sequence[Relation]) -> str:
+    def _definition(relations: Sequence[Relation], concept: str = "") -> str:
+        """The passage's definition is the one **of the concept**, not the first one in it.
+
+        Every Wikipedia lead contains several copular sentences and only the first is about the
+        article's subject. Taking the first ``definition`` relation regardless of whose it was
+        defined the thyroid as ``two connected lobes`` and the lung as ``to extract oxygen from
+        the atmosphere`` -- both true sentences, neither a definition of the article.
+        """
         for relation in relations:
-            if relation.predicate == "definition":
-                return relation.object
+            if relation.predicate != "definition":
+                continue
+            if concept and not _names_same(relation.subject, concept):
+                continue
+            return relation.object
         return ""
 
     @staticmethod
-    def _kind(relations: Sequence[Relation]) -> str:
+    def _kind(relations: Sequence[Relation], concept: str = "") -> str:
         for relation in relations:
-            if relation.predicate in ("is_a", "kind"):
-                return relation.object
+            if relation.predicate not in ("is_a", "kind"):
+                continue
+            if concept and not _names_same(relation.subject, concept):
+                continue
+            return relation.object
         return ""
 
     @staticmethod
     def _head(phrase: str) -> str:
-        """The head noun of a gloss: the last content word before its first modifier opens.
+        """The head noun of a gloss: the last content word of its opening run.
 
-        ``a general rise in prices`` -> ``rise``. Structural, and it is what separates the kind
-        from the definition without a list of nouns that are allowed to be kinds.
+        ``a general rise in prices`` -> ``rise``. The run ends at the first closed-class word
+        after the phrase's own determiner, whatever class it is. Skipping determiners wherever
+        they fell — which the first version did — let the run walk straight through a relative
+        clause: ``an astronomical body so compact **that** its gravity prevents anything`` came
+        back with a kind of ``anything``.
+
+        This is a structural rule and not a parse. It is right on a plain noun phrase and it is
+        wrong on an adjectival predicate, and :mod:`nyxara.njp.encyclopediaschool` marks how often
+        rather than leaving the question open.
         """
         _, Tag = _table()
-        toks = _toks(phrase)
         head: List[str] = []
-        for token in toks:
-            if token.tag in (Tag.PREP, Tag.WH, Tag.SUB, Tag.CONJ, _PUNCT):
+        for index, token in enumerate(_toks(phrase)):
+            if token.tag == Tag.DET and not head:
+                continue                       # the phrase's own determiner
+            if token.tag != _WORD:
                 break
-            if token.tag == Tag.DET:
-                continue
             head.append(token.text)
         return head[-1] if head else ""
 
@@ -893,6 +1192,7 @@ class PassageReader:
         usable = self.usable()
         return {"shapes": len(self.shapes), "usable": len(usable),
                 "max_filler": self._max_filler,
+                "determiner_headed": sorted(k for k, v in self._det_headed.items() if v),
                 "reference_cases": len(self._cases), "cues": self._cues,
                 "margin": self._margin,
                 "frames": sum(1 for s in usable if s.level == "frame"),
@@ -905,6 +1205,73 @@ class PassageReader:
 def _key_name(text: str) -> str:
     """The form :class:`~nyxara.njp.discourse.Referent` stores a name in."""
     return " ".join(_words(_bare(_toks(text))))
+
+
+def _head_of(phrase: str) -> str:
+    """The last content word before a phrase's first postmodifier opens."""
+    _, Tag = _table()
+    head: List[str] = []
+    for token in _toks(phrase):
+        if token.tag in (Tag.PREP, Tag.WH, Tag.SUB, _PUNCT):
+            break
+        if token.tag in (Tag.DET, Tag.CONJ):
+            continue
+        head.append(token.text)
+    return head[-1] if head else ""
+
+
+def _core(phrase: str) -> List[str]:
+    """A noun phrase's own words: everything before its first postmodifier opens."""
+    _, Tag = _table()
+    out: List[str] = []
+    for token in _toks(phrase):
+        if token.tag in (Tag.PREP, Tag.WH, Tag.SUB, _PUNCT, Tag.AUX):
+            break
+        if token.tag in (Tag.DET, Tag.CONJ):
+            continue
+        out.append(token.text)
+    return out
+
+
+def _names_same(named: str, topic: str) -> bool:
+    """Whether a clause's subject and the passage's topic name the same thing.
+
+    Heads first, then containment **within the core only**. "Kemp Town Estate, also known as
+    Kemp Town, is a 19th-century estate" has a different head from the article "Kemp Town" and is
+    plainly about it; "The relative size and development of the breasts" contains the article
+    "Breast" and is plainly not. What separates them is where the shared words sit: inside the
+    phrase's own core, or inside a postmodifier hanging off it.
+    """
+    mine, theirs = _core(named), _core(topic)
+    if not mine or not theirs:
+        return False
+    if _same_thing(mine[-1], theirs[-1]):
+        return True
+    short, long = (mine, theirs) if len(mine) <= len(theirs) else (theirs, mine)
+    joined = " ".join(long)
+    return f" {' '.join(short)} " in f" {joined} "
+
+
+def _same_thing(one: str, other: str) -> bool:
+    """Two heads naming the same thing, allowing for a plural. Nothing deeper is claimed."""
+    if not one or not other:
+        return False
+    if one == other:
+        return True
+    return one.rstrip("s") == other.rstrip("s") and min(len(one), len(other)) > 2
+
+
+def _continuation(left: Sequence[str], right: Sequence[str]) -> bool:
+    """A pattern whose only literals are a comma or a conjunction says nothing about which
+    relation it continues."""
+    closed, Tag = _table()
+    literals = [w for w in tuple(left) + tuple(right) if w != _HOLE]
+    if not literals:
+        return True
+    flat = []
+    for word in literals:
+        flat.extend(sorted(word) if isinstance(word, frozenset) else [word])
+    return all(w in (",", ";") or closed.get(w) == Tag.CONJ for w in flat)
 
 
 def _pronoun_word(word: str) -> bool:
@@ -925,6 +1292,10 @@ def _norm(text: str) -> str:
 #  the lessons
 # --------------------------------------------------------------------------------------------- #
 #: What a teacher shows her. Six passages, from two subjects, and that is deliberately narrow:
+#: (Every definition is quoted **with its determiner**, as the passage has it. Written without
+#: one -- which they were, back when a filler was a detokenised reconstruction rather than a span
+#: of the source -- they told the reader that a definition need not open on a determiner, and the
+#: test that separates a copula from a passive could not be learned at all.)
 #: the school's held-out passages are from subjects that appear nowhere here, so a shape that
 #: reads them read something nobody demonstrated.
 LESSONS: Tuple[Demonstration, ...] = (
@@ -933,8 +1304,8 @@ LESSONS: Tuple[Demonstration, ...] = (
         concept="photosynthesis",
         text=("Photosynthesis is the process by which plants convert light energy into "
               "chemical energy."),
-        expect={"definition": ("process by which plants convert light energy into chemical "
-                              "energy",),
+        expect={"definition": ("the process by which plants convert light energy into "
+                              "chemical energy",),
                 "occurs_in": ("plants",),
                 "uses": ("light energy",),
                 "produces": ("chemical energy",)},
@@ -944,7 +1315,7 @@ LESSONS: Tuple[Demonstration, ...] = (
         concept="respiration",
         text=("Respiration is the reaction by which cells release energy from glucose. "
               "Respiration occurs in the mitochondria and requires oxygen."),
-        expect={"definition": ("reaction by which cells release energy from glucose",),
+        expect={"definition": ("the reaction by which cells release energy from glucose",),
                 "occurs_in": ("cells", "the mitochondria"),
                 "produces": ("energy",),
                 "requires": ("oxygen",)},
@@ -954,7 +1325,7 @@ LESSONS: Tuple[Demonstration, ...] = (
         concept="transpiration",
         text=("Transpiration is the loss of water from a leaf. It requires stomata, warmth "
               "and moving air."),
-        expect={"definition": ("loss of water from a leaf",),
+        expect={"definition": ("the loss of water from a leaf",),
                 "requires": ("stomata", "warmth", "moving air")},
         pronouns={1: "transpiration"},
     ),
@@ -963,7 +1334,7 @@ LESSONS: Tuple[Demonstration, ...] = (
         concept="erosion",
         text=("Erosion is the process by which wind removes soil from a surface. "
               "It produces sediment."),
-        expect={"definition": ("process by which wind removes soil from a surface",),
+        expect={"definition": ("the process by which wind removes soil from a surface",),
                 "occurs_in": ("wind",),
                 "uses": ("soil",),
                 "produces": ("sediment",)},
@@ -974,7 +1345,7 @@ LESSONS: Tuple[Demonstration, ...] = (
         concept="condensation",
         text=("Condensation is the change by which vapour becomes water. "
               "Condensation requires cooling."),
-        expect={"definition": ("change by which vapour becomes water",),
+        expect={"definition": ("the change by which vapour becomes water",),
                 "occurs_in": ("vapour",),
                 "requires": ("cooling",)},
     ),
@@ -983,7 +1354,7 @@ LESSONS: Tuple[Demonstration, ...] = (
         concept="weathering",
         text=("Weathering is the breakdown of rock in place. "
               "Weathering requires water, temperature change and time."),
-        expect={"definition": ("breakdown of rock in place",),
+        expect={"definition": ("the breakdown of rock in place",),
                 "requires": ("water", "temperature change", "time")},
     ),
 )
@@ -997,7 +1368,7 @@ _AMBIGUOUS: Demonstration = Demonstration(
     name="ambiguity",
     concept="silting",
     text=("Silting is the settling of sand behind a barrage. It requires slow water."),
-    expect={"definition": ("settling of sand behind a barrage",)},
+    expect={"definition": ("the settling of sand behind a barrage",)},
     pronouns={1: ""},
 )
 
