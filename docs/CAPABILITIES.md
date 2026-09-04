@@ -60,6 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39i | Auditable conclusions (every claim carries the path that produced it — facts, edges, inferences, assumptions — and a claim with no path is `UNKNOWN` rather than weak. Blame ranks by exclusivity rather than frequency, so the lone assumption is named and not the fact four other standing claims also rest on; and a failure is stored with its culprit, so a *completely differently worded* problem reasoned through the same assumption raises a warning) | `nyxara.njp.provenance` + `nyxara.njp.loop` | NEW |
 | 39h | The closed loop (observations → structure → latent hypothesis → experiment → revision → a prediction nobody asked for, as one runnable cycle: hidden causes proposed and never believed, interventions chosen by how much they move *the question you are about to be asked*, revision in both directions, an autopsy that keeps the edge that carried a failed claim, and five distinct reasons for not knowing. Measured on randomly generated worlds with unobserved variables where **declining is sometimes the only pass**. It beats reconstruction on structure, on latents and on ending with the right kind of world — and the loop does **not close**: 0.125, the same as the reconstructor) | `nyxara.njp.loop` + `nyxara.njp.discovery` | PARTIAL |
 | 39g | Breadth, measured (`njp/breadth.py` asks what no other exam here can: of things a person might name, what fraction does she have any fact about. ConceptNet's English assertions ship as a second corpus — 4,382 subjects become 130,274 — and it is **off by default** because measuring it honestly showed 12× the facts buys 2.8 points on subjects nobody mentioned, nothing on derivation, and costs `recall` 1.00 → 0.70 and 23× the time per question) | `nyxara.njp.breadth` + `nyxara/njp/data/world_broad.jsonl.gz` | NEW |
 | 39f | Structure discovery and cross-domain abstraction (she does not only walk the stored graph — she recovers which causal structures the *observations* support, reporting a whole Markov equivalence class rather than picking one of three indistinguishable orientations, with add/remove/reverse/merge/split as named operations and an MDL-style score that never overrules the evidence. And she finds subgraphs in different domains that are the same graph under a renaming — a structure-preserving bijection on shape alone, since the vocabularies share nothing — returning one abstraction reaching three domains with every role aligned, and leaving it unnamed) | `nyxara.njp.surgery` + `nyxara.njp.fusion` | NEW |
@@ -4096,6 +4097,65 @@ whose admissible set is larger is one where she reasons from a *sample* of the a
 loop cleverer, is the next thing.
 
 Run it: `python -m nyxara.njp.discovery --solver cold`, `--solver loop`.
+
+
+#### NJP V.43 — a conclusion that cannot say what produced it is not a conclusion
+
+Three of the Master's items are one mechanism seen from three sides, and none of them works alone:
+
+* **#7 provenance** — `CLAIM: X / SUPPORTED BY: fact 183, fact 921, inference R4, assumption A3`
+* **#5 the blame graph** — *which internal belief was responsible?*
+* **#6 the autopsy** — a failure stored in the shape that lets the next turn recognise it
+
+You cannot have the second without the first: *which belief was responsible* is unanswerable
+unless the answer wrote down what it stood on. You cannot have the third without the second:
+storing *"wrong"* teaches nothing; storing *"wrong, and this assumption did it"* teaches.
+
+`njp/provenance.py` is that one object. **`Ledger.assert_` refuses a conclusion with nothing under
+it** — `UNKNOWN` for a pathless claim is not a courtesy return, it is what makes `Claim.status`
+load-bearing. Four verdicts: `SUPPORTED` when every step is settled and the paths agree;
+`HYPOTHETICAL` when the claim rests on an assumption and **says so** — a defeasible link is how
+most true generalisations are stated; `CONFLICTED` when two paths cannot both hold, reported and
+never resolved by counting; `UNKNOWN` when nothing supports it.
+
+One rule is worth the space: **one clean route beside a speculative one is still supported.**
+Otherwise an idle guess downgrades an established conclusion.
+
+##### Blame is not the path
+
+The path says what a claim *stood on*; blame says what *held it up*. A claim resting on five steps
+where four are corroborated by other standing claims and one is a lone assumption has **one**
+responsible step, and blaming all five teaches nothing anybody can act on. So blame ranks by
+exclusivity, not frequency — a step on every path to this claim and on nothing else is the
+culprit; a step supporting a dozen standing claims almost certainly is not. Measured in a test:
+given a fact that also supports a standing claim and an assumption that does not, the assumption
+is blamed.
+
+##### The warning matches the step, not the wording
+
+`Ledger.warn` answers *"have I been wrong on this ground before?"* by the **blamed step**. Two
+questions that look nothing alike and failed on the same assumption are the same failure, and a
+similarity search over their wording would put them in different worlds. That is the whole reason
+the autopsy stores a culprit rather than a description.
+
+##### Wired, not adjacent
+
+`Loop.forecast` now files every prediction as a claim: each surviving model enters the path as an
+`EDGE` or — where it carries a hidden cause — as a `HYPOTHESIS`, followed by the inference that
+produced the answer. So a prediction resting on a latent comes back `hypothetical` without
+anything having had to remember to say so, and `Loop.audit(cause, effect)` prints the claim, its
+paths, and any warning:
+
+```
+CLAIM: b does not respond to do(a)  [hypothetical]
+SUPPORTED BY (0) — 1 surviving model(s):
+  hypothesis do(a)->b#m0?: h → a, h → b  [hidden: h]
+  inference R:mutilate: do(x) cuts x's incoming edges; y responds iff it is still reachable
+WARNING: 1 earlier failure(s) rested on the same step
+  b does not respond to do(a): predicted True, was False
+```
+
+Run it: `NJPBrain` organs unchanged; `Loop.audit`, `Ledger.blame`, `Ledger.warn`.
 
 
 ### Reachable over the wire

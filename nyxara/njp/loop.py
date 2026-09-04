@@ -448,6 +448,11 @@ class Loop:
         self.experiments = experiments or Experiments()
         self.max_models = max(2, int(max_models))
         self.autopsy = Autopsy()
+        #: Every conclusion the loop reaches, with the path that made it. A prediction that cannot
+        #: say what produced it is not a weak prediction — it is not a prediction.
+        from nyxara.njp.provenance import Ledger as ProvenanceLedger
+
+        self.ledger = ProvenanceLedger()
         self.history: List[str] = []
         #: What she is going to be asked. Set by :meth:`aim`, and the experiments are chosen in
         #: service of it. Knowing the *question* is not knowing the *answer*, and choosing an
@@ -538,6 +543,13 @@ class Loop:
         if killed:
             self.autopsy.record(cause, effect, predicted=not result, actual=result,
                                 blamed=killed)
+            # And the same failure at the grain that survives the world: which *step* carried it.
+            claim_id = f"do({cause})->{effect}"
+            if claim_id in self.ledger.claims:
+                self.ledger.autopsy(
+                    claim_id, predicted=not result, actual=result,
+                    missing=f"whether {effect} responds to do({cause})",
+                    repair=f"{len(killed)} model(s) removed")
         # A hypothesis that could have died here and did not has earned something. Not belief —
         # a hidden cause is never promoted for being useful — but the record says it was tested.
         self.history.append(f"revise: {len(models)} -> {len(kept)}, {len(killed)} refuted")
@@ -589,10 +601,45 @@ class Loop:
                            f"{len(models)} models disagree; do({splitter[0]}) would separate them")
         answer = answers.pop()
         hypothetical = any(m.hypothetical for m in models)
+        self._record(cause, effect, answer, models)
         return Prediction(cause=cause, effect=effect, responds=answer,
                           status=Status.HYPOTHETICAL if hypothetical else Status.SUPPORTED,
                           from_models=list(models))
 
+    # ---- provenance -------------------------------------------------------- #
+    def _record(self, cause: str, effect: str, answer: bool,
+                models: Sequence[Model]) -> str:
+        """File the prediction with the path that made it, and warn if this ground has failed.
+
+        A model that carries a hidden cause enters the path as a ``HYPOTHESIS`` rather than as an
+        edge, which is what makes :attr:`~nyxara.njp.provenance.Claim.status` come back
+        ``HYPOTHETICAL`` without anything having to remember to say so.
+        """
+        from nyxara.njp.provenance import Kind, Step as ProvenanceStep
+
+        claim_id = f"do({cause})->{effect}"
+        path: List[Any] = []
+        for index, model in enumerate(models[:4]):
+            kind = Kind.HYPOTHESIS if model.hypothetical else Kind.EDGE
+            path.append(self.ledger.record(ProvenanceStep(
+                id=f"{claim_id}#m{index}", kind=kind, text=model.render(),
+                settled=not model.hypothetical)))
+        path.append(self.ledger.record(ProvenanceStep(
+            id="R:mutilate", kind=Kind.INFERENCE,
+            text="do(x) cuts x's incoming edges; y responds iff it is still reachable")))
+        self.ledger.assert_(claim_id, f"{effect} {'responds' if answer else 'does not respond'} "
+                                      f"to do({cause})", path=path,
+                            note=f"{len(models)} surviving model(s)")
+        earlier = self.ledger.warn(path)
+        if earlier:
+            self.history.append(f"warning: {len(earlier)} earlier failure(s) on this ground")
+        return claim_id
+
+    def audit(self, cause: str, effect: str) -> str:
+        """The claim, its paths, and any warning — the auditable form of an answer."""
+        return self.ledger.render(f"do({cause})->{effect}")
+
     def to_dict(self) -> Dict[str, Any]:
         return {"history": list(self.history),
-                "failures": [f.to_dict() for f in self.autopsy.failures]}
+                "failures": [f.to_dict() for f in self.autopsy.failures],
+                "ledger": self.ledger.to_dict()}

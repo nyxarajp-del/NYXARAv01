@@ -383,6 +383,20 @@ from nyxara.njp.surgery import (
     Verdict as StructureVerdict,
 )
 from nyxara.njp.fusion import Abstraction, Analogy, Fusion, Pattern as ShapePattern
+# V.42/V.43. `Step`, `Status`, `Claim`, `Kind` and `Path` are all words other organs already own,
+# so every one of them takes a qualified name here. The namespace was checked before they went in,
+# which is the habit V.34 paid seven commits to learn.
+from nyxara.njp.loop import Loop, Model as CausalModel, Reason as UnknownReason
+from nyxara.njp.provenance import (
+    Blame,
+    Claim as ProvenanceClaim,
+    Kind as ProvenanceKind,
+    Ledger as ProvenanceLedger,
+    Path as ProvenancePath,
+    PostMortem,
+    Status as ProvenanceStatus,
+    Step as ProvenanceStep,
+)
 
 # The communication organ is imported; `nyxara.njp.discourseschool` carries a `__main__` and is
 # kept out for the reason `corpusschool` is — `NJPBrain.go_to_discourse_school` is its in-process
@@ -551,6 +565,10 @@ __all__ = [
     "Asking", "QuestionCue", "QuestionFrame",
     "Predator", "ExplanationAttack", "Survival",
     # NJP V.40 — rival structures, and the same shape in two subjects
+    # NJP V.42/V.43 — the closed loop, and conclusions that carry their ancestry
+    "Loop", "CausalModel", "UnknownReason",
+    "ProvenanceLedger", "ProvenanceClaim", "ProvenancePath", "ProvenanceStep",
+    "ProvenanceKind", "ProvenanceStatus", "Blame", "PostMortem",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
