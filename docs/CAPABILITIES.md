@@ -4648,6 +4648,101 @@ retracted) and `go_to_encyclopedia_school`. The reader the brain builds is taugh
 sets when the corpus is present and falls back silently when it is not — a brain must not need a
 data file to read a paragraph.
 
+## V.50 — what breaks a program, learned by breaking one
+
+`njp.coding` lets her *write* a program. Asked anything **about** programming she had nothing —
+measured, twelve questions, twelve empty answers:
+
+    what is a for loop?            ->  ""
+    what causes an IndexError?     ->  ""
+    how do you fix an IndexError?  ->  ""
+
+The first is a fact somebody can tell her and `njp.encyclopedia` now does. The other two are not.
+*"IndexError happens when the index is at least the length"* is not a sentence she should be
+handed: a table has no idea why, cannot say what would fix it, and is silent the moment the
+situation is one nobody wrote a row for.
+
+So `njp/programming.py` does not read about errors. **It causes them.** A situation is a real
+Python operation on real arguments — `[1,2,3][5]`, `{"a":1}["b"]`, `7/0`, `int("x")` — and every
+outcome in the module is what the interpreter did, at run time, every time. Nothing here states
+which operations raise what. (Nothing is `eval`ed or `exec`ed either: these are calls the module
+makes with arguments it built, the same boundary `njp.coding` draws.)
+
+**The probes are senses, not answers.** Before running, a situation is measured by generic
+relational questions — what type each argument is, how long, whether it is zero, whether one is
+less than another's length, whether one is a name in another. Not one mentions an error. What
+connects `arg1 < len(arg0)` to `IndexError` is induced from trials where it held and trials where
+it did not.
+
+### What she works out, and what it is worth
+
+| | |
+| --- | --- |
+| held-out situations, never run | **0.724** |
+| the base rate (always guess the commonest) | 0.535 |
+| the same watcher with induction off | 0.535 |
+| repair — a fix found by experiment, checked by re-running | **0.719** |
+
+Some of what came out, in her words:
+
+```
+ValueError        happens when argument 0 is not all digits and the operation converts
+StopIteration     happens when argument 0 is empty and the operation iterates
+ZeroDivisionError happens when argument 0 is a int and argument 1 is zero and the operation splits by
+IndexError        happens when argument 1 is not within reach counting backwards and the operation takes position
+```
+
+### Transfer, and the one number that explains the other four
+
+Trained having **never performed** an operation, then asked about nothing else:
+
+| held out | names the error | sees it fail | distinguishing siblings |
+| --- | --- | --- | --- |
+| `lookup` | 0.095 | **0.922** | 1 |
+| `divide` | 0.650 | **0.905** | 3 |
+| `index` | 0.383 | 0.485 | 0 |
+| `to_int` | 0.245 | 0.250 | 0 |
+
+Naming the error cannot transfer where the name depends on the container — reading an absent name
+raises `KeyError` from a dict and `AttributeError` from an object, and no amount of watching one
+teaches the other's name. **Whether it fails** can, and the last column says exactly when: a law
+about *the operation takes a name* is only learnable if something else in the world takes one.
+`lookup` has `attribute` for a sibling and `divide` has `modulo`; `index` is the only thing that
+takes a position and `to_int` the only thing that converts, so holding those out deletes the only
+evidence for the trait and there is nothing to transfer from. Transfer tracks siblings, not effort.
+
+### Four defects the measurements found
+
+* **The world was one in which everything failed.** Drawing every argument at random made
+  `TypeError` 60% of all outcomes, the greedy cover carved that mass into **thirty** exact and
+  meaningless laws, and the errors worth learning never surfaced. Operations now declare what they
+  are *written for* — intent, not consequence — and a quarter of arguments still slip.
+* **One outcome, one cause.** A search for a single conjunction covering every `ValueError` found
+  the only reading they all share, which was *"argument 0 has a length"*, with 254 counterexamples.
+  `int("x")` and unpacking the wrong number of things are different causes; the cover takes them
+  one at a time.
+* **Candidates drawn from what all positives share** meant `op` could never enter a law when an
+  outcome spanned two operations — so `ZeroDivisionError` came out as *"argument 1 is zero"*, true
+  of `xs[0]` and `a * 0` as well, and wrong 35 times.
+* **Exact on the data and wrong about the world.** *"AttributeError happens when argument 1 is a
+  str"* was exact — because in a thousand trials she had never once asked for an attribute that
+  exists. `challenge()` builds situations **to satisfy** each law and runs them; a law that dies
+  is demoted. No amount of the same sampling would have found that out.
+
+Two more were in the reporting: the search took the *first* exact conjunction rather than the
+widest, which kept passenger terms and cost a second law for each; and the induction over "does
+this fail at all" used the per-outcome floor, which for a class with as many members as every error
+put together meant no conjunction qualified and it learned **nothing**.
+
+Wired at `NJPBrain.learn_programming` — which files each surviving law as `occurs_when` **and** as
+a `causes` edge in the other direction, because *"what causes X"* is an inverted lookup and a
+forward fact alone answers *"when does X happen"* and leaves it empty — and `go_to_programming_school`.
+`fixed_by` is new in `grounding.py` with the question that reaches it: a fix she worked out by
+experiment that nothing could ask for would be a fact stored and unreachable.
+
+    what causes an IndexError?      -> argument 1 is not less than the length of argument 0 ...
+    how do you fix a ValueError?    -> see that argument 0 is not empty (argument 0: [] -> [4, 5])
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,

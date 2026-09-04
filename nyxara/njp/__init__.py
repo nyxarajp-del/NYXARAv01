@@ -436,6 +436,18 @@ from nyxara.njp.encyclopedia import (
     Encyclopedia,
     taught_on_wikipedia,
 )
+# V.50. `Situation` is `njp.theory`'s and `Law` is too; `Operation` is free; `Trial` is not — the
+# namespace test written in V.49 caught it here, which is the second time it has. The
+# programmer's situation is an act she performed, which is a different thing from an occasion she
+# observed, and the namespace test added in V.49 is what makes saying so mandatory.
+from nyxara.njp.programming import (
+    Law as FailureLaw,
+    Operation,
+    Programmer,
+    Repair,
+    Situation as Attempt,
+    Trial as ActTrial,
+)
 from nyxara.njp.passage import (
     Demonstration as ReadingLesson,
     KnowledgeObject,
@@ -639,6 +651,7 @@ __all__ = [
     "KnowledgeObject", "PassageReader", "ReadRelation", "ReadingLesson", "ReadingShape",
     "taught_reader",
     "Article", "ReadingCoverage", "Encyclopedia", "taught_on_wikipedia",
+    "Programmer", "Operation", "Attempt", "ActTrial", "FailureLaw", "Repair",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

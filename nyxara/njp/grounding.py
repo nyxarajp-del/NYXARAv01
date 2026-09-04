@@ -1077,6 +1077,11 @@ _PREDICATE_AFFINITY: Dict[str, Dict[str, float]] = {
     # committed by the reader that produces them. A place and an event's setting answer for each
     # other and are not the same thing, so the weights are asymmetric.
     "occurs_in": {"occurs_in": 1.0, "located_in": 0.8, "part_of": 0.5, "involves": 0.5},
+    # V.50. `njp.programming` induces two things about a failure by causing it: the condition under
+    # which it happens and the change that removes it. The first has a home already; the second had
+    # none, and a fix she worked out by experiment that no question could reach would be a fact
+    # stored and unreachable — the defect `njp.ingest`'s docstring names.
+    "fixed_by": {"fixed_by": 1.0, "requires": 0.5, "purpose": 0.4},
     "purpose": {"purpose": 1.0, "involves": 0.7, "means": 0.6, "is_a": 0.5},
     # "What causes X?" asked about the effect and wants the cause. A forward `causes` edge *from*
     # X answers the opposite question, and answering with it is not a weaker answer — it is a
@@ -1149,6 +1154,10 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
      r"(?:located|situated|found|placed)\b", "located_in"),
     (r"\bwhere\s+(?:was|were)\s+(?P<s>.+?)\s+born\b", "birthplace"),
     (r"\bwhere\s+(?:can\s+)?(?:you|we|one|i)\s+find\s+(?P<s>.+?)\??$", "located_in"),
+    (r"\bhow\s+(?:do\s+(?:you|i|we)|to|can\s+(?:you|i|we))\s+"
+     r"(?:fix|repair|solve|avoid|prevent)\s+(?:an?\s+|the\s+)?(?P<s>.+?)\??$", "fixed_by"),
+    (r"\bhow\s+is\s+(?:an?\s+|the\s+)?(?P<s>.+?)\s+(?:fixed|avoided|prevented)\??$",
+     "fixed_by"),
     # Asked of a process rather than a thing. Before `where is X`, because that pattern is broad
     # enough to swallow "where does fermentation occur" if it gets there first.
     (r"\bwhere\s+do(?:es)?\s+(?P<s>.+?)\s+"

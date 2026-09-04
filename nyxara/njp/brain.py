@@ -398,6 +398,7 @@ class NJPBrain:
         #: everything that reads it treats that as "no encyclopedia", never as an error.
         self.encyclopedia = None
         self.reader = self._build_reader(c)
+        self.programmer = self._build_programmer(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
@@ -1898,6 +1899,23 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a brain without it still parses sentences
             return None
 
+    def _build_programmer(self, c: Any) -> Any:
+        """The organ that finds out what breaks a program by breaking one.
+
+        Built **untrained**, and that is not laziness about a slow constructor — although it is one
+        (a run that learns every error kind is a minute of real work). It is that everything this
+        organ knows comes from acts it has performed, so a brain that has performed none should
+        know none. :meth:`learn_programming` is the call that gives it a history.
+        """
+        if not self._gate("programming", True):
+            return None
+        try:
+            from nyxara.njp.programming import Programmer
+
+            return Programmer(seed=int(getattr(c, "seed", 0) or 0))
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_language(self, c: Any) -> Any:
         """The organ that can acquire a grammar she was not shipped with.
 
@@ -2205,6 +2223,70 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return out
         return out
+
+    def learn_programming(self, *, acts: int = 1200, file: bool = True) -> Dict[str, Any]:
+        """Perform operations, watch what breaks, work out why, and file what survived.
+
+        Every law is filed as ``occurs_when`` and every repair she found **by experiment** as
+        ``fixed_by``, so *"what causes an IndexError"* and *"how do you fix an IndexError"* are
+        answerable from what she did rather than from anything anybody wrote down. A law that did
+        not survive :meth:`~nyxara.njp.programming.Programmer.challenge` is not filed at all.
+        """
+        out: Dict[str, Any] = {"acts": 0, "laws": 0, "filed": [], "outcomes": {}}
+        if self.programmer is None:
+            return out
+        try:
+            self.programmer.experiment(int(acts))
+            self.programmer.learn()
+            self.programmer.learn_failure()
+            self.programmer.challenge(tries=250)
+            out["acts"] = len(self.programmer.trials)
+            out["laws"] = len(self.programmer.laws)
+            out["outcomes"] = self.programmer.seen()
+            if not file or self.grounder is None:
+                return out
+            from nyxara.njp.grounding import GroundedTriple
+
+            seen: set = set()
+            for law in self.programmer.laws:
+                condition = law.english().split(" happens when ", 1)[-1]
+                # Filed **both ways round**, and not for symmetry's sake. "What causes X" is an
+                # inverted lookup — it searches for something whose `causes` edge points *at* X —
+                # so a forward `X occurs_when C` answers "when does X happen" and leaves "what
+                # causes X" empty from the very same fact. Raising the affinity does not fix that
+                # and would only be a tuned table hiding a missing edge. The law genuinely says
+                # both things, so both are stored, and `njp.explain` can walk the causal one.
+                rows = [("occurs_when", condition)]
+                repair = self.programmer.fix_for(law.outcome)
+                if repair is not None:
+                    rows.append(("fixed_by", repair.render()))
+                for predicate, value in rows:
+                    if not value or (law.outcome, predicate, value) in seen:
+                        continue
+                    seen.add((law.outcome, predicate, value))
+                    self.grounder._assert(GroundedTriple(
+                        subject=law.outcome,
+                        predicate=self.grounder._predicate(predicate), object=value,
+                        confidence=0.85, source="experiment",
+                        text=f"{law.outcome}: {law.render()}", provenance="observed"))
+                    out["filed"].append(f"{law.outcome} | {predicate} = {value[:60]}")
+                if condition:
+                    self.grounder._assert(GroundedTriple(
+                        subject=condition, predicate="causes", object=law.outcome,
+                        confidence=0.85, source="experiment",
+                        text=f"{law.outcome}: {law.render()}", provenance="observed"))
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def go_to_programming_school(self) -> Any:
+        """Held-out prediction, the two floors, repair, and transfer to an operation never done."""
+        try:
+            from nyxara.njp.programmingschool import run
+
+            return run()
+        except Exception:  # noqa: BLE001
+            return None
 
     def go_to_encyclopedia_school(self) -> Any:
         """Coverage, audited precision and definition accuracy on real encyclopedia prose."""
