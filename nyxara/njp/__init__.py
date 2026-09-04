@@ -440,6 +440,12 @@ from nyxara.njp.encyclopedia import (
 # namespace test written in V.49 caught it here, which is the second time it has. The
 # programmer's situation is an act she performed, which is a different thing from an occasion she
 # observed, and the namespace test added in V.49 is what makes saying so mandatory.
+# V.51. `Rule` is `njp.language`'s and `Case` is `njp.society`'s — two more the namespace test
+# caught, which is the third time it has paid for itself. `Pair` is `njp.study`'s. The reasoner's
+# pair is two sentences to be judged, its case a measured occasion and its rule a conjunction of
+# readings; none of them is the thing that had the name first, so none of them keeps it.
+from nyxara.njp.entail import Pair as Inference, Reasoner, read_pairs
+from nyxara.njp.induce import Case as MeasuredCase, Rule as InducedRule, cover
 from nyxara.njp.programming import (
     Law as FailureLaw,
     Operation,
@@ -652,6 +658,7 @@ __all__ = [
     "taught_reader",
     "Article", "ReadingCoverage", "Encyclopedia", "taught_on_wikipedia",
     "Programmer", "Operation", "Attempt", "ActTrial", "FailureLaw", "Repair",
+    "Reasoner", "Inference", "read_pairs", "InducedRule", "MeasuredCase", "cover",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

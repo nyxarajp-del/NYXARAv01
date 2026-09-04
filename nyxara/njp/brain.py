@@ -399,6 +399,7 @@ class NJPBrain:
         self.encyclopedia = None
         self.reader = self._build_reader(c)
         self.programmer = self._build_programmer(c)
+        self.entailer = self._build_reasoner(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
@@ -1899,6 +1900,21 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a brain without it still parses sentences
             return None
 
+    def _build_reasoner(self, c: Any) -> Any:
+        """The organ that answers whether one sentence follows from another.
+
+        Untrained, for the same reason the programmer is: everything it knows came from pairs it
+        was shown, so a brain shown none should know none. :meth:`learn_reasoning` gives it some.
+        """
+        if not self._gate("entail", True):
+            return None
+        try:
+            from nyxara.njp.entail import Reasoner
+
+            return Reasoner()
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_programmer(self, c: Any) -> Any:
         """The organ that finds out what breaks a program by breaking one.
 
@@ -2278,6 +2294,64 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return out
         return out
+
+    def learn_reasoning(self, *, limit: int = 0) -> Dict[str, Any]:
+        """Read FLAN's worked inferences and induce what predicts which answer.
+
+        Files nothing. What comes out is a small set of rules about **pairs of sentences**, not
+        facts about the world, and the fact store is not where a rule about a pair belongs.
+        """
+        out: Dict[str, Any] = {"pairs": 0, "rules": 0, "near_misses": 0}
+        if self.entailer is None:
+            return out
+        try:
+            from nyxara.njp.entail import read_pairs
+
+            pairs = read_pairs()
+            if limit:
+                pairs = pairs[:int(limit)]
+            self.entailer.learn_from(pairs)
+            out.update({"pairs": len(pairs), "rules": len(self.entailer.rules),
+                        "near_misses": len(self.entailer.near_misses),
+                        "learned": [r.to_dict() for r in self.entailer.rules]})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def entails(self, premise: str, hypothesis: str = "") -> Dict[str, Any]:
+        """Does the second sentence follow from the first?
+
+        Takes the two sentences, or one string in the form the question is usually asked in —
+        *If "P" does that mean that "H"?* — because a capability reachable only by passing two
+        arguments from Python is not reachable from English.
+        """
+        out: Dict[str, Any] = {"answer": "unknown", "why": "", "premise": "", "hypothesis": ""}
+        if self.entailer is None:
+            return out
+        try:
+            import re as _re
+
+            first, second = str(premise or ""), str(hypothesis or "")
+            if not second:
+                quoted = _re.findall(r'"([^"]{4,400})"', first)
+                if len(quoted) < 2:
+                    out["why"] = "two sentences are needed, or one that quotes both"
+                    return out
+                first, second = quoted[-2], quoted[-1]
+            said, why = self.entailer.answer(first, second)
+            out.update({"answer": said, "why": why, "premise": first, "hypothesis": second})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def go_to_reasoning_school(self) -> Any:
+        """Held-out accuracy, the base rate, the induction-off floor, and the purity sweep."""
+        try:
+            from nyxara.njp.entailschool import run
+
+            return run()
+        except Exception:  # noqa: BLE001
+            return None
 
     def go_to_programming_school(self) -> Any:
         """Held-out prediction, the two floors, repair, and transfer to an operation never done."""

@@ -4743,6 +4743,90 @@ experiment that nothing could ask for would be a fact stored and unreachable.
     what causes an IndexError?      -> argument 1 is not less than the length of argument 0 ...
     how do you fix a ValueError?    -> see that argument 0 is not empty (argument 0: [] -> [4, 5])
 
+## V.51 — reasoning from a dataset, without storing its answers
+
+FLAN's chain-of-thought split is worked reasoning: a question, one line of rationale saying why,
+and an answer. `scripts/build_reasoning_corpus.py` samples 4,980 rows of it (the corpus is
+377,759,274 rows and 317 GB, so nothing is downloaded whole), and the largest task in it by a
+distance is natural-language inference — premise, hypothesis, and one of *yes*, *no*, *it is not
+possible to tell*.
+
+The tempting thing to do with a dataset is store its answers. That is a lookup table with 7,226
+rows in it, and it scores zero on the 7,227th because nothing in it is about **why** any answer was
+right. So `njp/entail.py` stores none of them. It measures each pair with generic questions — how
+many of the hypothesis's content words the premise also has, how many it adds, whether one carries
+a negation the other does not, whether either counts something — and `njp/induce.py` works out
+which readings predict which answer. Not one probe names an answer.
+
+Two things had to be got right before any of that.
+
+**The prompt is data too.** A FLAN row is several *complete* worked examples followed by an
+unanswered question. Reading only the answers gave 3,116 items; reading every block that ends in
+"The answer is …" gave **11,642**, and 7,226 unique inference pairs out of them.
+
+**Sampling uniformly found nothing.** FLAN is ordered by task and the CoT block is a small band at
+the very front — two batches drawn from all 377 million rows returned **zero** CoT rows. The range
+is named in the sampler as a claim about the file, not hidden inside a filter.
+
+### What she learned, and the honest size of it
+
+| | over every pair | answered | when answered |
+| --- | --- | --- | --- |
+| base rate (always *not possible to tell*) | 0.423 | 1.000 | 0.423 |
+| induction switched off | 0.000 | 0.000 | — |
+| **taught** | 0.051 | 0.059 | **0.853** |
+| taught, with a majority guess where she is silent | **0.468** | 1.000 | 0.468 |
+
+One rule survived, and it is a real one: **a hypothesis made only of the premise's own words
+usually follows from it** — 294 pairs, right in 0.86 of them at training and 0.85 held out. That
+rule alone lifts a majority guesser from 0.423 to 0.468.
+
+Everything else is a negative result, and it is the useful half. `no` and `it is not possible to
+tell` produce **35 near misses and no rules**: every candidate conjunction has hundreds of
+counterexamples. Word overlap can recognise containment; it cannot see that performing in a
+competition and watching television are incompatible.
+
+The fallback is reported apart and never folded into `answer()`. Guessing the commonest label is
+not reasoning; it is what a caller gets when the reasoning has nothing to say, and one number
+mixing the two cannot say which of them earned it.
+
+### Is the missing knowledge in the store? Asked, not assumed
+
+`entailschool.knowledge_gap()` loads the full corpus — 158,470 facts — and counts how often the
+store holds **any** relation at all between a premise word and a hypothesis word:
+
+* she has heard of **558 of 723** of the content words;
+* a stored relation links the two sentences in **14 of 300** contradictions — and in **14 of 300**
+  non-contradictions.
+
+So she knows the words and not the relations between them, and where a relation exists it is
+equally present in both classes. The near misses are not a defect of this module; they are a gap in
+the corpus, and this names exactly what a corpus would have to contain to close it.
+
+### Two mechanisms, both corrections
+
+`njp/induce.py` is the cover from V.50, lifted out the moment a second subject needed it, plus two
+fixes the new subject exposed:
+
+* **A greedy cover that stops at the first seed it cannot explain is not a cover.** It did, and on
+  5,000 pairs exactly one of three labels ever got a rule — `yes` was covered, `no` failed on its
+  first seed, and the whole of *it is not possible to tell* was never reached.
+* **Exactness is a claim about the subject, not a setting.** At purity 1.0 — right for programs,
+  where Python does the same thing every time — she learns **nothing at all** from 5,000 pairs. A
+  rule kept below 1.0 carries the rate it was kept at, and the threshold is set by running the
+  whole examination at each value and reading the held-out column, not by preference.
+
+Wired at `NJPBrain.learn_reasoning`, `entails` — which takes the two sentences or one string in the
+form the question is usually asked in, *If "P" does that mean that "H"?*, because a capability
+reachable only from Python is not reachable from English — and `go_to_reasoning_school`.
+
+    entails('If "A large group of kids ... a lady in a blue dress." does that mean
+             that "A lady is in a blue dress."?')
+        -> yes, "added is none (0.86 of the pairs she saw)"
+
+    entails("A gymnast performing in a competition.", "The gymnast is watching tv.")
+        -> unknown, "no rule she has covers this pair"
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
