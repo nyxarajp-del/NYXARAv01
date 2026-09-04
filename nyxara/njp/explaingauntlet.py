@@ -87,7 +87,7 @@ import random
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = [
     "Verdict", "Fact", "World", "Item", "Reply", "Answer", "Paper", "Report",
@@ -254,7 +254,7 @@ def _class_size(structure: Any, observations: Sequence[Any]) -> int:
     the observations, and the class is a property of the observations rather than of the method.
     Any correct implementation returns the same number, which is what makes it a gold.
     """
-    from nyxara.njp.surgery import Structure, Surgeon
+    from nyxara.njp.surgery import Surgeon
 
     got = Surgeon().discover(structure.nodes, observations)
     return got.equivalent_count

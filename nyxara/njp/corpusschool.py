@@ -65,7 +65,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.njp import corpus as corpus_module
 from nyxara.njp.corpus import Record
-from nyxara.njp.school import (ExamConditions, Mint, Question, Result, Score, Subject,
+from nyxara.njp.school import (ExamConditions, Mint, Question, Score, Subject,
                                Taught, Transcript)
 
 __all__ = [

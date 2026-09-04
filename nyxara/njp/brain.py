@@ -42,7 +42,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from dataclasses import field as dc_field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.ledger import Ledger
@@ -5493,7 +5493,6 @@ class NJPBrain:
 
         try:
             compiler = getattr(self.compiler, "stats", lambda: {})()
-            grounded = getattr(self.grounder, "stats", lambda: {})()
             universe = getattr(self.universe, "stats", lambda: {})()
             predict = getattr(self.predictor, "stats", lambda: {})()
 

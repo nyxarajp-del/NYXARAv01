@@ -57,7 +57,7 @@ import os
 import random
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["Paper", "Report", "Breadth", "measure", "render", "main",
            "DEFAULT_SAMPLE", "DEFAULT_SEED"]
@@ -291,7 +291,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
 
-    from nyxara.njp.brain import NJPBrain
     from nyxara.njp.general import load_brain
     from nyxara.njp.ingest import ingest_triples
 

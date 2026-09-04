@@ -77,9 +77,9 @@ Pure standard library, deterministic.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 __all__ = ["Verdict", "Antigen", "Standing", "Immune", "COMPETING", "MANY_VALUED"]
 

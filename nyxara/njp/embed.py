@@ -47,7 +47,7 @@ Pure standard library beyond the manifold's numpy. Every entry point is fail-sof
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 __all__ = ["EntityEmbedding"]
 

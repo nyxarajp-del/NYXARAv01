@@ -107,7 +107,7 @@ Pure standard library, deterministic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = [
     "Step", "Chain", "Explanation", "Plan", "Explainer",

@@ -69,10 +69,8 @@ Pure standard library, deterministic.
 
 from __future__ import annotations
 
-import itertools
-from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 __all__ = [
     "Constraint", "Necessary", "Impossible", "Funnel", "Boundary",

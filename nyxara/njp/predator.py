@@ -80,7 +80,7 @@ Pure standard library, deterministic, and it holds no knowledge of its own.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["Attack", "Survival", "Predator", "EXCLUDES", "KINDS"]
 

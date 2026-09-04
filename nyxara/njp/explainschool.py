@@ -727,8 +727,8 @@ class ExplanationExam:
             silent_for = []
             if not self.by_sp.get((subject, "has_step")):
                 silent_for.append(("what are the steps of {}?", ()))
-            if not self.by_sp.get((subject, "purpose")) and not self.by_sp.get(
-                    (self.key(subject), "is_a")) is None:
+            if not self.by_sp.get((subject, "purpose")) and self.by_sp.get(
+                    (self.key(subject), "is_a")) is not None:
                 kinds = self.by_sp.get((subject, "is_a"), ())
                 if not any(self.by_sp.get((self.key(k), "purpose")) for k in kinds):
                     silent_for.append(("what is {} for?", ()))

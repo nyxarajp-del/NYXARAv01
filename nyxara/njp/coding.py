@@ -2749,7 +2749,6 @@ def _coalesce(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
     output built so far, which is why this cannot be a filter or a map.
     """
     xs = params[0]
-    last = _c("at", _v("out"), _c("minus", _c("len", _v("out")), Lit(1)))
     joins = _c("and", _c("gt", _c("len", _v("out")), Lit(0)), f[0])
     return (Assign("out", Lit(())),
             For(("it",), _c("sort", _v(xs)),
@@ -2906,7 +2905,6 @@ def _stack_scan(params: Sequence[str], f: Sequence[Term]) -> Tuple[Any, ...]:
     before it, and possibly the one before that.
     """
     xs = params[0]
-    top = _c("at", _v("st"), _c("minus", _c("len", _v("st")), Lit(1)))
     pop = While(_c("and", _c("ge", _c("len", _v("st")), f[0]), f[1]),
                 (Assign("st", _c("take", _v("st"), _c("minus", _c("len", _v("st")), Lit(1)))),))
     return (Assign("st", Lit(())),

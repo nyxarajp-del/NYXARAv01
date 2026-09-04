@@ -12,11 +12,9 @@ determine (see ``test_corpus.py``).
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
-from nyxara.njp import corpus as corpus_module
 from nyxara.njp.corpus import load, verify
 from nyxara.njp.corpussolver import CorpusSolver, Reading, strip_noise
 

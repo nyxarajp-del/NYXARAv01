@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.njp.falsify import Falsifier, Killer, TheoryKiller, Verdict
+from nyxara.njp.falsify import Falsifier, Killer, TheoryKiller
 
 
 class _Ledger:

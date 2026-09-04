@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.njp.asking import LESSON, LEVELS, Asking, Cue, Frame, install, teach, uninstall
+from nyxara.njp.asking import LESSON, Asking, install, teach, uninstall
 
 
 @pytest.fixture

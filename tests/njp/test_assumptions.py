@@ -20,7 +20,6 @@ end: ``unknown → hypothesis → experiment → result → discovery``.
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.njp import NJPBrain
 from nyxara.njp.assume import AssumptionKind, AssumptionMiner, AssumptionStatus

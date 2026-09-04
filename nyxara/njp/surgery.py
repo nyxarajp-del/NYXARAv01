@@ -93,7 +93,7 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 __all__ = [
     "Observation", "Structure", "Score", "Verdict", "Surgeon",
@@ -417,7 +417,6 @@ class Surgeon:
                 forced.add((by_low[a_low], middle))
                 forced.add((by_low[b_low], middle))
         out.forced = frozenset(forced)
-        independent = set(separated)
 
         # 3. Every acyclic orientation of the skeleton that keeps the forced edges and invents no
         #    collider the data does not have. What survives is the equivalence class.

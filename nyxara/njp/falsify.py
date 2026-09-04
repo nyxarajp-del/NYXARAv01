@@ -56,7 +56,7 @@ is a search that found nothing, which is what it is.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = ["Killer", "Falsifier", "Verdict", "TheoryKiller"]
@@ -232,7 +232,7 @@ class TheoryKiller:
                 return []
             held = [b for b in ledger.beliefs.values()
                     if float(getattr(b, "confidence", 0.0)) >= self.threshold
-                    and not getattr(b, "outcome", None) is False]
+                    and getattr(b, "outcome", None) is not False]
             held.sort(key=lambda b: (self._seen.get(getattr(b, "claim", ""), 0.0),
                                      -float(getattr(b, "confidence", 0.0))))
             return held[: (self.limit if limit is None else max(1, int(limit)))]

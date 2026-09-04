@@ -63,7 +63,7 @@ from __future__ import annotations
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["Pattern", "Analogy", "Abstraction", "Fusion", "MIN_EDGES", "MAX_RADIUS",
            "STRUCTURAL"]

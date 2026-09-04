@@ -241,7 +241,8 @@ from nyxara.njp.adversary import (
 from nyxara.njp.brain import NJPBrain, NJPPercept, NJPThought
 from nyxara.njp.canon import canonical_entity, canonical_relation, singular
 from nyxara.njp.cell import Cell
-from nyxara.njp.concepts import Concept, ConceptGenesis, Coverage, GenesisReport, Observation
+from nyxara.njp.concepts import (Concept, ConceptGenesis, Coverage, GenesisReport,
+                                 Observation as ConceptObservation)
 from nyxara.njp.field import (
     Bottleneck,
     CycleReport,
@@ -292,13 +293,17 @@ from nyxara.njp.society import (
     Contribution,
     Role,
 )
+# `Step` collides three ways in this namespace — a teaching step, an agent's step and a step of
+# an explanation — and only the last one imported was ever reachable. The two the linter found
+# shadowed are qualified here; the winner keeps the bare name, so nothing that resolves today
+# resolves differently.
 from nyxara.njp.teacher import (
     CortexTeacher,
     Distillation,
     Distiller,
     Lesson,
     RecordedTeacher,
-    Step,
+    Step as TeachingStep,
     Teacher,
     TeacherCouncil,
     Verdict as TeachingVerdict,
@@ -309,10 +314,10 @@ from nyxara.njp.evolution import (
     EvolutionTrial,
     Measurement,
     Mutation,
-    Situation,
+    Situation as EvolutionSituation,
 )
 from nyxara.njp.assume import (
-    Assumption,
+    Assumption as MinedAssumption,
     AssumptionKind,
     AssumptionMiner,
     AssumptionStatus,
@@ -332,7 +337,7 @@ from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.integrate import LearningLoop, LoopReport
 from nyxara.njp.ledger import ErrorMemory, ErrorRecord, Generation, Ledger
 from nyxara.njp.manifold import Manifold, Prediction, Snapshot
-from nyxara.njp.agency import ActionValue, Agent, Outcome, Step
+from nyxara.njp.agency import ActionValue, Agent, Outcome, Step as AgencyStep
 from nyxara.njp.agency import Plan as ActionPlan
 from nyxara.njp.calculate import Calculator, Evaluation
 # The mathematician has no `__main__` and is imported here; `nyxara.njp.mathschool` carries one
@@ -375,7 +380,10 @@ from nyxara.njp.predator import (
     Survival,
 )
 # `Structure` and `Pattern` are aliased for the reason `CausalExplanation` was: the namespace was
-# checked before these went in. `Observation` is free, `Surgeon` and `Fusion` are free.
+# checked before these went in. `Surgeon` and `Fusion` are free. `Observation` was **not** — this
+# comment said it was, and `njp.concepts.Observation` had held the name since long before. The
+# surgeon's kept it because it was imported later; the concept layer's is now
+# `ConceptObservation`.
 from nyxara.njp.surgery import (
     Observation,
     Structure as CausalStructure,
@@ -625,6 +633,9 @@ __all__ = [
     # NJP V.46/V.47 — what cannot work, and what a concept is made of
     "Boundary", "HardConstraint", "Necessary", "Impossible", "Funnel",
     "Genome", "Kinship", "read_genome",
+    # Names that were shadowed and unreachable until V.49's lint pass found them.
+    "TeachingStep", "AgencyStep", "ConceptObservation", "EvolutionSituation",
+    "MinedAssumption",
     "KnowledgeObject", "PassageReader", "ReadRelation", "ReadingLesson", "ReadingShape",
     "taught_reader",
     "Article", "ReadingCoverage", "Encyclopedia", "taught_on_wikipedia",
