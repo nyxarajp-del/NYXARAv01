@@ -346,6 +346,85 @@ from nyxara.njp.mathsolver import Solution as SolvedProblem
 # `NJPBrain.sit_corpus_exam` are its in-process entry points.
 from nyxara.njp.corpus import CorpusRecord, CorpusVerdict, verify_corpus_answer
 from nyxara.njp.corpussolver import CorpusReading, CorpusSolver
+# The explanation organ. `nyxara.njp.explainschool` is kept out for the same reason
+# `discourseschool` is: it carries a `__main__` and is an examination rather than a faculty.
+#
+# `Explanation` is aliased, and the alias is why this comment exists. The namespace check that
+# V.34 paid seven commits to learn was run before these five names went in, and it caught one:
+# `nyxara.njp.predictive.Explanation` — the account a predictive model gives of a surprise — was
+# already here, imported further down, and would have silently won the collision. Same word, two
+# organs, both entitled to it; the export list is the wrong place to settle that, so the newer one
+# takes a qualified name here and keeps its own where it lives. `ClaimLedger`, `TurnAnticipation`
+# and `TurnSurprise` above are the same decision made three times before.
+from nyxara.njp.explain import (
+    Chain,
+    Explainer,
+    Explanation as CausalExplanation,
+    Plan,
+    Step,
+)
+from nyxara.njp.explainread import read_explanation_question
+from nyxara.njp.asking import Asking, Cue as QuestionCue, Frame as QuestionFrame
+# `Attack` is already `nyxara.njp.adversary.Attack` — an attack on a *belief*. This one attacks an
+# *explanation*, which is a different object, so it takes a qualified name here for the reason
+# `CausalExplanation` did: the export list is the wrong place to settle a word two organs are both
+# entitled to.
+from nyxara.njp.predator import (
+    Attack as ExplanationAttack,
+    Predator,
+    Survival,
+)
+# `Structure` and `Pattern` are aliased for the reason `CausalExplanation` was: the namespace was
+# checked before these went in. `Observation` is free, `Surgeon` and `Fusion` are free.
+from nyxara.njp.surgery import (
+    Observation,
+    Structure as CausalStructure,
+    Surgeon,
+    Verdict as StructureVerdict,
+)
+from nyxara.njp.fusion import Abstraction, Analogy, Fusion, Pattern as ShapePattern
+# V.42/V.43. `Step`, `Status`, `Claim`, `Kind` and `Path` are all words other organs already own,
+# so every one of them takes a qualified name here. The namespace was checked before they went in,
+# which is the habit V.34 paid seven commits to learn.
+from nyxara.njp.loop import Loop, Model as CausalModel, Reason as UnknownReason
+# V.44. `Verdict` is already `njp.ledger`'s and `Standing` already `njp.discourse`'s, so both are
+# qualified; `Immune` and `Antigen` are free.
+from nyxara.njp.immune import (
+    Antigen,
+    Immune,
+    Standing as SourceStanding,
+    Verdict as ImmuneVerdict,
+)
+# V.45. `Prediction` is already `njp.predict`'s and `Theory` is free; `Situation`, `Invariant`,
+# `Law` and `Hunter` are all free. Checked before adding, as ever.
+from nyxara.njp.theory import (
+    Hunter,
+    Invariant,
+    Law,
+    Prediction as LawPrediction,
+    Situation,
+    Theory,
+)
+# V.46/V.47. `Constraint` is already `njp.puzzle`'s, so it is qualified; the rest are free.
+from nyxara.njp.boundary import (
+    Boundary,
+    Constraint as HardConstraint,
+    Funnel,
+    Impossible,
+    Necessary,
+)
+from nyxara.njp.conceptgenome import Genome, Kinship, read_genome
+from nyxara.njp.provenance import (
+    Blame,
+    Claim as ProvenanceClaim,
+    Kind as ProvenanceKind,
+    Ledger as ProvenanceLedger,
+    Path as ProvenancePath,
+    PostMortem,
+    Status as ProvenanceStatus,
+    Step as ProvenanceStep,
+)
+
 # The communication organ is imported; `nyxara.njp.discourseschool` carries a `__main__` and is
 # kept out for the reason `corpusschool` is — `NJPBrain.go_to_discourse_school` is its in-process
 # entry point.
@@ -507,6 +586,25 @@ __all__ = [
     "ActLearner", "Alternation", "TurnAnticipation", "Claim", "ClaimVerdict", "ClosedClassLearner", "Communicator", "Connective", "Expectation",
     "Exchange", "Figure", "Footing", "Induction", "Interpretation", "ClaimLedger", "Link", "Minds", "Readings", "Reference",
     "Register", "Reply", "Resolution", "Retelling", "Scale", "Standing", "TurnSurprise", "Uptake",
+    # NJP V.36 — what, how and why (njp/explain.py)
+    "Chain", "Explainer", "CausalExplanation", "Plan", "Step", "read_explanation_question",
+    # NJP V.38/V.39 — the question form induced, and the predator over explanations
+    "Asking", "QuestionCue", "QuestionFrame",
+    "Predator", "ExplanationAttack", "Survival",
+    # NJP V.40 — rival structures, and the same shape in two subjects
+    # NJP V.42/V.43 — the closed loop, and conclusions that carry their ancestry
+    "Loop", "CausalModel", "UnknownReason",
+    "ProvenanceLedger", "ProvenanceClaim", "ProvenancePath", "ProvenanceStep",
+    "ProvenanceKind", "ProvenanceStatus", "Blame", "PostMortem",
+    # NJP V.44 — quarantine, so one new fact cannot corrupt the graph
+    "Immune", "Antigen", "ImmuneVerdict", "SourceStanding",
+    # NJP V.45 — what never changes, and running what survives
+    "Hunter", "Situation", "Invariant", "Law", "Theory", "LawPrediction",
+    # NJP V.46/V.47 — what cannot work, and what a concept is made of
+    "Boundary", "HardConstraint", "Necessary", "Impossible", "Funnel",
+    "Genome", "Kinship", "read_genome",
+    "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
+    "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions

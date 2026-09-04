@@ -1,0 +1,56 @@
+# events.kb — things that happened, and what they set in motion.
+#
+# `history.kb`, `ancient.kb` and `modern.kb` cover periods and people. This file is about events
+# as events: the causal question — what brought this about and what followed from it — which is
+# what `njp/explain.py` walks, and which a list of dates cannot answer.
+
+event | is_a=something that happened at a place and time | has_kind=historical event | has_kind=natural event | has_kind=recurring event
+historical event | is_a=event | purpose=marking a change that outlasted it
+
+# --- events that changed how people live ---------------------------------------------------------- #
+agricultural revolution | is_a=historical event | means=the shift from foraging to farming | causes=settled villages | causes=population growth | causes=the storing of surplus food | causes=social hierarchy
+industrial revolution | is_a=historical event | occurs_when=machine production and coal power spread through Britain and then Europe | causes=mass production | causes=child labour before it was regulated | causes=rising carbon dioxide in the atmosphere
+printing revolution | is_a=historical event | occurs_when=movable type printing spreads in Europe | causes=books becoming cheap | causes=literacy spreading | causes=ideas travelling faster than authorities could control
+scientific revolution | is_a=historical event | causes=observation and experiment replacing authority as the test of a claim | causes=the founding of scientific societies
+enlightenment | is_a=historical period | means=a movement placing reason and individual rights at the centre of politics | causes=written constitutions | causes=arguments for the abolition of slavery
+green revolution | occurs_when=high yielding varieties and fertiliser spread through Asia and Latin America | causes=famine becoming less frequent in India | causes=greater use of irrigation water
+digital revolution | is_a=historical event | occurs_when=computing and networks become cheap and general | causes=information becoming near costless to copy | causes=whole industries being rebuilt around software
+
+# --- conflicts ---------------------------------------------------------------------------------------- #
+world war one | occurs_when=an assassination triggers a system of alliances into general war | causes=redrawn borders in Europe and the Middle East
+treaty of versailles | purpose=settling the terms after world war one | causes=heavy reparations on Germany | causes=resentment that later movements exploited
+world war two | causes=the united nations being founded | causes=decolonisation accelerating | causes=the atomic bomb being used | causes=the holocaust being uncovered | requires=nothing stopping the aggression of the 1930s
+cold war | is_a=prolonged confrontation | occurs_when=two blocs hold opposing systems and nuclear weapons | causes=alliances dividing Europe
+partition of india | causes=mass displacement of people | causes=communal violence | causes=a long dispute over Kashmir
+decolonisation | is_a=historical process | occurs_when=colonised peoples gain independence after the second world war | causes=dozens of new states | causes=borders inherited from colonial administration
+fall of the berlin wall | causes=the end of the cold war division of Europe
+abolition of slavery | is_a=historical process | causes=the legal end of chattel slavery | requires=sustained campaigning | requires=changes in law
+
+# --- moments in science and exploration ------------------------------------------------------------ #
+moon landing | occurs_when=a crewed spacecraft lands on the Moon | causes=proof that people could reach another body | requires=the Saturn V rocket
+discovery of penicillin | is_a=historical event | causes=the antibiotic era | causes=bacterial infections becoming treatable | occurs_when=a mould is noticed killing bacteria on a plate
+discovery of the structure of dna | is_a=historical event | causes=molecular biology | causes=genetic engineering becoming possible
+first flight | is_a=historical event | causes=powered aviation | occurs_when=a heavier than air machine flies under its own power with a pilot
+invention of the world wide web | is_a=historical event | causes=documents becoming linkable across the internet | causes=the web browser | occurs_when=hypertext is put on top of the internet
+eradication of smallpox | is_a=historical event | causes=the first disease eliminated by human action | requires=a global vaccination campaign | requires=surveillance and containment
+human genome project | is_a=scientific project | purpose=reading the sequence of the human genome | causes=genomics becoming a routine tool in medicine
+detection of gravitational waves | is_a=historical event | causes=a new way of observing the universe | requires=interferometers of extraordinary sensitivity
+
+# --- natural and recurring events -------------------------------------------------------------------- #
+natural event | is_a=event | means=one not brought about by people
+earthquake | is_a=natural event | occurs_when=stress along a fault is released suddenly | causes=tsunami when it happens under the sea | causes=building collapse where construction is weak
+volcanic eruption | is_a=natural event | occurs_when=magma reaches the surface | causes=ash clouds | causes=lava flows | causes=cooling of the climate for a season when very large
+tsunami | is_a=natural event | occurs_when=a large volume of water is displaced suddenly | causes=flooding far inland | requires=warning systems to reduce loss of life
+flood | is_a=natural event | causes=displacement of people | causes=crop loss | causes=waterborne disease
+drought | is_a=natural event | occurs_when=rainfall is far below normal for a long period | causes=water scarcity | causes=famine where there is no reserve
+famine | occurs_when=food production fails and no distribution makes up the shortfall
+pandemic | is_a=event | occurs_when=a new infectious disease spreads across many countries | causes=strain on health systems | causes=restrictions on movement | requires=a pathogen people have no immunity to
+solar eclipse | is_a=recurring event | causes=the Sun being hidden along a narrow track
+lunar eclipse | is_a=recurring event | causes=the Moon darkening and reddening
+equinox | is_a=recurring event | occurs_when=the Sun crosses the celestial equator | causes=day and night being nearly equal everywhere
+solstice | is_a=recurring event | occurs_when=the Sun reaches its greatest distance from the celestial equator | causes=the longest and shortest days of the year
+monsoon | is_a=recurring event | occurs_when=seasonal winds reverse and bring heavy rain | causes=the main rainfall of South Asia | requires=the land heating faster than the sea
+migration season | is_a=recurring event | occurs_when=animals move between breeding and feeding grounds | requires=cues from day length and temperature
+election | purpose=deciding who holds office at a fixed interval
+olympic games | is_a=recurring event | purpose=holding an international sporting competition every four years
+census | purpose=counting a population at a fixed interval

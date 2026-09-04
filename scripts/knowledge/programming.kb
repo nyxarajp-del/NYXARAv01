@@ -1,0 +1,73 @@
+# programming.kb — writing software: languages, constructs, practice, and what goes wrong.
+#
+# Written so that *why* and *how* have somewhere to walk. A relation that only says what a thing
+# *is* answers one of the three questions this domain is examined on; `causes`, `purpose` and
+# `requires` answer the other two, and a line with only `is_a=` on it is a line that will score.
+
+# --- what a program is ----------------------------------------------------------------------- #
+program | purpose=making a computer perform a task | requires=a programming language | requires=a computer
+source code | is_a=text written by a programmer | purpose=expressing a program in a form people can read | requires=a programming language
+machine code | is_a=instructions a processor executes directly | has_property=specific to one instruction set
+programming language | is_a=formal language | purpose=expressing computations precisely | has_kind=compiled language | has_kind=interpreted language
+compiler | causes=a faster program | requires=source code
+interpreter | purpose=running source code directly | causes=slower execution than compiled code | causes=faster feedback while writing
+bytecode | is_a=intermediate representation | purpose=running the same program on different machines
+virtual machine | is_a=program | purpose=executing bytecode | causes=portability across operating systems
+
+# --- the constructs everything is built from -------------------------------------------------- #
+variable | is_a=named place to hold a value | purpose=referring to a value by name
+constant | is_a=named value that does not change | purpose=giving a meaning to a fixed number
+function | is_a=named block of code | purpose=doing one job that can be called from many places | causes=less repeated code
+parameter | is_a=named input to a function | purpose=letting one function work on many values
+return value | is_a=value a function hands back | purpose=passing a result to the caller
+loop | is_a=control structure | purpose=repeating a block of code | requires=a stopping condition
+conditional | is_a=control structure | purpose=choosing between two paths | requires=a boolean expression
+recursion | is_a=a function calling itself | purpose=solving a problem in terms of a smaller one | causes=stack overflow when the base case is missing
+data structure | is_a=way of arranging data | purpose=making some operations cheap | has_kind=tree
+array | purpose=holding items in numbered positions
+linked list | is_a=data structure | purpose=holding items that are often inserted and removed | has_property=cheap insertion | has_property=slow access by position
+hash table | purpose=looking a value up by a key
+stack | purpose=handling the most recently added item first | means=last in first out
+queue | purpose=handling the earliest added item first | means=first in first out
+tree | is_a=data structure | purpose=representing a hierarchy | has_part=node | has_part=edge
+object | is_a=bundle of data and the operations on it | purpose=keeping related state and behaviour together
+class | is_a=template for objects | purpose=describing what its objects hold and can do
+inheritance | is_a=relation between classes | purpose=reusing behaviour from a more general class | causes=coupling between classes@0.7
+interface | is_a=agreed set of operations | purpose=letting code depend on what a thing does rather than what it is
+library | is_a=collection of reusable code | purpose=avoiding rewriting solved problems
+framework | is_a=library that calls your code | purpose=fixing the shape of an application
+api | is_a=agreed boundary between two programs | purpose=letting one program use another without knowing its internals
+
+# --- what programmers do ---------------------------------------------------------------------- #
+debugging | purpose=finding the cause of a defect | requires=a way to reproduce the defect | requires=observing what the program actually does
+refactoring | is_a=activity | purpose=improving the structure of code without changing what it does | requires=tests
+code review | is_a=activity | purpose=finding defects before they ship | causes=shared knowledge of the code | requires=a reader who is not the author
+testing | is_a=activity | purpose=finding out whether the program does what was intended | has_kind=unit test | has_kind=integration test | has_kind=regression test
+unit test | is_a=test | purpose=checking one piece of code in isolation | causes=fast feedback
+regression test | is_a=test | purpose=stopping a fixed defect from coming back | occurs_when=a defect is fixed
+version control | purpose=recording every change to the source | causes=the ability to undo a change
+git | purpose=recording changes and merging work from several people | has_part=merge
+commit | is_a=recorded change | purpose=marking a point the code can be returned to
+branch | is_a=parallel line of development | purpose=working on a change without disturbing the main line
+merge conflict | is_a=situation | occurs_when=two branches change the same lines | requires=a person to decide which change is meant
+continuous integration | is_a=practice | purpose=running the tests on every change | causes=defects being found the day they are written
+
+# --- what goes wrong, and why ------------------------------------------------------------------ #
+bug | is_a=defect in a program | causes=wrong output | causes=a crash
+syntax error | is_a=bug | occurs_when=the source does not follow the language grammar | causes=the program failing to compile
+type error | is_a=bug | occurs_when=a value is used as a kind it is not | causes=a crash at run time
+off by one error | is_a=bug | occurs_when=a loop bound is one too far or one too short | causes=reading past the end of an array
+null dereference | is_a=bug | occurs_when=code uses a reference that holds nothing | causes=a crash
+memory leak | is_a=bug | occurs_when=memory is allocated and never released | causes=a program growing until it is killed
+race condition | is_a=bug | occurs_when=two threads touch the same data without ordering | causes=results that change between runs | requires=concurrency
+deadlock | is_a=bug | occurs_when=two threads each hold what the other waits for | causes=both threads stopping forever
+infinite loop | is_a=bug | occurs_when=a loop condition never becomes false | causes=a program that never finishes
+technical debt | is_a=accumulated shortcut in a codebase | causes=each later change costing more | occurs_when=speed is chosen over structure
+
+# --- the qualities being aimed at --------------------------------------------------------------- #
+readability | is_a=quality of code | purpose=letting the next reader understand it | causes=cheaper maintenance
+abstraction | is_a=technique | purpose=hiding detail behind a simpler idea | causes=code that is easier to change | causes=harder debugging when it leaks@0.6
+modularity | is_a=quality of a system | purpose=letting one part change without the others | requires=clear interfaces
+idempotence | is_a=property of an operation | means=running it twice has the same effect as running it once | purpose=making retries safe
+complexity | is_a=measure of how much work an algorithm does
+time complexity | is_a=measure | purpose=describing how run time grows with input size | means=how the number of operations grows with the size of the input

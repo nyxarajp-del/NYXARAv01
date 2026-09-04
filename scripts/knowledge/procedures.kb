@@ -1,0 +1,145 @@
+# procedures.kb — how to do things, told as a set of steps and never as a sequence.
+#
+# This file is written to a rule, and the rule is the whole point of it:
+#
+#     A procedure states WHICH steps it has (`has_step`) and, on each step, WHAT THAT STEP NEEDS
+#     (`requires`). It never states the order.
+#
+# The order is derived, every time, by the topological walk in `njp/explain.py`. That is why the
+# steps below are written in whatever order they were thought of rather than in the order they are
+# done — and `tests/njp/test_explain.py` shuffles them and demands the same answer back, so a
+# sequence leaking out of the file's line order would fail rather than pass quietly.
+#
+# Two consequences are deliberate and are the reason this is not a recipe book:
+#
+#   * Where the prerequisites leave two steps free, the derivation returns **both orders**, and
+#     that is the correct answer rather than a failure to choose. `beating the eggs` and `heating
+#     the pan` are genuinely either way round, and a file that put one first would be asserting a
+#     constraint nobody has.
+#   * A procedure can be asked about steps nobody listed together — "does the water boil before
+#     the egg goes in" is answered from two `requires` lines and no statement of order at all.
+#
+# Step names are written as full gerund phrases so that each is its own subject in the store and
+# no two procedures accidentally share one.
+
+# --- cooking --------------------------------------------------------------------------------- #
+boiling an egg | is_a=procedure | purpose=cooking an egg in its shell | has_step=filling a pan with water | has_step=bringing the water to the boil | has_step=lowering the egg into the water | has_step=timing the cooking | has_step=cooling the egg under cold water | has_step=peeling the egg
+bringing the water to the boil | requires=filling a pan with water
+lowering the egg into the water | requires=bringing the water to the boil
+timing the cooking | requires=lowering the egg into the water
+cooling the egg under cold water | requires=timing the cooking
+peeling the egg | requires=cooling the egg under cold water
+
+making an omelette | is_a=procedure | purpose=cooking beaten eggs in a pan | has_step=beating the eggs | has_step=heating the pan | has_step=pouring the eggs into the pan | has_step=folding the omelette | has_step=serving the omelette
+pouring the eggs into the pan | requires=beating the eggs | requires=heating the pan
+folding the omelette | requires=pouring the eggs into the pan
+serving the omelette | requires=folding the omelette
+
+baking bread | is_a=procedure | purpose=turning flour into a risen loaf | has_step=mixing the flour, water, yeast and salt | has_step=kneading the dough | has_step=letting the dough rise | has_step=shaping the loaf | has_step=heating the oven | has_step=baking the loaf | has_step=cooling the loaf on a rack | requires=yeast | requires=an oven
+kneading the dough | requires=mixing the flour, water, yeast and salt | purpose=developing the gluten that traps the gas
+letting the dough rise | requires=kneading the dough | purpose=letting the yeast produce carbon dioxide | causes=the dough doubling in size
+shaping the loaf | requires=letting the dough rise
+baking the loaf | requires=shaping the loaf | requires=heating the oven
+cooling the loaf on a rack | requires=baking the loaf | purpose=letting steam escape so the crust does not go soft
+
+brewing tea | is_a=procedure | purpose=making a drink by infusing tea leaves | has_step=boiling the water | has_step=warming the pot | has_step=adding the tea leaves | has_step=pouring on the water | has_step=letting the tea steep | has_step=straining the tea into a cup
+adding the tea leaves | requires=warming the pot
+pouring on the water | requires=boiling the water | requires=adding the tea leaves
+letting the tea steep | requires=pouring on the water
+straining the tea into a cup | requires=letting the tea steep
+
+# --- first aid and health -------------------------------------------------------------------- #
+treating a minor burn | is_a=procedure | purpose=limiting damage from a small burn | has_step=removing the source of heat | has_step=cooling the burn under running water | has_step=removing rings and tight clothing near the burn | has_step=covering the burn with a clean non fluffy dressing | has_step=seeking medical help if the burn is large or deep
+cooling the burn under running water | requires=removing the source of heat | purpose=taking heat out of the tissue | causes=less damage to the deeper layers
+covering the burn with a clean non fluffy dressing | requires=cooling the burn under running water | requires=removing rings and tight clothing near the burn
+seeking medical help if the burn is large or deep | requires=covering the burn with a clean non fluffy dressing
+
+giving cpr | is_a=procedure | purpose=keeping blood moving when a heart has stopped | has_step=checking the scene is safe | has_step=checking for a response | has_step=calling for emergency help | has_step=checking for breathing | has_step=starting chest compressions | has_step=continuing until help arrives | requires=training
+checking for a response | requires=checking the scene is safe
+checking for breathing | requires=checking for a response
+calling for emergency help | requires=checking for a response
+starting chest compressions | requires=checking for breathing | requires=calling for emergency help
+continuing until help arrives | requires=starting chest compressions
+
+washing your hands | is_a=procedure | purpose=removing pathogens from the hands | has_step=wetting the hands | has_step=applying soap | has_step=rubbing all surfaces of the hands for twenty seconds | has_step=rinsing the hands | has_step=drying the hands | causes=fewer infections being passed on
+applying soap | requires=wetting the hands
+rubbing all surfaces of the hands for twenty seconds | requires=applying soap | purpose=lifting grease and pathogens off the skin
+rinsing the hands | requires=rubbing all surfaces of the hands for twenty seconds
+drying the hands | requires=rinsing the hands | purpose=stopping damp hands picking up more microbes
+
+# --- science and method ---------------------------------------------------------------------- #
+scientific method | is_a=procedure | purpose=testing an explanation against the world | has_step=making an observation | has_step=forming a hypothesis | has_step=deriving a prediction from the hypothesis | has_step=designing an experiment | has_step=collecting the data | has_step=analysing the results | has_step=reporting what was found | causes=claims that others can check
+forming a hypothesis | requires=making an observation
+deriving a prediction from the hypothesis | requires=forming a hypothesis | purpose=making the hypothesis refutable
+designing an experiment | requires=deriving a prediction from the hypothesis | purpose=arranging conditions in which the prediction could fail
+collecting the data | requires=designing an experiment
+analysing the results | requires=collecting the data
+reporting what was found | requires=analysing the results | purpose=letting others repeat the test
+
+running a controlled experiment | is_a=procedure | purpose=isolating the effect of one variable | has_step=identifying the variable to be tested | has_step=choosing a control group | has_step=assigning subjects at random | has_step=keeping every other condition the same | has_step=measuring the outcome in both groups | has_step=comparing the two groups | requires=a control group
+choosing a control group | requires=identifying the variable to be tested
+assigning subjects at random | requires=choosing a control group | purpose=stopping unknown differences lining up with the groups
+measuring the outcome in both groups | requires=assigning subjects at random | requires=keeping every other condition the same
+comparing the two groups | requires=measuring the outcome in both groups
+
+titrating a solution | is_a=procedure | purpose=finding the concentration of a solution | has_step=rinsing the burette with the titrant | has_step=filling the burette | has_step=measuring the sample into a flask | has_step=adding the indicator | has_step=adding titrant until the colour changes | has_step=recording the volume used | has_step=repeating until the readings agree
+filling the burette | requires=rinsing the burette with the titrant
+adding the indicator | requires=measuring the sample into a flask
+adding titrant until the colour changes | requires=filling the burette | requires=adding the indicator
+recording the volume used | requires=adding titrant until the colour changes
+repeating until the readings agree | requires=recording the volume used | purpose=showing the result is not a single mistake
+
+# --- software -------------------------------------------------------------------------------- #
+fixing a bug | is_a=procedure | purpose=removing a defect without introducing another | has_step=reproducing the failure | has_step=writing a test that fails | has_step=finding the cause | has_step=making the smallest change that fixes it | has_step=running the whole test suite | has_step=recording what was wrong
+writing a test that fails | requires=reproducing the failure | purpose=proving the fix later and stopping the defect coming back
+finding the cause | requires=reproducing the failure
+making the smallest change that fixes it | requires=finding the cause | requires=writing a test that fails
+running the whole test suite | requires=making the smallest change that fixes it | purpose=finding out whether the fix broke something else
+recording what was wrong | requires=running the whole test suite
+
+deploying a change | is_a=procedure | purpose=putting a change in front of users without breaking what works | has_step=merging the change | has_step=building the release | has_step=running the tests against the build | has_step=releasing to a small share of traffic | has_step=watching the error rate | has_step=releasing to everyone | has_step=keeping a way to roll back
+building the release | requires=merging the change
+running the tests against the build | requires=building the release
+releasing to a small share of traffic | requires=running the tests against the build | requires=keeping a way to roll back
+watching the error rate | requires=releasing to a small share of traffic
+releasing to everyone | requires=watching the error rate
+
+# --- everyday and civic ------------------------------------------------------------------------ #
+changing a flat tyre | is_a=procedure | purpose=replacing a punctured wheel at the roadside | has_step=parking somewhere level and safe | has_step=putting on the handbrake | has_step=loosening the wheel nuts | has_step=jacking up the car | has_step=removing the wheel nuts and the wheel | has_step=fitting the spare wheel | has_step=lowering the car | has_step=tightening the wheel nuts
+putting on the handbrake | requires=parking somewhere level and safe
+loosening the wheel nuts | requires=putting on the handbrake | purpose=breaking them free while the wheel cannot spin
+jacking up the car | requires=loosening the wheel nuts
+removing the wheel nuts and the wheel | requires=jacking up the car
+fitting the spare wheel | requires=removing the wheel nuts and the wheel
+lowering the car | requires=fitting the spare wheel
+tightening the wheel nuts | requires=lowering the car | purpose=tightening them against the ground rather than against the jack
+
+opening a bank account | is_a=procedure | purpose=getting an account a person can pay into and out of | has_step=choosing a bank | has_step=gathering proof of identity | has_step=gathering proof of address | has_step=completing the application | has_step=passing the identity checks | has_step=receiving the account details
+completing the application | requires=choosing a bank | requires=gathering proof of identity | requires=gathering proof of address
+passing the identity checks | requires=completing the application
+receiving the account details | requires=passing the identity checks
+
+voting in an election | is_a=procedure | purpose=casting a vote that counts | has_step=registering to vote | has_step=finding your polling station | has_step=bringing the required identification | has_step=collecting the ballot paper | has_step=marking the ballot in secret | has_step=placing the ballot in the box
+collecting the ballot paper | requires=registering to vote | requires=finding your polling station | requires=bringing the required identification
+marking the ballot in secret | requires=collecting the ballot paper
+placing the ballot in the box | requires=marking the ballot in secret
+
+# --- growing and making ------------------------------------------------------------------------- #
+planting a seed | is_a=procedure | purpose=getting a seed to grow into a seedling | has_step=preparing the soil | has_step=making a hole of the right depth | has_step=placing the seed in the hole | has_step=covering the seed with soil | has_step=watering the soil | has_step=keeping the soil warm and moist until it germinates
+making a hole of the right depth | requires=preparing the soil
+placing the seed in the hole | requires=making a hole of the right depth
+covering the seed with soil | requires=placing the seed in the hole
+watering the soil | requires=covering the seed with soil
+keeping the soil warm and moist until it germinates | requires=watering the soil
+
+making compost | is_a=procedure | purpose=turning garden and kitchen waste into a soil improver | has_step=choosing a spot for the heap | has_step=collecting green waste | has_step=collecting brown waste | has_step=layering green and brown waste | has_step=keeping the heap moist | has_step=turning the heap to let air in | has_step=waiting until it is dark and crumbly
+layering green and brown waste | requires=choosing a spot for the heap | requires=collecting green waste | requires=collecting brown waste
+keeping the heap moist | requires=layering green and brown waste
+turning the heap to let air in | requires=layering green and brown waste | purpose=giving the decomposers oxygen
+waiting until it is dark and crumbly | requires=keeping the heap moist | requires=turning the heap to let air in
+
+purifying drinking water | is_a=procedure | purpose=making water safe to drink | has_step=letting the sediment settle | has_step=filtering the water through cloth | has_step=boiling the water for one minute | has_step=letting the water cool | has_step=storing the water in a clean covered container | causes=waterborne disease being prevented
+filtering the water through cloth | requires=letting the sediment settle
+boiling the water for one minute | requires=filtering the water through cloth | purpose=killing the pathogens the filter did not remove
+letting the water cool | requires=boiling the water for one minute
+storing the water in a clean covered container | requires=letting the water cool

@@ -980,17 +980,94 @@ class GeneralKnowledgeExam:
 # --------------------------------------------------------------------------- #
 # Convenience
 # --------------------------------------------------------------------------- #
-def load_brain(path: str = "", *, brain: Any = None) -> Any:
-    """A bare :class:`~nyxara.njp.brain.NJPBrain` with the shipped world corpus in it."""
+#: The broad corpus: ConceptNet 5.7's English assertions, reshaped by
+#: ``scripts/prepare_conceptnet.py``. Crowd-sourced, ~198,000 facts over ~130,000 subjects, and
+#: **not loaded by default** — see :func:`load_brain`.
+_BROAD = "world_broad.jsonl.gz"
+
+
+def load_brain(path: str = "", *, brain: Any = None, broad: bool = False,
+               immune: bool = True) -> Any:
+    """A bare :class:`~nyxara.njp.brain.NJPBrain` with the shipped world corpus in it.
+
+    ``broad`` additionally loads :data:`_BROAD` **through the immune system**, and that is what
+    makes it usable rather than a trade.
+
+    Loaded naively it was a trade, and V.41 measured both halves of it. Breadth: 4,382 subjects to
+    130,274, thirty times as many things she has anything to say about. Cost: ``recall`` on the
+    curated corpus fell, because a crowd-sourced ``is_a`` stood beside a curated one as though the
+    two had the same standing, and once both were in the store no downstream organ could tell them
+    apart. So the broad corpus shipped switched off, which was honest and was not a fix.
+
+    :class:`~nyxara.njp.immune.Immune` is the fix. A competing claim from a source that has earned
+    nothing is **quarantined** — kept, retrievable, and out of the store — while everything that
+    merely adds is admitted. Measured over 75 items:
+
+    ==========================  =======  ==========  ========  ============  ==========
+    load                          facts    subjects    recall    membership    taxonomy
+    ==========================  =======  ==========  ========  ============  ==========
+    curated only                 15,848       4,382      0.92          0.96        1.00
+    ``broad``, no immune        211,149     130,274      0.84          1.00        0.92
+    ``broad`` (this)            193,805     130,274      0.92          1.00        0.96
+    ==========================  =======  ==========  ========  ============  ==========
+
+    **Every subject kept, the regression gone.** 17,559 of 198,455 claims quarantined — 8.8% — and
+    that is the whole of the damage: the harm was concentrated, and isolating it costs almost none
+    of the breadth. ``immune=False`` restores the naive load for anyone who wants to re-measure it.
+    """
     from nyxara.njp.brain import NJPBrain
     from nyxara.njp.ingest import ingest_triples
 
     got = brain if brain is not None else NJPBrain()
-    if not path:
-        import os
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", _TRIPLES)
-    ingest_triples(got, path, source="world_knowledge")
+    import os
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    ingest_triples(got, path or os.path.join(here, _TRIPLES), source="world_knowledge")
+    if broad:
+        wide = os.path.join(here, _BROAD)
+        if os.path.exists(wide):
+            if immune:
+                import os as _os
+
+                filtered = _guarded(got, wide)
+                try:
+                    ingest_triples(got, filtered, source="conceptnet")
+                finally:
+                    _os.unlink(filtered)
+            else:
+                ingest_triples(got, wide, source="conceptnet")
     return got
+
+
+def _guarded(brain: Any, path: str) -> str:
+    """The broad corpus with what would damage an answer held back. Returns **a path**.
+
+    A path and not a list, and that is a defect fixed rather than a preference.
+    :func:`~nyxara.njp.ingest.ingest_triples` takes a *file* — it opens what it is given — so the
+    first version, which handed it the filtered rows directly, ingested **nothing**. Silently:
+    ``load_brain(broad=True)`` returned 4,382 subjects, exactly the curated count, and reported no
+    error at all. The V.44 measurement had used a temporary file and so was real; the shipped path
+    did not, and did nothing. Caught by ``test_the_broad_corpus_multiplies_what_she_has_heard_of``,
+    which is the only reason this comment is not still a lie in a docstring.
+    """
+    import gzip
+    import json
+    import os
+    import tempfile
+
+    from nyxara.njp.immune import Immune
+
+    guard = Immune(trusted={"world_knowledge"})
+    guard.learn_incumbents(brain.grounder)
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as handle:  # type: ignore[operator]
+        rows = [json.loads(line) for line in handle if line.strip()]
+    kept = list(guard.filter_triples(rows, source="conceptnet"))
+    handle_out = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False,
+                                             encoding="utf-8")
+    with handle_out as out:
+        for row in kept:
+            out.write(json.dumps(row) + "\n")
+    return handle_out.name
 
 
 def examine(*, limit: int = DEFAULT_LIMIT, seed: int = DEFAULT_SEED,

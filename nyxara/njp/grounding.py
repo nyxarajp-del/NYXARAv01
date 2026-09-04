@@ -1060,6 +1060,12 @@ _PREDICATE_AFFINITY: Dict[str, Dict[str, float]] = {
     "means": {"means": 1.0, "is_a": 0.95, "occurs_when": 0.8, "part_of": 0.7,
               "involves": 0.7, "purpose": 0.65},
     "has_kind": {"has_kind": 1.0, "consists_of": 0.85, "has_part": 0.7, "is_a": 0.5},
+    # An ordered decomposition and an unordered one answer for each other, and neither is the
+    # other. A procedure's steps are its parts in the loose sense a questioner means, so `has_part`
+    # may answer at 0.6 — but a *part* is not a *step*, and the asymmetric weights are how the
+    # right relation still wins when both are stored.
+    "has_step": {"has_step": 1.0, "has_stage": 0.9, "has_part": 0.6},
+    "has_stage": {"has_stage": 1.0, "has_step": 0.9, "has_part": 0.6},
     "consists_of": {"consists_of": 1.0, "has_part": 0.9, "has_kind": 0.7},
     "causes": {"causes": 1.0, "produces": 0.9, "increases": 0.7, "decreases": 0.7,
                "occurs_when": 0.6},
@@ -1172,8 +1178,18 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # reproduced it exactly, one register later.
     (r"\bwhat\s+are\s+(?:the\s+)?(?:\w+\s+){0,2}?"
      r"(?:categories|types|kinds|forms|classes)\s+of\s+(?P<s>.+?)\??$", "has_kind"),
-    (r"\bwhat\s+(?:are|is)\s+(?:the\s+)?(?:components|parts|stages|steps|phases)\s+of\s+"
+    (r"\bwhat\s+(?:are|is)\s+(?:the\s+)?(?:components|parts)\s+of\s+"
      r"(?P<s>.+?)\??$", "has_part"),
+    # `steps` and `stages` used to sit in the row above, and that was the very asymmetry the
+    # comment two rows up was written about, running the other way. `_KIND_PREDICATE` reads "the
+    # steps of X are A, B, C" and **writes `has_step`**; this pattern read "what are the steps of
+    # X" and **asked for `has_part`**, so a stage list could be extracted from prose and then
+    # never retrieved by the sentence that asks for it. Both halves worked and disagreed about the
+    # name, which is the hardest version of this fault to see. `_PREDICATE_AFFINITY` below lets
+    # each of the three still answer for the others, so nothing that used to be found is lost.
+    (r"\bwhat\s+(?:are|is)\s+(?:the\s+)?(?:steps|phases)\s+of\s+"
+     r"(?P<s>.+?)\??$", "has_step"),
+    (r"\bwhat\s+(?:are|is)\s+(?:the\s+)?stages\s+of\s+(?P<s>.+?)\??$", "has_stage"),
     (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:consist\s+of|comprise)\??$", "consists_of"),
     (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:mean|refer\s+to|stand\s+for)\??$", "means"),
     (r"\bwhat\s+does\s+(?P<s>.+?)\s+involve\??$", "involves"),
@@ -3636,6 +3652,12 @@ _PREDICATE_ALIASES: Dict[str, str] = {
     "capital": "capital", "currency": "currency", "symbol": "symbol",
     "unit": "unit", "formula": "formula", "birthplace": "birthplace",
     "has_kind": "has_kind", "has_part": "has_part", "consists_of": "consists_of",
+    "has_step": "has_step", "has_stage": "has_stage",
+    # *These two cannot both hold.* A relation the store had no name for, so a corpus that knew
+    # two causes were mutually exclusive had nowhere to put it and `njp/predator.py` had nothing
+    # to read. Every spelling folds onto one edge for the reason the `produces` family does.
+    "excludes": "excludes", "exclude": "excludes", "rules_out": "excludes",
+    "incompatible_with": "excludes", "contradicts": "excludes",
     "also_known_as": "also_known_as", "occurs_when": "occurs_when", "capable_of": "capable_of",
     # The relations a seed pattern renames on the way in. "animal needs water" is *stored* as
     # `requires` by the pattern that reads it, and "what does an animal need" asks for `needs` —

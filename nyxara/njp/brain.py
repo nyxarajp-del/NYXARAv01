@@ -384,6 +384,7 @@ class NJPBrain:
         self.grounder = self._build_grounder(c)
         # After the grounder, because it reads nothing from it, and before `perceive` can run.
         self.discourse = self._build_discourse(c)
+        self.explainer = self._build_explainer(c)
         self.world = self._build_world(c)
         self.predictor = self._build_predictor(c)
         self.levels = self._build_levels(c)
@@ -1825,6 +1826,40 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a brain with no discourse organ still reads sentences
             return None
 
+    def _build_explainer(self, c: Any) -> Any:
+        """The organ that walks a *path* through the fact store rather than reading an edge off it.
+
+        It holds nothing. Every explanation it returns is composed out of facts she was told, and
+        a brain with an empty store answers every why and every how with silence — which is the
+        point, and which `tests/njp/test_explain.py` asserts by emptying the store and asking.
+
+        Built after the grounder because it indexes the grounder's facts in both directions: a
+        *why* names the effect and ``causes`` is stored on the cause, so without the inverted
+        index a why-walk is a full scan per hop and there is no second hop at any price.
+        """
+        if not self._gate("explain", True):
+            return None
+        try:
+            from nyxara.njp.explain import Explainer
+
+            # And she is shown how the question is phrased, once, here.
+            #
+            # `explainread` is a table of a dozen regular expressions and the gauntlet measured
+            # what that is worth: 4 of 40 on ten phrasings of one question. Adding nine rows would
+            # move the number and teach her nothing. So `asking.Asking` induces the form from
+            # demonstrations instead, and this is the single call that hands it to the reader —
+            # anywhere else and the organ ends up wired into one code path and not the other.
+            #
+            # It is a *lesson*, not a table: the phrasings demonstrated are deliberately not the
+            # phrasings the gauntlet examines on, and the gauntlet reports the taught and untaught
+            # halves apart.
+            if self._gate("asking", True):
+                from nyxara.njp.asking import install
+                install()
+            return Explainer(self.grounder)
+        except Exception:  # noqa: BLE001 — a brain without it still answers *what*
+            return None
+
     def _build_language(self, c: Any) -> Any:
         """The organ that can acquire a grammar she was not shipped with.
 
@@ -2013,6 +2048,106 @@ class NJPBrain:
             return self.discourse.vocabulary.closed(language)
         except Exception:  # noqa: BLE001
             return set()
+
+    def explain(self, question: str) -> Any:
+        """Ask a *why* or a *how* directly and get the whole walk, not just its first line.
+
+        Returns an :class:`~nyxara.njp.explain.Explanation`, a
+        :class:`~nyxara.njp.explain.Plan`, or ``None`` when the text is not one of those
+        questions. :meth:`think` uses the same call and renders it to one string; this is here
+        for a caller that wants the chains, their confidences and what the floor removed.
+        """
+        if self.explainer is None:
+            return None
+        try:
+            return self.explainer.ask(str(question or ""))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def why(self, topic: str, *, sense: str = "any") -> Any:
+        """The causal, purposive and enabling chains that end at *topic*."""
+        if self.explainer is None:
+            return None
+        try:
+            return self.explainer.why(str(topic or ""), sense=str(sense))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def how(self, topic: str) -> Any:
+        """How *topic* works: its parts and what each of them does."""
+        if self.explainer is None:
+            return None
+        try:
+            return self.explainer.mechanism(str(topic or ""))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def how_to(self, topic: str) -> Any:
+        """The steps of *topic*, in an order derived from their prerequisites.
+
+        The order is not stored anywhere and is recomputed each call. Where the prerequisites
+        leave two steps free, :attr:`~nyxara.njp.explain.Plan.orders` holds both and
+        :attr:`~nyxara.njp.explain.Plan.determined` is False — which is the answer, not a failure
+        to pick one.
+        """
+        if self.explainer is None:
+            return None
+        try:
+            return self.explainer.procedure(str(topic or ""))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def hunt_explanation(self, question: str) -> Any:
+        """Ask, then go after the answer. Returns the :class:`~nyxara.njp.predator.Survival`.
+
+        The walk already runs the predator on every explanation it returns; this is for a caller
+        who wants the findings rather than the prose — which of two answers exclude each other,
+        which chains are jointly required, which link the whole thing rests on.
+        """
+        got = self.explain(question)
+        return getattr(got, "survival", None)
+
+    def recover_structure(self, nodes: Sequence[str]) -> Any:
+        """Which causal structures the observations about these things actually support.
+
+        Not a walk of the stored graph — a **recovery** from what was observed, which may disagree
+        with what was stored. Returns a :class:`~nyxara.njp.surgery.Verdict` holding the whole
+        Markov equivalence class, so a caller can ask :meth:`Verdict.holds` whether an arrow is in
+        *every* admissible structure rather than in the one that happened to come first.
+        """
+        try:
+            from nyxara.njp.surgery import Surgeon
+            return Surgeon(self.grounder).discover(list(nodes))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def shared_shape(self, seeds: Dict[str, Sequence[str]]) -> Any:
+        """The abstractions two or more domains turn out to have in common. ``{domain: [seed]}``.
+
+        Cross-domain by construction: two subgraphs from one file are a duplicate, not an analogy.
+        """
+        if self.explainer is None:
+            return []
+        try:
+            from nyxara.njp.fusion import Fusion
+            return Fusion(self.explainer).abstract(dict(seeds))
+        except Exception:  # noqa: BLE001
+            return []
+
+    def refresh_explanations(self) -> int:
+        """Re-index the walk after the store has grown. Returns the edge count it now sees.
+
+        The index is built once at construction, so anything ingested afterwards is invisible to
+        a why-walk until this is called. It is a method rather than a check on every question
+        because the index costs one pass over the store and a question does not.
+        """
+        if self.explainer is None:
+            return 0
+        try:
+            self.explainer.reindex()
+            return int(self.explainer.edges)
+        except Exception:  # noqa: BLE001
+            return 0
 
     def retell(self, surface: str, *, into: str, frm: Optional[str] = None) -> Any:
         """Say one turn again in another language, and report what did **not** cross.
@@ -4137,7 +4272,22 @@ class NJPBrain:
             # discarded. Content and epistemic framing are different layers; keep them apart.
             answer = getattr(grounding, "answer", None)
             if answer is not None and answer.answered:
-                return str(answer.text)[:1000]
+                # 1a. And if a *why* was asked, the store's one hop is the first link of a longer
+                # chain rather than the answer.
+                #
+                # Measured: *"why does rain happen"* returned ``cloud``. That is true, it is what
+                # `_CAUSE_OF` reads off one edge, and it is the fact she was already told — while
+                # ``cooling → condensation → cloud → rain`` sat in the same store as three
+                # separate facts nobody had put together. A one-hop reply to a why-question is the
+                # question restated with its answer's answer withheld.
+                #
+                # The rule is narrow and is why this is three lines rather than a reordering: the
+                # walk replaces the lookup **only** when it found something with more than one
+                # hop in it. A one-hop chain is the same claim the store already made, said less
+                # plainly, and letting it win would have the derivation take over questions it
+                # adds nothing to.
+                deeper = self._deepen(thought)
+                return str(deeper or answer.text)[:1000]
 
             # 1.5. Two claims that cannot both hold, or a pronoun nothing in the discourse
             # settles. Either way she has a question rather than an answer.
@@ -4204,6 +4354,20 @@ class NJPBrain:
                 # nothing else. And a contested pair answers with the dispute rather than with
                 # either claim, because those are different states and returning one of them as
                 # though it were settled is the overwrite this whole organ exists to refuse.
+                # 2a-. *Why* and *how*, which are not relations and cannot be looked up. The
+                # store holds `cooling causes condensation`, `condensation causes cloud` and
+                # `cloud causes rain` as three separate facts and holds no fact at all that
+                # answers "why does rain happen" — the answer is the path, and
+                # `njp/explain.py` is the only thing here that walks one.
+                #
+                # It sits **after** the ordinary grounding above and before everything else, so a
+                # one-hop question that the store can answer outright still answers outright.
+                # What reaches this line is a question the fact store had nothing for, which is
+                # exactly where a derivation belongs and nowhere else: putting the walk first
+                # would answer "what is a stethoscope for" with a chain when a fact would do.
+                explained = self._answer_by_explaining(thought)
+                if explained:
+                    return explained
                 asked_where = self._answer_from_conversation(thought)
                 if asked_where:
                     return asked_where
@@ -4383,6 +4547,54 @@ class NJPBrain:
                     "Abhi kuch khaas nahi kar rahi — sun rahi hoon.")
         head = "Main theek hoon Master. " if mood else "Abhi: "
         return head + "; ".join(bits[:3]) + f" — {self.turns} turns."
+
+    def _deepen(self, thought: NJPThought) -> str:
+        """The chain, when the walk found more hops than the store's own answer had. Else "".
+
+        Only for a *why*. A *how* question that the store answered outright was answered by a
+        relation somebody stated about the thing — ``has_step``, ``has_part`` — and a mechanism
+        walk over the same edges is not deeper, only longer.
+        """
+        if self.explainer is None:
+            return ""
+        try:
+            from nyxara.njp.explainread import read_explanation_question
+            got = read_explanation_question(str(getattr(thought, "stimulus", "") or ""))
+            if got is None or got[0] not in ("because", "for"):
+                return ""
+            found = self.explainer.ask(str(thought.stimulus))
+            best = getattr(found, "best", None) if found is not None else None
+            if best is None or best.depth < 2:
+                return ""
+            return found.text()
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _answer_by_explaining(self, thought: NJPThought) -> str:
+        """A why or a how, answered by walking. Empty string for anything else.
+
+        Empty rather than a guess on three counts, and each is a refusal the walk makes rather
+        than one made here: the sentence is not a why/how question at all, the graph reaches
+        nothing from the topic, or every chain it did reach fell below the confidence floor. All
+        three are silence, and silence is the right answer to a question the store cannot support.
+        """
+        if self.explainer is None:
+            return ""
+        try:
+            got = self.explainer.ask(str(getattr(thought, "stimulus", "") or ""))
+        except Exception:  # noqa: BLE001
+            return ""
+        if got is None or not getattr(got, "answered", False):
+            return ""
+        if hasattr(got, "orders"):
+            # A procedure. One order when the prerequisites determine one; otherwise say how many
+            # there are before giving one of them, because "these steps in this order" and "these
+            # steps in one of six orders" are different claims and only one of them is true here.
+            first = " → ".join(got.first)
+            if got.determined:
+                return first
+            return f"{first}  (one of {got.order_count} orders the steps allow)"
+        return got.text()
 
     def _answer_from_conversation(self, thought: NJPThought) -> str:
         """A ``where`` question answered from the discourse ledger, or ``""``."""

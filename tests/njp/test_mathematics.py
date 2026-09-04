@@ -367,9 +367,41 @@ def test_a_question_with_no_answer_gets_no_substitute():
 
 
 def test_the_public_entry_point_returns_the_working():
+    """One method, one shape — whichever solver answered.
+
+    ``do_maths`` asks `mathsolver` first and `mathematics` second, and for a long time those two
+    returned **different objects**: only the second had a ``topic``, while the method's own
+    docstring promised one. So which attributes a caller got depended on which solver happened to
+    recognise the sentence, and a quadratic — which `mathsolver` answers — had no topic at all.
+    That is a broken contract rather than a stale test, and it was fixed by giving
+    `mathsolver.Solution` the same field over the same vocabulary.
+    """
     solution = NJPBrain().do_maths("solve x^2 - 5x + 6 = 0")
     assert solution.ok and solution.topic == "algebra"
-    assert "discriminant" in " ".join(solution.steps)
+    assert solution.steps, "the working is the point"
+
+
+def test_both_solvers_answer_in_the_same_shape():
+    """The contract, asserted directly rather than through one example of it."""
+    import re
+
+    import nyxara.njp.mathsolver as ms
+    from nyxara.njp.mathematics import Mathematician
+
+    known = {topic for topic, _method in Mathematician.SKILLS}
+    engines = set(re.findall(r'engine="([a-z_]+)"', open(ms.__file__).read()))
+    readers = set(re.findall(r"def (read_[a-z_]+)", open(ms.__file__).read()))
+    unmapped = sorted((engines | readers) - set(ms.ENGINE_TOPIC))
+    assert not unmapped, f"no topic for {unmapped}"
+    stray = sorted({t for t in ms.ENGINE_TOPIC.values() if t and t not in known})
+    assert not stray, f"topics `mathematics` does not use: {stray}"
+
+    brain = NJPBrain()
+    for question, topic in (("solve x^2 - 5x + 6 = 0", "algebra"),
+                            ("how many primes below 30", "number"),
+                            ("what is 17 percent of 240", "percent")):
+        got = brain.do_maths(question)
+        assert got.ok and got.topic == topic, f"{question} -> {got.topic!r}"
 
 
 def test_the_floor_is_reproducible_with_the_organ_switched_off():

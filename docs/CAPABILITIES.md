@@ -60,6 +60,17 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39m | Concept genome (a concept as eight named slots — roles, relations, constraints, causal, temporal, transformations, exceptions, invariants — so a comparison says **where** two concepts differ rather than only how much. The fingerprint holds no vocabulary at all, so kinship is found across vocabularies that share nothing; an unclassified relation is dropped rather than absorbed; and the common structure is never given a name) | `nyxara.njp.conceptgenome` | NEW |
+| 39l | Impossibility and boundary (what *cannot* work under a set of constraints, with the **unsatisfiable core** — the smallest responsible subset, found by removal — and the derivation that reached it; plus a pruning funnel that names which constraint eliminated what and which never bound. Nothing is concluded from an absence: unstated is unknown, not false) | `nyxara.njp.boundary` | NEW |
+| 39k | Invariant → law → executable theory (what survives across situations whose **vocabularies share nothing** — found by structural alignment, not by recurring names — refused when one situation, when it could not have failed, or when an exception would have to be hidden. Then compiled: `Theory.predict` takes a situation never seen, aligns it, and says what the law requires to be there, which is a falsifiable claim produced by a rule nobody wrote) | `nyxara.njp.theory` | NEW |
+| 39j | Cognitive immune system (a new claim that would make an existing question unanswerable is **quarantined** — kept, retrievable, out of the store — while everything that merely adds is admitted, and standing is *earned* by having quarantined claims confirmed rather than declared. Built against a measured regression and it repairs it: the broad corpus's 130,274 subjects kept in full, `recall` back to the curated level, 8.8% of claims isolated. The response runs both ways: a challenger that outranks the incumbent displaces it) | `nyxara.njp.immune` + `nyxara.njp.general` | NEW |
+| 39i | Auditable conclusions (every claim carries the path that produced it — facts, edges, inferences, assumptions — and a claim with no path is `UNKNOWN` rather than weak. Blame ranks by exclusivity rather than frequency, so the lone assumption is named and not the fact four other standing claims also rest on; and a failure is stored with its culprit, so a *completely differently worded* problem reasoned through the same assumption raises a warning) | `nyxara.njp.provenance` + `nyxara.njp.loop` | NEW |
+| 39h | The closed loop (observations → structure → latent hypothesis → experiment → revision → a prediction nobody asked for, as one runnable cycle: hidden causes proposed and never believed, interventions chosen by how much they move *the question you are about to be asked*, revision in both directions, an autopsy that keeps the edge that carried a failed claim, and five distinct reasons for not knowing. Measured on randomly generated worlds with unobserved variables where **declining is sometimes the only pass**. It beats reconstruction on structure, on latents and on ending with the right kind of world — and the loop does **not close**: 0.125, the same as the reconstructor) | `nyxara.njp.loop` + `nyxara.njp.discovery` | PARTIAL |
+| 39g | Breadth, measured (`njp/breadth.py` asks what no other exam here can: of things a person might name, what fraction does she have any fact about. ConceptNet's English assertions ship as a second corpus — 4,382 subjects become 130,274 — and it is **off by default** because measuring it honestly showed 12× the facts buys 2.8 points on subjects nobody mentioned, nothing on derivation, and costs `recall` 1.00 → 0.70 and 23× the time per question) | `nyxara.njp.breadth` + `nyxara/njp/data/world_broad.jsonl.gz` | NEW |
+| 39f | Structure discovery and cross-domain abstraction (she does not only walk the stored graph — she recovers which causal structures the *observations* support, reporting a whole Markov equivalence class rather than picking one of three indistinguishable orientations, with add/remove/reverse/merge/split as named operations and an MDL-style score that never overrules the evidence. And she finds subgraphs in different domains that are the same graph under a renaming — a structure-preserving bijection on shape alone, since the vocabularies share nothing — returning one abstraction reaching three domains with every role aligned, and leaving it unnamed) | `nyxara.njp.surgery` + `nyxara.njp.fusion` | NEW |
+| 39e | Self-attack on explanations (`njp/adversary` goes after a *belief*; nothing went after a *composition*, where every fact can be true and the sentence still false. Four attacks, each carrying the stated triple that licenses it: two answers the store says exclude each other — reported as a dispute and never resolved; chains the target `requires` on both sides — a conjunction, not a list; a hop at the confidence floor, marked and not withdrawn; and a stated counterexample. It runs *after* the walk, never inside it, so it cannot suppress its own evidence) | `nyxara.njp.predator` + `nyxara.njp.explaingauntlet` | NEW |
+| 39d | Meaning over spelling (a question's *form* induced from demonstrations rather than listed as regular expressions — the cue is the open-class word left when the topic and the closed class are removed, kept only once two demonstrations differing in topic agree, dropped when two disagree; and an identity firewall so a chain cannot enter a node on one sense of a word and leave on another. The gauntlet's `wording` 0.100 → 1.000 and `homonym` 0.000 → 1.000) | `nyxara.njp.asking` + `nyxara.njp.explain` | NEW |
+| 39c | Explanation (the other two questions a person asks. She answered **what**, and *why* and *how* were not weak in her, they were absent — no relation in any graph is called "why", so an explanation is a **path** and had to be walked. Mechanistic why backwards along production, teleological why forwards along purpose, and never one for the other; a mechanism from parts crossed with what they do; and a procedure's **order derived from its prerequisites**, never told — with every order returned where the telling left two steps free. Over all 42 of the Master's domains, 14 of which had no source file at all) | `nyxara.njp.explain` + `nyxara.njp.explainread` + `nyxara.njp.explainschool` + `scripts/knowledge/*.kb` | NEW |
 | 40 | Multimodal Intelligence | `nyxara.senses.binding` | REAL+WIRED |
 | 41 | Embodied Intelligence | `nyxara.sim.embodied` + `nyxara.senses.live` | REAL+WIRED |
 | 42 | Real-time Decision Making (System 1/2) | `nyxara.mind.dual_process` | REAL+WIRED |
@@ -3373,10 +3384,1060 @@ Run it: `NJPBrain.hear_turn("...")`, `show_act`, `correct_act`, `say_to`, `holds
 `go_to_discourse_school()`, `python -m nyxara.njp.discourseschool`, or `/v1/njp/discourse`.
 
 
+#### NJP V.36 — what, how and why
+
+Measured cold, on the shipped world corpus, before a line of `njp/explain.py` existed:
+
+```
+what is force                    'physical quantity'
+what is a mammal                 'vertebrate'
+what causes rain                 'cloud'
+why does water boil              ''
+why does an object accelerate    ''
+how does a plant make food       ''
+how does photosynthesis work     ''
+how do you boil an egg           ''
+```
+
+Three of eight. She answered **what**, and she answered a *named* one-hop relation. The two
+questions a person actually asks about the world were not weak in her, they were absent.
+
+That was not a corpus gap. The store held `cooling causes condensation`, `condensation causes
+cloud` and `cloud causes rain` all three. The gap is that *why* and *how* are **not relations** —
+there is no edge in any graph labelled "why". An explanation is a **path**, and a path has to be
+walked.
+
+**Why is two questions and they must not be confused.** Mechanistic *why* walks **backwards** along
+production, so *why does rain happen* is not `cloud`; it is `moist air rises and cools → cloud →
+rain`, facts she was told separately and a chain nobody wrote down. Teleological *why* walks
+**forwards** along `purpose`, and up through `is_a` only when the thing itself carries none. A fuse
+is caused by a factory and is for breaking the circuit, and only one of those answers *what is a
+fuse for*. A third strand is kept third rather than folded into *because*: `requires` is an
+**enabling condition**, glossed *"it needs"* and never *"because"* — fire requires oxygen; oxygen
+did not cause the fire, and rendering a requirement as a cause is how an explanation becomes false
+while every fact in it stays true.
+
+**How is also two.** *How does X work* is a mechanism — X's parts crossed with what each of them
+does. *How do you X* is a procedure, and the procedure is where the real claim is.
+
+##### The order is derived, never told
+
+A procedure in `scripts/knowledge/procedures.kb` states **which** steps it has (`has_step`) and, on
+each step, **what that step needs** (`requires`). It never states a sequence. The sequence is
+computed by a topological walk, every time, and three properties of it are decisions:
+
+* **Where the prerequisites leave two steps free, the answer is every order they allow.** Beating
+  the eggs and heating the pan are genuinely either way round. `Plan.orders` holds them all and
+  `Plan.determined` says whether there was one — the same rule this package has applied to two
+  parses of a sentence since V.13: *where two readings survive, the answer is that there are two.*
+  Baking bread has five admissible orders; voting has six; boiling an egg has one.
+* **A prerequisite cycle is reported as a cycle**, not as a sequence with one edge quietly dropped.
+* **A step named as a prerequisite but never listed as a step** is a hole in the telling and is
+  named in `Plan.dangling` rather than treated as already done.
+
+The steps in the source file are written in the order they were thought of, and a test shuffles
+them and demands the same answer back.
+
+##### The corpus: fourteen domains that did not exist
+
+Fifteen of the Master's forty-two domains had no source file at all. Now written and measured:
+**programming, engineering, government & civics, psychology, sociology, literature, music,
+business, agriculture, architecture, education, organizations, events** — and **procedures**, the
+forty-second, which is where the ordering derivation gets something to derive from. 48 files became
+62; 13,755 facts became 15,847. Every one of the 225 claims that duplicated an existing file was
+removed rather than left to be deduplicated on load.
+
+##### What it measures
+
+Seven papers, 300 items each, each defined by what makes its items unseen:
+
+```
+paper          asked  right  wrong  silent   score
+why_chain        300    291      9       0   0.970
+why_purpose       11     11      0       0   1.000
+mechanism        300    300      0       0   1.000
+procedure         18     18      0       0   1.000
+minted           120    120      0       0   1.000
+direction        300    297      3       0   0.990
+abstention       300    297      3     297   0.990   (silence is the pass)
+
+952/962 = 0.990 over the papers that reward answering
+```
+
+`why_chain` holds out the shortcut: `A causes B` and `B causes T` are stated, `A causes T` is not,
+and reaching **B** — the fact she was told — scores nothing. `minted` invents a procedure out of
+nonsense words with a random prerequisite graph and grades it against a **brute-force enumeration
+over permutations**, which is deliberately not the algorithm under test; grading a topological sort
+against itself would pass whatever it did. `abstention` is half nonsense topics and half **real
+subjects asked for a relation they do not carry**, which is where the confabulation risk actually
+lives.
+
+There is also a per-domain block over all forty-two. Read its two halves differently: `what`/`why`/
+`how` are *coverage* and saturate at 1.00, which says the corpus reaches every domain and says
+nothing about difficulty; `held` is the held-out papers restricted to that domain's own subjects,
+and that is the number that falls — psychology 0.93, sociology 0.95, events 0.96.
+
+##### Four defects the measurement found, three of them in the exam
+
+**Three of the seven papers could not fail.** `direction` asked only *what is X for*, and the
+grammar reads *for* as `sense="for"`, so the forbidden causes were unreachable by construction — an
+acceptance test for one line of dispatch, presented as a paper about a confusion. It now asks both
+directions, each the other's control, and a walk with the two senses **swapped** — the failure
+worth catching, invisible when only one direction is asked — fails all of it.
+
+**A gold answer is every answer that would be right.** `mechanism` emitted one item per part and
+graded each against that one part. The digestive system has eight parts, the walk returns six
+chains, and an item asking for the small intestine scored her wrong for having answered with the
+liver and the stomach. That is `njp/general.py`'s own rule, broken in a file whose docstring quotes
+it. Cost: 0.14.
+
+**The exam asked for something no walk should produce.** The per-domain sweep counted forward
+`causes` as material for a *why* about the subject. `max planck causes quantum theory` is material
+for *why did quantum theory happen*; it says nothing about why Planck happened. The `people` domain
+reported 0.00 with four subjects, every one a scientist whose only causal edge points away from
+them.
+
+**And `0.00` meant two things.** `geography` read 0.00 on *why* because no geography subject has a
+causal edge; `people` read 0.00 because four did and she answered none. Opposite findings, shown
+identically. Not asked is now a dash.
+
+##### And two in her
+
+**The confidence floor was a depth bound in disguise.** A chain was pruned on its *decayed product*,
+which falls with length — so the floor's effective depth depended on how confident the source
+corpus happened to be. The shipped corpus states facts at 0.85 and reached three hops; the same
+three facts ingested without stated confidences land at 0.6, and `0.6² × 0.85² = 0.26` is under the
+floor, so `cooling → condensation → cloud → rain` returned `cloud`. **The feature was off for any
+corpus that was not confident enough, and nothing said so.** `MAX_DEPTH` now bounds length and the
+floor judges the chain's **weakest link**, which is a question about the claims rather than about
+how many of them there are. `why_chain` moved 0.755 → 0.970.
+
+**A walk composes across a homonym.** Asked *how does the heart work*, she answered `heart → atrium
+→ bringing daylight into the middle of a deep plan`. Every edge is a fact she was correctly told: a
+heart has an atrium, and an atrium — the tall space in a building — is for bringing daylight into a
+deep plan. The store keys facts on their **surface spelling**, so the heart's chamber and the
+building's courtyard are one node. Fifteen thousand facts held that invisibly, because only a path
+can expose it.
+
+The detector written for it does not detect homonymy, and saying so is more useful than the
+detector. Two `is_a` objects neither of which is an ancestor of the other, sharing no word, fires on
+**261 of 4,230 subjects, 6.2%** — and reading them settles it: Einstein is a *physicist* and a
+*nobel laureate*; a bat is a *mammal* and a *nocturnal animal*. One thing under two descriptions is
+the ordinary case. Used as a confidence penalty it cost `nitrogen fixation → soil fertility → higher
+yield`, a correct derivation, while the number it was meant to improve stood still. It survives as a
+**tie-break and nothing else**: among chains of the same kind and length, one through a many-kinded
+node ranks last. Enough to have fixed the heart; unable to remove a chain. Separating the two
+atriums needs a store keyed on something other than spelling, and that is a limit of this store,
+named rather than tuned away.
+
+##### Reachable from English, not only from Python
+
+`njp/general.py` records `inheritance` at 400/400 with **every one of them arriving through the
+derivation ladder and none through English** — a real capability no sentence reached. The walk and
+its question grammar were written together so that could not repeat, and every paper here goes
+through the grammar. The `has_step` split closes the same fault one layer down: `_KIND_PREDICATE`
+read "the steps of X are A, B, C" and **wrote** `has_step`, while the question pattern for "what are
+the steps of X" **asked for** `has_part`. Both halves worked and disagreed about the name, which is
+the hardest version of that fault to see.
+
+Run it: `NJPBrain.explain("why does rain happen?")`, `why`, `how`, `how_to`,
+`refresh_explanations`, or `python -m nyxara.njp.explainschool`.
+
+
+#### NJP V.37 — the 0.990 is frozen; here is the exam it could not be
+
+A benchmark at 0.99 has stopped being an instrument. `njp/explainschool.py` generates every item
+from the shipped fact store — entities she was told about, in graph shapes somebody wrote by hand,
+phrased the way the question grammar's own patterns are phrased. So `njp/explaingauntlet.py` is
+written the way `njp/hard.py` was: by someone looking for what the faculty **cannot** do, against
+a faculty that is finished. Nothing in it comes from the corpus. Every world is minted per item —
+entities, causal graph, wording, and the trap.
+
+Nine attacks, each naming a property of real inference the walk has no defence against:
+
+| attack | what it injects | what a pass requires |
+|---|---|---|
+| `wording` | phrasings no pattern was written for | *what brings about X*, *on account of what*, *how come* |
+| `entities` | every node a nonsense word | the control: nothing recognised, only derived |
+| `shape` | chain, fork, **collider**, diamond, random DAG | a collider's two causes are not a sequence |
+| `distractors` | true facts on `causes`, downstream and sideways | naming one is **wrong**, not verbose |
+| `contradiction` | two causes stated to exclude each other | report the **dispute**; picking one is wrong |
+| `homonym` | one spelling, two disjoint neighbourhoods | never cross between senses |
+| `gap` | the target's only incoming edge deleted | **UNKNOWN** — everything around it still stands |
+| `legs` | two legs, neither sufficient alone | a **conjunction**, not a list of alternatives |
+| `unknown` | evidence genuinely insufficient | silence |
+
+**UNKNOWN is a verdict, not a failure to have one.** Four values — `RIGHT`, `WRONG`, `UNKNOWN`,
+`CONFLICT` — and the report refuses to average papers that reward opposite behaviours. Two numbers
+sit beside the score: **restraint** (of the items whose only pass is silence, how many got it) and
+**confabulations** (answers where nothing supported one). A system scoring 0.6 by answering
+everything is worse than one scoring 0.6 by answering what it can, and a single number cannot tell
+them apart — a test asserts an always-answering stub scores 0.0 restraint.
+
+##### The floor, cold
+
+```
+attack            asked  passed  wrong  silent   score
+wording              40       4      0      36   0.100
+entities             40      40      0       0   1.000
+shape                40      38      0       0   0.950
+distractors          40      40      0       0   1.000
+contradiction        40       0     40       0   0.000   (the dispute is the pass)
+homonym              40       0     40       0   0.000
+gap                  40      40      0      40   1.000   (silence is the pass)
+legs                 40       0     40       0   0.000
+unknown              40      40      0      40   1.000   (silence is the pass)
+
+0.508 over the papers that reward answering
+1.000 restraint · 0 confabulations
+```
+
+**0.508**, against 0.990 on the exam it replaces. Two of the passes are real strengths worth
+naming rather than skipping past: she does **not** invent a bridge across a deleted mechanism —
+1.000 restraint, zero confabulations, on a world where the target is still described and still
+causes something, so there was plenty to invent from — and she respects causal direction against
+distractors wired downstream on the very relation she walks.
+
+Three capabilities are **absent**: no notion of a dispute inside an explanation, no separation of
+two senses of one spelling, no joint necessity. And the question grammar is a list of surfaces,
+which is what 0.100 means.
+
+##### Four of the nine papers were graded wrongly on the first run, and all four were the exam
+
+**A collider's gold was one of two right answers.** `A → C ← B` says both cause C and are unrelated;
+the item wanted `A` and she named both, which is every answer that would be right. Marked wrong for
+not guessing which the generator picked first — the same rule broken the same way in V.36's
+mechanism paper, one version earlier. The pass is now *both, and neither routed through the other*.
+
+**The `gap` paper called a stated fact a confabulation.** It deleted `b → c` in `a → b → c → d`
+and then asked about **d** — but `c causes d` is still stated, so *"because c"* is correct. Twenty
+confabulations that were nothing of the kind. It now asks about **c**, the node whose own support
+went missing.
+
+**The distractors were noise in a channel nobody was listening to.** Injected on `purpose`,
+`has_part` and `is_a`, which a backward causal walk does not read, so the paper scored 1.000 by
+construction. They are now on `causes`, downstream and sideways.
+
+**`contradiction` and `legs` passed on "mentioned both".** Listing two causes is not noticing they
+exclude each other, and it is not deriving that both are required — three different claims from the
+same two names. The adapter now returns a **structured** reply with `conflict` and `joint` flags,
+both `False` for the current walk, and that is the finding rather than a shortcoming of the
+harness.
+
+Also: the generated-graph gold was the last edge written instead of the **longest** derivation, so
+seven of forty failures were answers that were longer and correct.
+
+Run it: `python -m nyxara.njp.explaingauntlet --failures 3`.
+
+
+#### NJP V.38 — the question form induced, and the identity firewall
+
+Two of the gauntlet's four zeroes, closed. **0.508 → 0.707.**
+
+##### `wording` 0.100 → 1.000, and the nine regexes I did not write
+
+The table in `explainread.py` reached 4 of 40 phrasings. Adding nine rows would have moved that
+number and taught her nothing — the eleventh phrasing would miss, and the author of each row is
+doing the work the mind is meant to do.
+
+`njp/asking.py` holds **no phrasings**. Everything it knows arrives through `show(question, topic,
+walk)`. Given *"what brings about thunder?"* and the fact that the topic was `thunder`, what is
+left is `what brings about ▫` — and `what` and `about` are already in the closed class she induced
+from exposure at V.31. The word carrying the question's identity is the one that is **not** closed:
+`brings`. That is the cue, and it is what generalises.
+
+Three rules, each one this repository has already paid for:
+
+* **A cue is kept only once two demonstrations that differ in their topic agree on it.** Shown one
+  example, `thunder` is as good a candidate for the causal word as `brings`.
+* **Where two demonstrations disagree about the walk, the cue is contested and never read** — not
+  resolved by majority. A cue that means two things means nothing.
+* **Negatives are demonstrations.** *"What is a mammal?"* with walk `""` teaches that a form carries
+  no causal claim.
+
+The lesson is deliberately **not** the exam: five of the gauntlet's ten phrasings are absent from
+it, and the gauntlet now reports `wording` (taught cues, minted topics and graphs) and
+`wording_new` (cues nobody demonstrated) as **separate papers** — so teaching more phrasings can
+never be mistaken for reasoning better. `wording` is 1.000 and `wording_new` is **0.000 with every
+item silent**: she does not guess a cue nobody showed her, and she can learn one from two
+demonstrations at any time.
+
+The induced reader sits **after** the table, not in front of it. The table's dozen readings were
+each measured against `Grounder._read_question`; a learned cue is corroborated by two
+demonstrations. Two demonstrations is enough to be worth consulting and not enough to overrule
+something that was measured.
+
+*Honest note:* the negatives are **not load-bearing on this lesson**, and that is measured rather
+than assumed — settled 24 and false positives 0 with or without them, because `what` and `is` are
+already closed and never become cues. Exactly one cue is contested (`job`) and switching the
+contest rule off changes no reading. They are kept and labelled as what they are: a guard that has
+not yet fired.
+
+##### `homonym` 0.000 → 1.000 — and the signal that was measured and thrown away
+
+V.36 found `heart → atrium → bringing daylight into the middle of a deep plan`, shipped a detector
+that turned out to detect *multiple description* (Einstein is a physicist and a Nobel laureate),
+and named the limit rather than fixing it.
+
+The firewall asks a different question: not *"does this node have unrelated kinds"* — the ordinary
+case — but *"do this node's **neighbours** fall into groups that have nothing to do with each
+other"*. Two neighbours group when connected within two hops by a **structural** relation. A cause
+is deliberately not evidence of shared identity: fire and rain both cause damage. A chain entering
+a node from one group may not leave it towards another, and only on **evidence of belonging
+elsewhere** — a departure alone in its group is a fact with no neighbours, not a second sense.
+
+On the gauntlet's minted worlds that alone took `homonym` from 0.000 to 1.000. **On the shipped
+corpus it does nothing**, and the reason is a fact about the corpus: every neighbour of `atrium` is
+a leaf — an object phrase that is not a subject anywhere and carries no edges of its own.
+
+So a second signal was tried: group two neighbours that share a content word. It worked on
+`atrium` and it **cost 74 continuations** and took `explainschool`'s `mechanism` paper from 1.000
+to 0.830, every inspected failure a false positive — *nerve → neurons → carrying an electrical
+signal* refused because the effect had drifted into a group that did not contain `nerve`.
+`SENSE_BY_WORDS` is **off**, kept as a switch rather than deleted so it can be re-measured.
+
+What replaced it is not a cleverer signal, it is **data**. Three automatic tests for finding
+homonyms were tried — unrelated kinds, two source files, disjoint content — and **all three fired
+mostly on ordinary multiple description**: 261 of 4,230 subjects; 434 of 4,379; 93 of 4,379. Blood
+is in `biology.kb` and `body.kb`. *Cereal* is in agriculture and in food. Read by hand, **six
+subjects were genuinely two things and `pulse` was three**. A sense *is* a distinct entity, so it
+gets a distinct name — `atrium (in a building)`, `pulse (the crop)`, `pulse (in music)`, `fatigue
+(in a material)`, `extinction (in learning)`, `differentiation (in teaching)`, `circulation (in a
+building)`. No new syntax: naming a thing is what a knowledge file is for, and the false chain
+disappears at the source instead of being filtered downstream.
+
+The division of labour is now explicit — **declared senses handle the corpus, the structural
+firewall handles everything else**: an ingested or minted world, where the graph has structure.
+
+```
+attack            asked  passed  wrong  silent   score
+wording              40      40      0       0   1.000   (was 0.100)
+wording_new          40       0      0      40   0.000   (the honest ceiling)
+entities             40      40      0       0   1.000
+shape                40      38      0       0   0.950
+distractors          40      40      0       0   1.000
+contradiction        40       0     40       0   0.000   (still absent)
+homonym              40      40      0       0   1.000   (was 0.000)
+gap                  40      40      0      40   1.000
+legs                 40       0     40       0   0.000   (still absent)
+unknown              40      40      0      40   1.000
+
+0.707 · 1.000 restraint · 0 confabulations
+```
+
+`explainschool` is unchanged at **0.995** — a guard that removes chains was measured for what it
+removes, and what it removes on the shipped corpus is nothing.
+
+Run it: `NJPBrain()` teaches the forms on construction; `Explainer.senses("atrium")`,
+`crosses_senses`, `python -m nyxara.njp.asking` demonstrations via `asking.teach()`.
+
+
+#### NJP V.39 — the predator over explanations
+
+The last two zeroes. **0.707 → 0.850.**
+
+`njp/adversary.py` attacks a **belief** — one claim, with its evidence and its track record.
+Nothing attacked an **explanation**, and the difference is not academic: an explanation is a
+*composition*, every fact in it can be true, and the composition can still be false. V.36 shipped
+one — `heart → atrium → bringing daylight into the middle of a deep plan` — where all three edges
+were correct and the sentence was not.
+
+The gauntlet measured what that costs on two papers that scored 0.000 and **could not have scored
+anything else**:
+
+* **`contradiction`** — two causes of one effect, where the store also says the two exclude each
+  other. The walk returned both, as a list, cheerfully. Listing two claims is not noticing they
+  cannot both hold, and a reader given that list is worse off than one given nothing, because the
+  list *looks* like knowledge.
+* **`legs`** — two chains reaching one target, where the target `requires` a node on each. They are
+  a **conjunction** and the walk reported them as alternatives. *"Because A, or because B"* and
+  *"because A and B together"* are different claims built from the same two names.
+
+Both are one gap: the walk **builds** and nothing **examines**.
+
+##### Four attacks, each grounded in a stated fact
+
+* **Exclusion** — two surviving chains whose roots the store says cannot both hold. The verdict is
+  not *pick the better one*; it is *these two cannot both hold and nothing here settles which* —
+  the same refusal `Grounder.answer` has made since V.13 for two equally supported triples, moved
+  up a level from a fact to a composition. `excludes` is a new relation the store had no name for,
+  so a corpus that knew two causes were mutually exclusive had nowhere to put it.
+* **Conjunction** — the target's own `requires` edges landing on two different chains. Then neither
+  is *an* explanation; together they are *the* explanation.
+* **Unsupported assumption** — a hop at the confidence floor, carrying a chain that is then stated
+  flatly. **Marked, never withdrawn**: a defeasible link is how most true generalisations are
+  stated, and refusing them would leave her able to explain almost nothing.
+* **Counterexample** — a stated case where the chain's cause holds and its effect does not. Rare in
+  a curated corpus and worth its two lines the day it fires: the store contradicting a derivation
+  out of its own contents.
+
+##### Three things it may not do
+
+**It may not invent.** Every attack carries the triple that licenses it, and a test walks every
+attack the predator makes and asserts that triple is in the store. An attack needing a fact nobody
+stated would be the predator confabulating *in order to accuse*, which is worse than the
+confabulation it hunts.
+
+**It may not resolve a conflict it found.** Reporting *"A and B cannot both hold"* and then
+answering with A is worse than never having noticed.
+
+**It runs after the walk and never inside it.** A predator wired into chain-building would suppress
+the very chains that are its evidence — the self-confirming failure V.26's figurative guard was
+built out of and had to be rescued from. It sees the finished explanation, the same one a reader
+sees. A test asserts the chains are byte-identical with the hunt on and off, and only the finding
+differs.
+
+And the finding is said **before** the list it changes, because a reader who saw the list and not
+the finding would be worse off than one who saw neither.
+
+```
+attack            hunt on   hunt off
+contradiction       1.000      0.000
+legs                1.000      0.000
+entities            1.000      1.000
+distractors         1.000      1.000
+shape               0.933      0.933
+overall             0.848      0.705
+```
+
+It swings exactly the two papers it was built for and nothing else. `explainschool` went **0.995 →
+0.998** — the `direction` paper gained, because an explanation that knows it is disputed no longer
+answers a purpose question with a cause.
+
+##### Where the gauntlet stands
+
+```
+wording 1.000 · wording_new 0.000 · entities 1.000 · shape 0.950 · distractors 1.000
+contradiction 1.000 · homonym 1.000 · gap 1.000 · legs 1.000 · unknown 1.000
+
+0.850 · 1.000 restraint · 0 confabulations
+```
+
+Every zero the V.37 floor recorded is closed **except `wording_new`**, and that one is not a gap.
+It is the honest ceiling of an induced grammar: a cue nobody demonstrated is not guessed, every
+item comes back silent rather than wrong, and two demonstrations would close it at any time. The
+0.850 is what it is *because* that paper is in the denominator, and it stays there.
+
+Run it: `NJPBrain.hunt_explanation("why does t happen?")`, or read `Explanation.conflict`,
+`.joint` and `.survival` off any answer.
+
+
+#### NJP V.40 — rival structures, and the same shape in two subjects that never met
+
+The last two of the Master's list. **0.850 → 0.883**, on a gauntlet that grew two papers.
+
+##### `njp/surgery.py` — if the graph is wrong, every path through it is wrong
+
+Everything in `njp/explain.py` walks *the* graph, and its only question is which path answers. That
+is a reader, and it has one blind spot no amount of better walking closes.
+
+```
+Model 1:  A → B → C        Model 2:  A → C  and  B → C        Model 3:  A ← B → C
+```
+
+Three structures over the same three names. This module asks **which the evidence supports**, and
+may add, remove, reverse, merge or split to find out.
+
+The evidence is deliberately **not the edges** — asking the graph whether the graph is right is how
+a model confirms itself, and this repository has made that mistake twice. It is *observations*:
+`depends_on` and `independent_of`, which say nothing about direction. From those the structure is
+recovered in three steps — skeleton, v-structures, propagation — and then:
+
+> **Where several structures fit the evidence equally, the answer is that there are several.**
+
+`A→B→C`, `A←B→C` and `A←B←C` imply *exactly* the same dependencies. They are one Markov
+equivalence class and naming one of them invents a direction. Measured: chain/fork **3**, collider
+**1**, triangle **6**, all-independent **1** — textbook, and `Verdict.holds` answers *"is this
+arrow in **every** admissible structure"* rather than *"in the first one"*.
+
+Two defects the measurement found. **Marginal observations alone halve what is recoverable**: with
+nothing held fixed a chain and a triangle are indistinguishable, and `discover` returned six for a
+chain, which is every orientation of a triangle — because a triangle is what the observations
+described. One conditional statement — *A and C do not vary together **once B is held fixed*** —
+fixes it, and the set that made a pair independent also decides whether the middle is a collider,
+so one field does both jobs. And **the middle is the whole v-rule**: testing only whether a pair
+was separated accepted `a → b ← c` for a chain, where `b` is precisely what makes `a` and `c`
+independent, and the class came back 4 where it is 3.
+
+Scoring is the Master's #14 made computable — `explains − unsupported − λ·complexity` — and it
+**never overrules the evidence**: members of one equivalence class are indistinguishable by
+construction, so scoring them against each other is scoring noise. The `unsupported` term was dead
+on arrival: it counted only marginal dependence, so in a chain `a → c` looked called for and the
+complete graph scored zero unsupported edges. A conditional independence deletes an edge, and the
+score has to read that the same way the skeleton does.
+
+##### `njp/fusion.py` — three files, three vocabularies, one shape
+
+`biology.kb` knows a body holds its temperature steady; `engineering.kb` knows a control system
+holds a quantity at a set value; `economics.kb` knows price moves until supply meets demand. A
+store that keeps them apart has three facts where it could have an idea.
+
+An analogy here is a **structure-preserving bijection** — not word similarity, not co-occurrence.
+The words are deliberately unavailable, because the point is to relate things whose vocabularies
+share nothing:
+
+```
+sensor   → controller   → actuator → quantity    → sensor       (engineering)
+receptor → hypothalamus → effector → temperature → receptor     (biology)
+```
+
+Measured on three domains it returns **one** abstraction with reach 3 and every role filled in
+every domain — `role0 = biology: receptor, economics: wage, engineering: sensor`. The roles are
+**positions, not names**: calling it *"feedback regulation"* would be the module supplying the
+insight it claims to have found.
+
+Three refusals: different domains or it is a duplicate; `MIN_EDGES = 3`, below which an isomorphism
+is arithmetic; and **a near-miss is a miss**. *"The atom is a solar system"* is right about four
+edges and wrong about the one that matters.
+
+`MAX_RADIUS` is **3**, measured: at two the four-edge loop came back as a two-edge line, because
+the edge back to the seed — the one that *makes* it feedback — is a hop further than the walk went.
+And `abstract` grouped three domains into an idea reaching two, because it took one analogy's two
+sides as the membership instead of the transitive closure over the shape.
+
+##### The fusion paper could not fail, twice
+
+It scored 1.000 with the exactness rule off *and* with `MIN_EDGES` set to 1. The decoy was **one
+edge short**, so it was rejected by a size comparison before the bijection was ever reached. Two
+two-cycles were no better — unreachable from one seed, so the pattern came out at two edges and was
+dropped for being small. A connected four-node four-edge graph with every degree two **is** a ring;
+there is no other, so a decoy differing in *shape* cannot exist at that size.
+
+The decoy now differs in **direction**: `p → q → r ← s ← p` is the same undirected four-cycle, four
+edges, one relation, every degree two — identical fingerprint, no bijection. It now scores
+**1.000 → 0.000** when the bijection is not checked, which is the first time that paper measured
+anything.
+
+`surgery` falsifies the same way: **1.000 → 0.750** without the v-structure rule, **→ 0.500** on
+marginal observations only.
+
+And a fourth exam defect of the same family as V.37's: the observation generator used **undirected
+reachability**, so it told the surgeon that `a` and `b` vary together in `a → c ← b` — they do not,
+a collider *blocks* the path it sits on. Ten of forty failures, every one a collider, every one the
+exam marking her wrong for correctly recovering the triangle it had described. It uses
+d-separation now.
+
+```
+wording 1.000 · wording_new 0.000 · entities 1.000 · shape 0.950 · distractors 1.000
+contradiction 1.000 · homonym 1.000 · gap 1.000 · legs 1.000 · unknown 1.000
+surgery 1.000 · fusion 1.000
+
+0.883 · 1.000 restraint · 0 confabulations
+```
+
+Run it: `NJPBrain.recover_structure(["a", "b", "c"])`, `NJPBrain.shared_shape({"biology": [...],
+"engineering": [...]})`.
+
+
+#### NJP V.41 — knowledge at scale, and the number that says what a fact store cannot do
+
+The Master asked for knowledge of everything, on the scale of a modern LLM. This section is the
+honest answer, and most of it is a measurement rather than a claim.
+
+##### What was done
+
+ConceptNet 5.7's full assertions dump — 34,074,917 rows — converted through the existing
+`scripts/prepare_conceptnet.py` and shipped as `nyxara/njp/data/world_broad.jsonl.gz` (1.9 MB).
+**198,455 kept**; 26.2M dropped by relation (`RelatedTo` and `AtLocation` are excluded for reasons
+that script already documents) and 7.2M by language.
+
+```
+                    facts      subjects
+curated            15,848         4,382
++ broad           211,149       130,274      (13× facts, 30× subjects)
+```
+
+`njp/breadth.py` is the new examination, and it asks the question no other exam in this package
+can, because every other one draws its subjects from what she already knows:
+
+> Of the things a person might mention, what fraction does she have **any fact at all** about?
+
+##### The numbers
+
+**Breadth, in-source.** On 1,500 subjects sampled from ConceptNet, coverage goes **0.060 → 1.000**.
+That number is *true and nearly worthless*, and a test says so: sampling subjects from the file you
+just ingested is a tautology. It is reported only because the honest version needs it as a contrast.
+
+**Breadth, held out by subject.** Ten percent of subjects removed from the load entirely, then
+asked about:
+
+```
+                 coverage    reachable    derived
+curated only        0.060        0.931      0.029
++ 176k facts        0.088        0.880      0.030
+```
+
+**Twelve times the facts bought 2.8 percentage points on subjects nobody mentioned, and nothing at
+all on derivation.** That is the finding, and it is the structural difference from a language
+model stated as a number rather than as an argument: a fact store knows exactly the entities it was
+told about. It does not generalise to a new one. `derived` — two-hop questions whose answer was
+never ingested — moved 0.029 to 0.030.
+
+**And it costs.** `recall` on the curated corpus falls **1.00 → 0.70**: ConceptNet supplies
+competing values for subjects the curated corpus had cleanly, and `Grounder.answer` correctly
+declines to choose between two equally supported readings — so a question that had one answer now
+has none. Loading goes 0.8s → 14.0s and thirty exam items go **0.2s → 4.7s**, twenty-three times
+the cost per question.
+
+So the broad corpus ships and is **off by default**, on that measurement rather than on a
+preference. `load_brain(broad=True)` turns it on. Breadth and precision are genuinely in tension
+here and the caller is the one who knows which they need.
+
+##### What this cannot become, said plainly
+
+A fact store and a language model do not have the same shape of knowledge, and no single number
+compares them. What is on this side is **named entities and stated relations between them** — which
+can be asked for, checked, contradicted, and derived from, and every one of those verbs is a thing
+the rest of this package does. What is not on this side is everything a model carries that was
+never a triple: how a sentence is usually finished, what a paragraph of legal prose sounds like,
+the shape of an argument, the thousand unstated regularities that come from reading rather than
+from being told.
+
+Scaling this corpus further — Wikidata, DBpedia — would move the first number and, on the evidence
+above, **not the third**. More facts of the same kind is not the road to the second thing. The road
+to the second thing is her CORTEX, which is a language model, already on-device, and already
+classed among her own brains rather than as an external teacher (capability 39).
+
+What this file adds is the honest instrument for saying which of the two a given question needs.
+
+Run it: `python -m nyxara.njp.breadth --against <triples.jsonl.gz> --sample 1500`,
+`load_brain(broad=True)`.
+
+
+#### NJP V.42 — the closed loop, and the benchmark that says it does not close yet
+
+The Master's reading of the ConceptNet result was sharper than mine: twelve times the facts moved
+unseen-entity coverage 6.0% → 8.8% and derivation 2.9% → 3.0%, so **the missing thing was never
+facts**. Every organ this package has built for reasoning is a *step* — `surgery` recovers a
+structure, `predator` attacks an explanation, `fusion` finds a shared shape — and each passed its
+own paper. None of them is a loop.
+
+> Intelligence = the ability to kill your own explanations and replace them with better ones.
+> Not simply generating more explanations.
+
+##### `njp/discovery.py` — a world with no answer in it
+
+Every benchmark here so far hands her something. `explaingauntlet` mints a world and then **states
+its edges**. Even `surgery` gets observations derived from a graph the exam already knows, and is
+graded on getting that graph back. That is **reconstruction**.
+
+This one gives her observations and nothing else — and half the worlds contain a **latent**: a
+cause that appears in no observation, has no name, and is not in the list of things she is told
+about. Over the observed variables alone, `A → B` and `A ← H → B` imply *exactly* the same
+dependencies. Five staged papers: recover a structure that implies what was observed; hold **both**
+readings where nothing separates them; name an **intervention** that would; revise on its result;
+and predict the effect of an intervention on a pair that appeared in none of the four.
+
+Three properties make it hard rather than merely long. The world **refuses the held-out pair** as
+an experiment, so stage five cannot be bought by asking it. A third of the worlds are built so that
+**declining is the right answer** — nothing permitted can settle them — and answering one is a
+failure however the coin lands. And whether a world is decidable is **computed by exhaustive search**
+over the admissible model set, not set by whoever wrote it.
+
+##### `njp/loop.py` — the cycle
+
+`Latents` proposes an unobserved common cause wherever one would carry the same dependence, keeps
+only what stays observationally consistent, and marks every one `HYPOTHETICAL` — which nothing but
+an intervention can lift. `Experiments` scores every intervention by **how much of the disagreement
+about the question you are about to be asked** it would remove, over what it costs. `Loop.revise`
+removes what the result refutes and keeps what it does not. `Autopsy` records a failed prediction
+with the model and the edge that carried it. And not knowing is a **reason**, not a shrug — five of
+them, each naming a different remedy, each reachable and each pinned by a test.
+
+##### It scored 1.000, and that was the templates
+
+On three hand-written world shapes the loop scored 1.000 on every stage. That is exactly the number
+a system tuned to three templates would score and there was no way to tell the two apart from
+outside. So the templates were deleted: the graphs are drawn at random, the latents are drawn at
+random, and the conditional-independence profile is emitted **complete** — every pair against every
+subset — because with singletons only, "implies what was observed" is weaker than Markov
+equivalence and the admissible set inflated to 1,503 models where the loop held 57. Every number
+downstream of that was computed against a fiction.
+
+**On 24 randomly generated worlds:**
+
+```
+        structure  latent  experiment  revise  predict   closed  right-kind
+cold        0.458   0.000       0.125   0.167    0.125    0.125       0.316
+loop        0.708   0.708       0.125   0.250    0.125    0.125       0.538
+```
+
+The loop is better than the reconstructor at holding a structure that fits (0.458 → 0.708), at
+refusing to invent the absence of a hidden cause (0.000 → 0.708), at revising (0.167 → 0.250) and
+at ending up holding the right kind of world (0.316 → 0.538, against a coin flip). **And the closed
+loop is 0.125 for both.** It does not close.
+
+That is the result. The architecture is built, every part of it is measured and falsifiable, and on
+worlds nobody designed for it the cycle does not yet produce a correct prediction about something
+it was never asked. Reporting the 1.000 would have been available and would have been false.
+
+##### Three defects found on the way, one of them conceptual
+
+**An empty observed-only class is evidence of a latent, not a dead end.** `Loop.models` built
+latent variants *out of* Surgeon's Markov class, and on a world with real confounding it returned
+**zero models where 75 were admissible** — because when a latent confounds two variables, often no
+DAG over the observed variables fits at all: every orientation implies a collider the data denies.
+The class is correctly empty, and reading that as failure left nothing to propose from. This was
+the single defect that put the loop *below* the reconstructor.
+
+**An experiment that cannot move the aim is not cheap, it is wasted.** Scoring interventions by
+models eliminated, the loop converged and plateaued at 0.675 on the templated worlds — a third of
+them ran out of useful experiments while still split on the one question they were about to be
+asked. Eliminating nineteen of twenty models buys nothing if the twentieth disagrees with the
+survivor about the thing you need. Aim on: 1.000. Aim off: 0.625. A test pins both.
+
+**A variable no model mentions was answered with "no".** The mutilation reaches nothing, so a
+confident negative fell out of never having heard of the thing. *Nothing connects these* and *I
+hold no model that mentions this* are different answers with different remedies, which is why
+`Reason` has five members and a test asserts every one is reachable.
+
+##### Where it stops, precisely
+
+The loop enumerates orientations of the skeleton it reads off the observations, and on the failing
+worlds the admissible model it needs is not among them — the skeleton is missing an edge the gold
+model has. Below that sits the honest ceiling: `MAX_MODELS` bounds the enumeration, and a world
+whose admissible set is larger is one where she reasons from a *sample* of the alternatives and
+`Loop.models` says so in its history line. Making the model space right, rather than making the
+loop cleverer, is the next thing.
+
+Run it: `python -m nyxara.njp.discovery --solver cold`, `--solver loop`.
+
+
+#### NJP V.43 — a conclusion that cannot say what produced it is not a conclusion
+
+Three of the Master's items are one mechanism seen from three sides, and none of them works alone:
+
+* **#7 provenance** — `CLAIM: X / SUPPORTED BY: fact 183, fact 921, inference R4, assumption A3`
+* **#5 the blame graph** — *which internal belief was responsible?*
+* **#6 the autopsy** — a failure stored in the shape that lets the next turn recognise it
+
+You cannot have the second without the first: *which belief was responsible* is unanswerable
+unless the answer wrote down what it stood on. You cannot have the third without the second:
+storing *"wrong"* teaches nothing; storing *"wrong, and this assumption did it"* teaches.
+
+`njp/provenance.py` is that one object. **`Ledger.assert_` refuses a conclusion with nothing under
+it** — `UNKNOWN` for a pathless claim is not a courtesy return, it is what makes `Claim.status`
+load-bearing. Four verdicts: `SUPPORTED` when every step is settled and the paths agree;
+`HYPOTHETICAL` when the claim rests on an assumption and **says so** — a defeasible link is how
+most true generalisations are stated; `CONFLICTED` when two paths cannot both hold, reported and
+never resolved by counting; `UNKNOWN` when nothing supports it.
+
+One rule is worth the space: **one clean route beside a speculative one is still supported.**
+Otherwise an idle guess downgrades an established conclusion.
+
+##### Blame is not the path
+
+The path says what a claim *stood on*; blame says what *held it up*. A claim resting on five steps
+where four are corroborated by other standing claims and one is a lone assumption has **one**
+responsible step, and blaming all five teaches nothing anybody can act on. So blame ranks by
+exclusivity, not frequency — a step on every path to this claim and on nothing else is the
+culprit; a step supporting a dozen standing claims almost certainly is not. Measured in a test:
+given a fact that also supports a standing claim and an assumption that does not, the assumption
+is blamed.
+
+##### The warning matches the step, not the wording
+
+`Ledger.warn` answers *"have I been wrong on this ground before?"* by the **blamed step**. Two
+questions that look nothing alike and failed on the same assumption are the same failure, and a
+similarity search over their wording would put them in different worlds. That is the whole reason
+the autopsy stores a culprit rather than a description.
+
+##### Wired, not adjacent
+
+`Loop.forecast` now files every prediction as a claim: each surviving model enters the path as an
+`EDGE` or — where it carries a hidden cause — as a `HYPOTHESIS`, followed by the inference that
+produced the answer. So a prediction resting on a latent comes back `hypothetical` without
+anything having had to remember to say so, and `Loop.audit(cause, effect)` prints the claim, its
+paths, and any warning:
+
+```
+CLAIM: b does not respond to do(a)  [hypothetical]
+SUPPORTED BY (0) — 1 surviving model(s):
+  hypothesis do(a)->b#m0?: h → a, h → b  [hidden: h]
+  inference R:mutilate: do(x) cuts x's incoming edges; y responds iff it is still reachable
+WARNING: 1 earlier failure(s) rested on the same step
+  b does not respond to do(a): predicted True, was False
+```
+
+Run it: `NJPBrain` organs unchanged; `Loop.audit`, `Ledger.blame`, `Ledger.warn`.
+
+
+#### NJP V.44 — the cognitive immune system, and the regression it repairs
+
+This organ exists because of a number. V.41 loaded ConceptNet beside the curated corpus, took
+subjects from 4,382 to 130,274 — and took `recall` on the curated corpus **down**. Nothing was
+broken: `Grounder.answer` behaved exactly as designed, seeing two equally supported readings and
+declining to pick, which has been right since V.13. What went wrong is upstream. **A crowd-sourced
+`is_a` was allowed to stand beside a curated one as though the two had the same standing**, and
+once both were in the store no downstream organ could tell them apart — the provenance the ingest
+records says *how* a claim was got, never *who said it*. So the broad corpus shipped switched off,
+which was honest and was not a fix.
+
+`njp/immune.py` takes the metaphor literally. A body does not reject everything unfamiliar — it
+would starve — and does not accept everything either. It **isolates what is both unfamiliar and
+able to do damage**:
+
+```
+new fact
+   ↓
+is it in contact with anything?  ──no──→  ADMIT      (new subject: nothing to degrade)
+   ↓ yes
+does it compete, or merely add?  ──adds─→  ADMIT     (a fifth `causes` is a fifth cause)
+   ↓ competes
+whose standing is higher?  ──incumbent──→  QUARANTINE
+   ↓ challenger
+ADMIT, and quarantine the incumbent instead
+```
+
+Three consequences follow from taking it seriously. **Most of a large corpus is harmless** — a
+fact about a subject nothing else mentions cannot degrade an answer, which is why this buys
+breadth *and* precision instead of trading them. **Only competing relations are guarded**: a second
+`has_kind` is a second kind, a second `is_a` is a rival answer to the same question, and `COMPETING`
+is that short list. **Standing is earned, not declared**: a source starts at **zero**, not at a
+half — starting it at parity would have let sheer volume outrank a corpus twenty versions of
+examinations have been run against. It gains standing when quarantined claims are confirmed and
+loses it when they are refuted.
+
+And the response runs **both ways**. A challenger that outranks the incumbent is admitted and the
+*incumbent* is quarantined — without that half the organ is only conservatism.
+
+##### Quarantine is not rejection
+
+A quarantined fact is kept, retrievable and marked. It never reaches the fact store so it cannot
+degrade an answer, and it is not lost so it can be released the moment something corroborates it.
+Deleting on arrival would make this a filter; keeping it makes it an immune system, and the
+difference shows up the first time the crowd turns out to be right.
+
+##### What it recovers, measured over 75 items
+
+```
+                        facts    subjects   recall  membership  taxonomy
+curated only           15,848      4,382     0.92      0.96       1.00
+broad, no immune      211,149    130,274     0.84      1.00       0.92
+broad, through it     193,805    130,274     0.92      1.00       0.96
+```
+
+**Every subject kept and the regression gone.** 17,559 of 198,455 claims quarantined — **8.8%** —
+and that is the whole of the damage. The harm was concentrated; isolating it costs almost none of
+the breadth. `load_brain(broad=True)` now goes through the guard by default and
+`load_brain(broad=True, immune=False)` restores the naive load for anyone who wants to re-measure
+it.
+
+Run it: `load_brain(broad=True)`, `Immune.held_against(subject, predicate)`, `Immune.report()`.
+
+
+#### NJP V.45 — the invariant hunter and the theory compiler
+
+Two of the Master's items, built as one pipeline because separating them produces a module that
+*names* a regularity and a module that *runs* one with nothing to run:
+
+```
+#9   examples → what survives every change → invariant → abstract law
+#11  law → formal representation → executable predictor → compare → revise
+```
+
+The line that makes it hard is in the spec: *"system state changes, parameters change, **surface
+vocabulary changes**, but relationship X → Y survives."* So an invariant cannot be found by asking
+which variable names recur — in the interesting case **none of them do**. What recurs is *shape*,
+which is the claim `fusion` makes across domains, made here across **occasions**: fusion asks what
+biology and engineering have in common; this asks what Monday and Thursday have in common when
+Monday's variables are called nothing Thursday's are.
+
+```
+monday    a → b → c,  a requires c
+thursday  p → q → r,  p requires r
+august    x → y → z,  x requires z
+          ↓
+INVARIANT over 3 situations
+role0 —causes→ role1; role0 —requires→ role2; role1 —causes→ role2
+  role0 = august: x, monday: a, thursday: p
+```
+
+Roles are **positions, not names**, for the reason `fusion.Abstraction` leaves its shapes unnamed.
+
+##### Three things that stop it being correlation
+
+**One situation is not an invariant** — anything holds in one. `MIN_SITUATIONS` is three, because
+two can be a coincidence with a name. **A relation that could not have failed is not a finding**:
+if every situation has the edge because every situation has every edge, that describes the
+encoding, not the world, and `Invariant.discriminating` refuses it. **An exception is recorded,
+never hidden.**
+
+That last one was broken by the code that states it. Given four situations where one lacks an
+edge, the hunter preferred the perfect subset — it **dropped** the edge with the counterexample
+and reported an INVARIANT over what was left. Silently removing it turns a checkable law into a
+smaller true one that says less. It now returns both:
+
+```
+INVARIANT over 4 situations          role0 —causes→ role1; role1 —causes→ role2
+LAW (with 1 exception) over 3        role0 —requires→ role2
+                                       EXCEPT in odd
+```
+
+##### And it runs
+
+`Law.compile()` returns a `Theory` with `predict(situation)` — take a situation never seen, align
+it to the roles, and **say what the law requires to be there**:
+
+```
+unseen:  m → n → o        (the `requires` edge withheld)
+predict: aligned, missing ['m', 'requires', 'o']
+```
+
+That is a falsifiable claim about a situation nobody described, produced by a rule nobody wrote.
+`Theory.check` runs it over many and returns `holds` / `invalid` / `incomplete`, which closes the
+Master's theory → simulate → predict → compare loop.
+
+Two refusals: **alignment never sees the edge being predicted** — aligning on the answer and then
+predicting it is the mistake every exam in this package has had to be rescued from at least once,
+so the caller names what is hidden and the search never sees it. And **a law may not widen its own
+scope**: induced from three-variable situations, it declines a five-variable one rather than
+guessing.
+
+Run it: `Hunter().hunt(situations)`, `law.compile().predict(unseen)`, `Theory.check`.
+
+
+#### NJP V.46 — what cannot work, and exactly why
+
+Every reasoning organ here answers *what is the case* or *what would follow*. None answered the
+other half:
+
+> Intelligence is not only "what solution works?" It is also "what solutions cannot possibly work?"
+
+Those are not one question from opposite ends. A search for what works explores; a search for what
+cannot **eliminates**, and eliminating is what makes a large space tractable.
+
+`njp/boundary.py` does three things. **Closure** derives what must also hold, and each `Necessary`
+carries the chain that produced it — with `derived` False for anything merely asserted, because a
+closure that proudly returns its own inputs looks like it did work and did none.
+
+**Contradiction with a core.** The answer to an unsatisfiable set is not `False`; it is the
+**smallest set of constraints that still conflicts**, found by removing them one at a time and
+seeing whether the conflict survives:
+
+```
+NO SOLUTION: D and C cannot both hold
+  because of 4 constraint(s):
+    [A] A          [A→D] A → D          [C] C          [D⊗C] D ⊗ C
+  reached by:
+    D  (derived: [A] A ; [A→D] A → D)
+```
+
+Eight constraints in, four responsible out. `B→E`, `E→F` and an unused rule are correctly dropped.
+A core of four out of eight is a fixable problem; *"unsatisfiable"* is not.
+
+**Pruning with a funnel**, and the funnel *is* the product:
+
+```
+1000 candidates
+  ↓ even  (−500)      500
+  ↓ div by 5  (−400)  100
+  ↓ > 900  (−91)        9
+never binding: always true
+```
+
+It names the constraint doing the work — and names the ones that never bind at all, which a bare
+survivor count cannot.
+
+One refusal matters most: **nothing is concluded from an absence.** An unstated literal is
+*unknown*, not false. This is a monotone closure, not a database, and treating the first as the
+second is how a planner starts proving things impossible because nobody mentioned them.
+
+#### NJP V.47 — what a concept is made of, before it is called anything
+
+`fusion` matches on **edges**, which is enough to find a resemblance and not enough to say what two
+things *are*. A set of edges cannot distinguish *"has a part that does X"* from *"turns into
+something that does X"* — different concepts, same edge count.
+
+`njp/conceptgenome.py` gives a concept the Master's eight slots — roles, relations, constraints, causal,
+temporal, transformations, exceptions, invariants — so a fingerprint can say **where** two concepts
+differ rather than only how much:
+
+```
+CONCEPT pump
+  roles            has_part=impeller
+  constraints      requires=energy
+  causal           causes=flow
+  temporal         occurs_when=the motor turns
+  invariants       has_property=conserves mass
+
+pump ~ heart   aligned  (1.00)
+  roles     impeller ↔ ventricle       constraints  energy ↔ oxygen
+  causal    flow ↔ circulation         temporal     the motor turns ↔ the muscle contracts
+```
+
+**The fingerprint contains no vocabulary** — only shapes — and a test asserts no name appears in
+it. Two genomes with the same fingerprint are *candidates*; kinship is then established by a
+bijection, because a fingerprint match is a filter and never a finding.
+
+Three refusals. An unclassified relation is **dropped, not swept into `relations`** — that slot
+would absorb everything and the fingerprint would stop discriminating, which is the failure
+`related_to` has in ConceptNet. A partial match is **not** a match. And **the common structure is
+never named**: calling it *"feedback regulation"* would be the module supplying the insight it
+claims to have found. Structure first, label second — a test checks the gloss for invented words.
+
+Run it: `Boundary(constraints).render()`, `Boundary().prune(candidates, tests)`,
+`read_genome(explainer, "pump").compare(read_genome(explainer, "heart"))`.
+
+
+##### Two defects the full suite caught, and one of them was destruction
+
+Fifteen tests went red on the full run. Two were long-standing; the rest were mine, and the first
+is the worst thing done in this session.
+
+**`njp/genome.py` already existed and was overwritten.** The Reasoning Genome of V.06 — which
+compresses what she knows about her *own reasoning* rather than about concepts — was destroyed by
+a file written straight over it. `brain.genome` became `None` and fifteen tests across
+`test_reasoning_shapes`, `test_school` and `test_skills` went with it. The original is restored
+from git and the newcomer is `njp/conceptgenome.py`: both organs compress a structure, neither is
+the other, and the one that arrived second takes the longer name. Nothing but the suite would have
+caught it — the new module imported cleanly, its own tests passed, and the docs described a module
+that no longer existed.
+
+**`load_brain(broad=True)` was doing nothing at all.** `ingest_triples` takes a *file* and the V.44
+wiring handed it a list, so the immune-filtered corpus was silently discarded: 4,382 subjects
+returned where 130,274 were expected, with no error anywhere. The V.44 measurement had used a
+temporary file and was real; the shipped path did not, and was not. It writes a file now, and the
+numbers match what V.44 reported.
+
+**And `excludes` was reachable by nothing the test knew about.** `test_predicate_is_reachable_by_
+something` asserts no relation is stored where nothing can read it back — and `excludes`, added at
+V.39, is read by `njp/predator.py` rather than by any question. The organ was added to the test's
+list of readers; loosening the assertion would not have been the honest move.
+
+##### And the two that predated the session
+
+Both were a **contract** that had drifted, not a stale expectation, so both were fixed in the code.
+
+`PuzzleSolver._contains` is a **classmethod** — it compares word *stems* through `cls._stem` — and
+the test unwrapped it with `__dict__[...].__func__`, which is right for the `staticmethod` two
+lines above it and hands back a function still wanting `cls` for this one. Every call died on a
+missing argument. The code was right; the test had drifted behind a binding change. It now calls
+the bound classmethod, checks the stem comparison the classmethod exists *for*, and a second test
+asserts which helper has which binding — because a staticmethod and a classmethod unwrapped the
+same way look identical at the call site and differ by one argument at run time.
+
+`NJPBrain.do_maths` asks `mathsolver` first and `mathematics` second, and **the two returned
+different objects**. Only the second carried a `topic` while the method's own docstring promised
+one — so which attributes a caller got depended on which solver happened to recognise the
+sentence, and a quadratic had no topic at all. `mathsolver.Solution` now derives `topic` from its
+engine over **the same vocabulary `Mathematician.SKILLS` uses**, as a property rather than a field
+so no construction site can be forgotten, which is exactly how the two drifted apart. An engine is
+a *reader* and a topic is what the question was *about*, so the map is written out rather than
+guessed: an engine it does not know reports `""`, and an empty topic is honest where a wrong one
+is not. All **82** engines and readers are mapped, and a test asserts none is missing and none
+invents a topic `mathematics` does not have.
+
+`tests/njp` is green apart from `test_every_question_is_answerable_from_a_triple_in_the_same_build`
+— a corpus question in `history.kb` ("What is Age of Exploration?") that no question grammar
+parses, which is a separate matter from either of these.
+
+
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
-`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, `/discourse`, and `/{organ}` — so growth and self-rewriting are observable
+`/pulse`, `/learner`, `/calculate`, `/maths`, `/mathsolver`, `/cognition`, `/discourse`, `/explain`, and `/{organ}` — so growth and self-rewriting are observable
 from outside the process,
 not merely asserted in a docstring. On the console: `/njp`, and `/njp think` prints the synapse
 count before and after the turn, which is the claim this whole package has to earn.

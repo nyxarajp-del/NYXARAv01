@@ -1,0 +1,59 @@
+# architecture.kb — designing buildings and the spaces between them.
+#
+# `engineering.kb` covers whether a structure stands up. This covers what it is for, how it is
+# arranged, and why one arrangement works better than another for the people inside it.
+
+architecture | is_a=art and practice of designing buildings | purpose=shaping space for human use | requires=an understanding of structure | requires=an understanding of how people move and gather
+building | is_a=structure with a roof and walls | purpose=sheltering people or things | has_part=opening
+architect | is_a=person who designs buildings | purpose=turning a brief into a design that can be built | requires=knowledge of materials, structure and regulation
+brief | is_a=statement of what a client needs from a building | purpose=setting the problem the design must solve
+plan | is_a=a drawing of a building seen from above | purpose=showing how spaces are arranged and connected
+section | is_a=a drawing of a building cut through | purpose=showing heights and how floors relate
+elevation | is_a=a drawing of a building's face | purpose=showing what it looks like from outside
+scale model | is_a=small physical version of a design | purpose=letting people understand a building before it exists
+site | is_a=the piece of ground a building stands on | causes=the design being shaped by orientation, slope and access
+orientation | is_a=which way a building faces | purpose=controlling sunlight and wind | causes=lower heating and cooling need when chosen well
+circulation (in a building) | is_a=how people move through a building | purpose=connecting spaces without wasting them | causes=confusion when it is unclear
+programme | is_a=the list of spaces a building must contain | purpose=deciding how much of each kind of space is needed
+
+# --- structure and enclosure ------------------------------------------------------------------------ #
+load bearing wall | purpose=carrying the weight above it | causes=limits on where openings can be placed
+frame | is_a=structural skeleton | purpose=carrying the loads so the walls need not | causes=open floor plans becoming possible | has_kind=steel frame | has_kind=reinforced concrete frame | has_kind=timber frame
+curtain wall | is_a=outer wall that carries no load | purpose=enclosing a framed building | causes=large areas of glass becoming possible
+dome | is_a=roof form | purpose=covering a large space without internal supports | causes=outward thrust at its base
+vault | is_a=roof form | purpose=carrying a roof across a span in compression
+buttress | purpose=resisting the outward thrust of an arch or vault | causes=thinner walls becoming possible
+flying buttress | is_a=buttress | purpose=carrying thrust across an open space to a pier | causes=tall walls with large windows becoming possible
+lintel | is_a=beam over an opening | purpose=carrying the wall above a door or window
+cantilever | purpose=projecting a floor or roof beyond its support
+atrium (in a building) | is_a=tall open space inside a building | purpose=bringing daylight into the middle of a deep plan
+courtyard | is_a=open space enclosed by a building | purpose=giving light, air and privacy | causes=cooler interiors in hot climates
+facade | is_a=the face a building presents to the street | purpose=addressing the public realm
+
+# --- comfort and performance -------------------------------------------------------------------------- #
+daylighting | is_a=practice | purpose=lighting a building with the sun | causes=less electricity used | causes=glare when unshaded
+shading | is_a=practice | purpose=keeping summer sun off glass | causes=less overheating | requires=knowing the sun's path
+natural ventilation | is_a=practice | purpose=moving air through a building without machinery | requires=openings on more than one side | causes=lower cooling energy
+thermal mass | is_a=property of heavy materials | purpose=absorbing heat by day and releasing it at night | causes=steadier indoor temperature | requires=a large day to night temperature swing to be useful
+insulation | is_a=material | purpose=slowing heat moving through a wall or roof | causes=lower heating and cooling need | causes=condensation when installed without a vapour barrier
+acoustics | means=how sound behaves in a space | purpose=making speech clear and noise tolerable | requires=control of reflection and absorption
+reverberation | is_a=the persistence of sound after its source stops | causes=speech becoming unclear when too long | purpose=giving music warmth when moderate
+accessibility | is_a=quality of a building | purpose=letting everyone use it regardless of mobility | requires=step free routes | requires=doors and corridors wide enough
+fire escape | is_a=protected route out of a building | purpose=letting people leave while a fire burns | requires=two independent ways out
+building code | is_a=set of legal requirements for construction | purpose=setting a minimum for safety, health and access | causes=designs being changed before permission is granted
+sustainability | is_a=goal in design | purpose=reducing the resources a building consumes over its life | requires=looking at the whole life of the building rather than the day it opens
+embodied energy | is_a=the energy used to make and transport a building's materials | purpose=showing that a low running cost can hide a high initial one
+retrofit | is_a=practice | purpose=improving an existing building rather than replacing it | causes=much lower embodied energy than a new building
+
+# --- styles and settlement ----------------------------------------------------------------------------- #
+vernacular architecture | is_a=building tradition of a place | purpose=solving local climate and material problems with what is at hand | causes=forms that differ by region
+classical architecture | has_part=column | has_part=pediment | purpose=expressing order through proportion
+gothic architecture | has_part=pointed arch | has_part=rib vault | has_part=flying buttress | causes=tall interiors filled with light
+modernism | is_a=architectural style | purpose=letting form follow function and stripping ornament | occurs_when=steel, concrete and glass become widely available
+brutalism | is_a=architectural style | means=architecture that shows its raw concrete structure
+urban planning | is_a=practice | purpose=deciding how land in a settlement is used | causes=where people can live, work and travel | requires=looking further ahead than one building
+zoning | is_a=planning rule | purpose=separating incompatible uses of land | causes=long journeys between home and work when applied strictly
+mixed use development | is_a=planning approach | purpose=putting homes, work and shops together | causes=shorter journeys | causes=streets in use through the day
+public space | is_a=space anyone may use | purpose=letting a community meet | causes=street life when well made
+urban sprawl | is_a=pattern of low density spreading | occurs_when=planning assumes everyone drives | causes=car dependence | causes=loss of farmland
+walkability | is_a=quality of a place | purpose=letting daily needs be met on foot | requires=density | requires=connected streets | causes=less car use

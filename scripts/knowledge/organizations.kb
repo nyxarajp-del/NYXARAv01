@@ -1,0 +1,59 @@
+# organizations.kb — the named bodies that act in the world, and what each was set up to do.
+#
+# `people.kb` holds individuals and `government.kb` holds the shape of a state. This holds the
+# institutions themselves: what kind of body each is, when it began, and the job it exists for.
+
+organization | is_a=group of people arranged to pursue a shared purpose | has_part=members | has_part=rules | has_part=leadership | has_kind=international organization | has_kind=company | has_kind=charity | has_kind=university | has_kind=trade union
+international organization | is_a=organization | means=one whose members are states | purpose=letting states act together on problems no state can solve alone
+
+# --- the multilateral system ------------------------------------------------------------------------ #
+united nations | is_a=international organization | purpose=maintaining international peace and cooperation | has_part=general assembly | has_part=security council | has_part=secretariat | has_part=international court of justice | located_in=New York
+security council | is_a=organ of the united nations
+general assembly | is_a=organ of the united nations | purpose=giving every member state one vote on the questions before it
+world health organization | is_a=international organization | purpose=directing and coordinating international health work
+unicef | is_a=international organization | purpose=protecting the rights and wellbeing of children
+unesco | is_a=international organization | purpose=promoting cooperation in education, science and culture | causes=world heritage sites being designated
+international monetary fund | is_a=international organization | purpose=lending to countries in balance of payments difficulty and monitoring the world economy | located_in=Washington
+world bank | is_a=international organization
+world trade organization | is_a=international organization | purpose=setting and enforcing the rules of international trade | causes=trade disputes being settled by agreed procedure
+international labour organization | is_a=international organization | purpose=setting international standards for work
+international atomic energy agency | is_a=international organization | purpose=promoting peaceful nuclear use and verifying that nuclear material is not diverted
+world meteorological organization | is_a=international organization | purpose=coordinating weather and climate observation between states
+intergovernmental panel on climate change | is_a=international body | purpose=assessing the published science of climate change for governments | causes=assessment reports that inform negotiations
+european union | is_a=political and economic union | purpose=integrating the economies and some policies of its member states | has_part=european commission | has_part=council of the european union
+african union | is_a=international organization | purpose=promoting cooperation and integration among African states
+association of southeast asian nations | is_a=international organization | also_known_as=ASEAN | purpose=promoting regional cooperation in southeast Asia
+north atlantic treaty organization | is_a=military alliance | also_known_as=NATO | purpose=collective defence of its members
+opec | is_a=international organization | purpose=coordinating petroleum policy among member producing countries | causes=coordinated changes in oil supply
+
+# --- humanitarian and standards bodies ---------------------------------------------------------------- #
+international committee of the red cross | is_a=humanitarian organization | purpose=protecting victims of armed conflict | causes=the Geneva Conventions being monitored
+medecins sans frontieres | is_a=humanitarian organization | also_known_as=Doctors Without Borders | purpose=providing medical care in crises and conflict
+amnesty international | is_a=non governmental organization | purpose=campaigning against human rights abuses
+world wide fund for nature | is_a=non governmental organization | purpose=conserving nature and reducing the most pressing threats to biodiversity
+international organization for standardization | is_a=standards body | also_known_as=ISO | purpose=publishing international standards so products and processes work together
+international electrotechnical commission | is_a=standards body | purpose=publishing standards for electrical and electronic technology
+internet engineering task force | is_a=standards body | purpose=developing the standards that the internet runs on | causes=protocols being published as requests for comments
+world wide web consortium | is_a=standards body | purpose=developing the standards of the web
+ieee | is_a=professional organization | purpose=publishing standards and research in electrical engineering and computing
+international olympic committee | is_a=organization | purpose=organising the Olympic Games and governing the Olympic movement
+fifa | is_a=sports governing body | purpose=governing association football worldwide and organising the World Cup
+
+# --- science and research ------------------------------------------------------------------------------ #
+cern | is_a=research organization | purpose=studying particle physics with the largest accelerators | located_in=Geneva | causes=the discovery of the Higgs boson | causes=the invention of the world wide web
+nasa | is_a=space agency | purpose=carrying out the civilian space programme of the United States | located_in=United States
+european space agency | is_a=space agency | purpose=coordinating European space activity
+isro | is_a=space agency | means=the Indian Space Research Organisation | purpose=carrying out India's space programme
+royal society | is_a=learned society | purpose=promoting the natural sciences | has_property=one of the oldest scientific societies
+national institutes of health | is_a=research agency | purpose=funding and conducting biomedical research
+council of scientific and industrial research | is_a=research organization | purpose=running India's network of industrial and scientific laboratories
+
+# --- what makes an organization work or fail ---------------------------------------------------------- #
+charter | is_a=founding document of an organization | purpose=stating what it may do and how it decides
+mandate | is_a=the authority an organization is given | purpose=setting the limits of what it may act on | causes=disputes when a body acts beyond it
+non governmental organization | is_a=organization | means=one that is independent of any government | purpose=acting on a cause without state direction
+charity | is_a=organization | purpose=applying its funds to a public benefit rather than to owners
+trade union | is_a=organization of workers | purpose=bargaining collectively over pay and conditions | causes=a stronger position for workers than bargaining alone
+cooperative | is_a=organization owned by its members | purpose=running an enterprise for the benefit of those who use it
+professional body | is_a=organization | purpose=setting standards and ethics for an occupation | causes=members being removable from practice for misconduct
+accountability | purpose=making an organization answerable for what it does | requires=transparency | requires=someone with the power to act on what is found

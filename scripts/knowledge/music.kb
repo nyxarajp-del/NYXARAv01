@@ -1,0 +1,66 @@
+# music.kb — sound organised in time, and why each device does what it does.
+#
+# Written with `purpose` and `causes` carrying the weight, because a list of note names explains
+# nothing about why a minor chord sounds as it does or why a rest matters.
+
+music | is_a=art of organising sound in time | has_part=dynamics | has_part=form
+melody | means=a sequence of single notes heard as a line | purpose=giving music something to follow and remember
+harmony | purpose=colouring a melody and creating tension and release
+rhythm | means=the pattern of sound and silence in time | purpose=giving music its movement | requires=a sense of pulse
+pulse (in music) | is_a=the steady beat underlying rhythm | purpose=letting players stay together
+tempo | is_a=the speed of the pulse | causes=a piece feeling urgent or calm
+metre | is_a=grouping of beats into repeating units | purpose=making a rhythm countable | has_kind=duple metre | has_kind=triple metre
+syncopation | is_a=rhythmic device | means=stressing a beat the metre does not | causes=a sense of push against the pulse
+timbre | means=the quality that tells one instrument from another at the same pitch | requires=the pattern of overtones
+dynamics | is_a=element of music | means=how loud or soft the music is | purpose=shaping the emotional arc of a phrase
+articulation | is_a=how a note is begun and ended | purpose=making a line speak rather than merely sound
+form | is_a=the large shape of a piece | purpose=letting a listener know where they are | has_kind=binary form | has_kind=ternary form | has_kind=sonata form | has_kind=verse chorus form
+rest | is_a=notated silence | purpose=shaping a phrase by what is not played | causes=the note after it standing out
+
+# --- pitch ---------------------------------------------------------------------------------------- #
+pitch | is_a=how high or low a note sounds | requires=frequency of vibration | causes=a note being identified
+frequency | causes=pitch | means=how many vibrations happen each second
+octave | is_a=interval | means=the distance between a note and one at twice its frequency | causes=the two notes sounding like the same note higher
+interval | is_a=the distance between two pitches | purpose=describing how notes relate
+scale | is_a=an ordered set of pitches | purpose=providing the notes a piece draws on | has_kind=chromatic scale
+major scale | is_a=scale | causes=a bright open sound@0.8
+minor scale | is_a=scale | causes=a darker sound@0.8
+key | is_a=the scale a passage is centred on | purpose=giving one note the role of home
+tonic | is_a=the home note of a key | purpose=being the note a phrase resolves to
+chord | is_a=three or more notes sounded together | purpose=establishing harmony | has_kind=triad | has_kind=seventh chord
+triad | is_a=chord | consists_of=a root, a third and a fifth
+dissonance | is_a=harmony that sounds unstable | purpose=creating a need to resolve | causes=tension
+consonance | is_a=harmony that sounds settled | causes=release of tension
+cadence | is_a=a harmonic ending to a phrase | purpose=marking where a phrase closes | has_kind=perfect cadence | has_kind=imperfect cadence
+modulation | is_a=changing key within a piece | purpose=refreshing the harmonic ground | causes=a sense of moving somewhere new
+transposition | is_a=moving a whole passage up or down by the same interval | purpose=fitting a piece to a voice or an instrument
+counterpoint | is_a=technique | means=combining independent melodic lines | purpose=letting several lines be heard at once
+
+# --- notation and practice --------------------------------------------------------------------------- #
+notation | is_a=system of writing music down | purpose=letting music be played by someone who never heard it | has_part=staff | has_part=clef | has_part=note | has_part=time signature | has_part=key signature
+staff | is_a=the five lines music is written on | purpose=showing pitch by vertical position
+clef | is_a=a sign at the start of a staff | purpose=fixing which pitch a line stands for
+time signature | is_a=a sign showing the metre | purpose=telling the player how beats are grouped
+key signature | is_a=a sign showing which notes are sharp or flat | purpose=avoiding an accidental on every note
+score | is_a=the written form of a whole piece | purpose=showing every part at once
+improvisation | is_a=practice | means=composing while performing | requires=fluency in a musical language
+composition | is_a=practice | purpose=making a piece that others can perform
+arrangement | is_a=practice | purpose=adapting an existing piece for different forces
+ensemble | is_a=a group playing together | requires=listening to the other players | has_kind=orchestra | has_kind=choir | has_kind=band | has_kind=quartet
+orchestra | is_a=ensemble
+conductor | is_a=musician | purpose=holding an ensemble together and shaping the interpretation
+
+# --- instruments ---------------------------------------------------------------------------------- #
+musical instrument | is_a=object made to produce musical sound | has_kind=electronic instrument
+string instrument | requires=a resonating body
+wind instrument | has_kind=bansuri
+resonance | is_a=phenomenon | purpose=making a small vibration loud enough to hear | occurs_when=a body vibrates in sympathy with a source
+vibrato | is_a=technique | means=a small regular wavering of pitch | purpose=giving a held note life
+
+# --- kinds and traditions ------------------------------------------------------------------------- #
+genre | is_a=a category of music with shared conventions | has_kind=classical music | has_kind=folk music | has_kind=jazz | has_kind=rock | has_kind=hindustani classical music | has_kind=carnatic music
+jazz | is_a=genre | has_part=improvisation | has_part=swing | purpose=leaving room for the player to invent
+folk music | is_a=genre | purpose=carrying a community's songs | occurs_when=music is passed on by ear rather than in writing
+hindustani classical music | is_a=genre | has_part=raga | has_part=tala | purpose=developing a mood through an established melodic frame
+raga | purpose=setting which notes may be used and how they move | causes=a characteristic mood
+tala | purpose=organising time into a repeating pattern of beats

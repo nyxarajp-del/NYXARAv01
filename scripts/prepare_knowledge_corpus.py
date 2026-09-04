@@ -130,6 +130,12 @@ _ASKABLE: Dict[str, Tuple[str, str]] = {
     "means":        ("What does {s} mean?", "s"),
     "has_kind":     ("What are the types of {s}?", "s"),
     "has_part":     ("What are the parts of {s}?", "s"),
+    # An ordered decomposition. It is a separate relation from `has_part` rather than a flavour of
+    # it because `njp/explain.py` derives a procedure's *sequence* from the prerequisites among
+    # these and nothing else — a step list mixed into the parts of a machine would put a camshaft
+    # into a topological sort. `grounding` reads the two questions apart as of this change set.
+    "has_step":     ("What are the steps of {s}?", "s"),
+    "has_stage":    ("What are the stages of {s}?", "s"),
     "consists_of":  ("What does {s} consist of?", "s"),
     "involves":     ("What does {s} involve?", "s"),
     "occurs_when":  ("When does {s} occur?", "s"),
@@ -157,7 +163,9 @@ _ASKABLE: Dict[str, Tuple[str, str]] = {
 
 #: Emitted into the graph, never into the exam. See the module docstring for why each is here and
 #: why neither gets a question.
-_GRAPH_ONLY = ("part_of", "also_known_as")
+#: ``excludes`` joins them: it is read by `njp/predator.py` when it goes after an explanation
+#: offering two answers, and "what does X exclude" is not a sentence anybody writes.
+_GRAPH_ONLY = ("part_of", "also_known_as", "excludes")
 
 #: Relations that hold exactly one value, where a second is a contradiction rather than an
 #: addition. ``grounding._FUNCTIONAL`` names the first two; the rest are functional by meaning —
@@ -182,6 +190,8 @@ _ANSWER: Dict[str, str] = {
     "means":        "{S} means {o}.",
     "has_kind":     "The main types of {s} are {o}.",
     "has_part":     "The parts of {s} are {o}.",
+    "has_step":     "The steps of {s} are {o}.",
+    "has_stage":    "The stages of {s} are {o}.",
     "consists_of":  "{S} consists of {o}.",
     "involves":     "{S} involves {o}.",
     "occurs_when":  "{S} occurs when {o}.",

@@ -1,0 +1,60 @@
+# engineering.kb — designing and building things that have to hold up.
+#
+# The domain is deliberately written around `purpose`, `requires` and `causes` rather than around
+# names, because what makes engineering a subject is the reasoning from load to failure and from
+# requirement to design, and a store of nouns cannot answer any of it.
+
+engineering | is_a=discipline | purpose=designing things that solve a problem within real constraints | has_kind=civil engineering | has_kind=mechanical engineering | has_kind=electrical engineering | has_kind=chemical engineering | has_kind=software engineering | has_kind=aerospace engineering
+civil engineering | is_a=engineering | purpose=designing roads, bridges, dams and buildings
+mechanical engineering | is_a=engineering | purpose=designing machines and the parts that move
+electrical engineering | is_a=engineering | purpose=designing circuits, power systems and electronics
+chemical engineering | is_a=engineering | purpose=designing processes that transform materials at scale
+aerospace engineering | is_a=engineering | purpose=designing aircraft and spacecraft
+
+# --- the reasoning ------------------------------------------------------------------------------ #
+design | is_a=activity | purpose=choosing a form that meets the requirements | requires=a statement of the requirements | requires=knowledge of the materials
+requirement | is_a=stated need a design must meet | purpose=making it possible to tell whether a design succeeded
+constraint | is_a=limit a design must respect | has_kind=cost | has_kind=weight | has_kind=time | has_kind=safety
+trade off | is_a=situation | occurs_when=improving one property worsens another | causes=a choice that has to be justified
+safety factor | is_a=ratio | means=how much stronger a thing is built than the worst expected load | purpose=covering what the calculation did not know | causes=heavier and costlier structures
+tolerance | is_a=allowed deviation from a stated dimension | purpose=letting parts made separately still fit
+specification | is_a=written description of what is to be built | purpose=letting the builder and the buyer mean the same thing
+prototype | is_a=early working version | purpose=finding out what the drawing did not say | causes=design changes before manufacture
+failure analysis | is_a=activity | purpose=finding why something broke | causes=a design change | requires=the broken part
+
+# --- loads and failure -------------------------------------------------------------------------- #
+load | is_a=force a structure must carry | has_kind=dead load | has_kind=live load | has_kind=wind load
+dead load | is_a=load | means=the permanent weight of the structure itself
+live load | is_a=load | means=the changing weight of people and things using the structure
+stress | is_a=physical quantity | means=force divided by the area carrying it | unit=pascal | causes=strain
+strain | is_a=physical quantity | means=the fractional change in length under stress
+tension | is_a=stress that pulls a material apart | causes=stretching
+compression | is_a=stress that pushes a material together | causes=shortening | causes=buckling in a slender member
+shear | is_a=stress that slides one part of a material past another
+bending | is_a=combination of tension and compression across a beam | occurs_when=a beam carries a load between its supports
+buckling | is_a=sudden sideways failure | occurs_when=a slender column is compressed beyond a critical load | causes=collapse
+fatigue (in a material) | is_a=failure mode | occurs_when=a material is loaded and unloaded many times | causes=a crack that grows with each cycle | causes=failure far below the static strength
+creep | is_a=failure mode | occurs_when=a material is held under load at high temperature | causes=slow permanent deformation
+corrosion | is_a=failure mode | occurs_when=metal reacts with its environment | causes=loss of section | causes=weakening of a structure | requires=oxygen | requires=moisture
+brittle fracture | is_a=failure mode | occurs_when=a crack spreads before the material yields | causes=sudden failure with no warning
+yield point | is_a=stress at which a material stops returning to its shape | purpose=marking where deformation becomes permanent
+
+# --- the things built --------------------------------------------------------------------------- #
+beam | is_a=structural member | purpose=carrying a load across a span | has_property=in tension on one face and compression on the other
+column | is_a=structural member | purpose=carrying a load downwards | causes=load being transferred to the foundation
+truss | is_a=structure of triangles | purpose=carrying a load with little material | has_property=members carry only tension or compression
+arch | is_a=structure | purpose=carrying a load across a span in compression | causes=an outward thrust at its base | requires=abutments to resist the thrust
+suspension bridge | is_a=bridge | purpose=spanning a long distance | has_part=cable | has_part=tower | has_part=deck | has_property=the cables carry the deck in tension
+foundation | purpose=spreading the load into the ground | requires=knowledge of the soil
+cantilever | is_a=beam fixed at one end only | purpose=projecting over a space with no support beneath it
+gear | purpose=changing the speed and torque of a rotation | has_property=trades speed for force
+lever | purpose=trading distance for force
+pulley | causes=a load being lifted with less effort when several are used
+bearing | is_a=machine part | purpose=letting a shaft turn with little friction | causes=less wear | requires=lubrication
+lubrication | is_a=practice | purpose=reducing friction between moving parts | causes=less heat | causes=longer life
+heat exchanger | is_a=device | purpose=moving heat from one fluid to another without mixing them
+pump | is_a=machine | purpose=moving a fluid against a pressure difference | requires=energy | has_part=impeller
+turbine | purpose=taking energy out of a moving fluid | causes=rotation of a shaft
+control system | is_a=system | purpose=keeping a quantity at a set value | has_part=sensor | has_part=controller | has_part=actuator | requires=feedback
+feedback | is_a=signal fed back into a system | purpose=correcting the difference between what is wanted and what is happening | causes=stability when negative | causes=oscillation when the delay is too long
+redundancy | is_a=design technique | purpose=keeping a system working when one part fails | causes=higher cost | causes=higher reliability

@@ -1,0 +1,60 @@
+# business.kb — organisations that trade, and the reasons they succeed or fail.
+#
+# `economics.kb` is about markets and `finance.kb` about money. This is about the firm: what it
+# does, what it costs, and what kills it.
+
+business | means=an organisation that provides goods or services for payment | purpose=creating value people will pay for | requires=revenue exceeding cost over time
+company | is_a=business registered as a legal person | purpose=letting a business own property and make contracts in its own name | causes=limited liability for its owners
+sole proprietorship | is_a=business owned by one person | causes=the owner being personally liable for the debts
+partnership | is_a=business owned by two or more people | requires=an agreement about shares and duties
+limited liability | is_a=legal protection | purpose=capping what an owner can lose to what they invested | causes=people being willing to invest in risky ventures
+startup | purpose=searching for a repeatable business model | has_property=high uncertainty | requires=funding before revenue
+business model | is_a=description of how a business creates and captures value | purpose=making it clear who pays, for what, and why
+value proposition | is_a=statement of the benefit a customer gets | purpose=answering why anyone would buy this rather than the alternative
+market research | is_a=activity | purpose=finding out what customers actually want | causes=fewer products built for nobody
+product market fit | is_a=condition | occurs_when=a product satisfies a strong market demand | causes=growth without pushing
+
+# --- money in and money out ------------------------------------------------------------------------ #
+revenue | is_a=money a business takes in from sales | means=price multiplied by quantity sold
+cost | is_a=money a business spends
+fixed cost | means=a cost that does not change with output | causes=losses when sales fall
+variable cost | means=a cost that rises with each unit produced
+profit | is_a=what is left of revenue after costs | purpose=rewarding the risk taken and funding growth
+margin | is_a=profit as a share of revenue | purpose=showing how much of each sale is kept
+break even point | is_a=level of sales at which revenue equals cost | purpose=telling a business how much it must sell to survive
+cash flow | is_a=money actually moving in and out | purpose=showing whether the bills can be paid this month
+insolvency | is_a=condition | occurs_when=a business cannot pay its debts as they fall due | causes=bankruptcy
+bankruptcy | is_a=legal process | occurs_when=a business cannot pay its debts | causes=assets being sold to pay creditors
+economies of scale | is_a=effect | means=that unit cost falls as output rises | causes=large producers undercutting small ones | requires=fixed costs spread over more units
+overhead | is_a=cost not tied to producing one unit | causes=a business needing a minimum volume to be viable
+
+# --- how the work is organised ---------------------------------------------------------------------- #
+management | is_a=activity | purpose=getting work done through other people | has_part=planning | has_part=organising | has_part=leading | has_part=controlling
+strategy | is_a=a chosen way of competing | purpose=deciding what the business will not do as much as what it will | requires=understanding of the competition
+operations | is_a=the running of the work that produces the product | purpose=turning inputs into outputs reliably
+supply chain | is_a=the sequence of suppliers, makers and carriers | purpose=getting inputs to production and products to customers | causes=disruption spreading when one link fails
+inventory | is_a=stock a business holds | purpose=meeting demand without delay | causes=capital being tied up | causes=waste when it is not sold
+just in time | is_a=practice | purpose=holding as little inventory as possible | causes=lower holding cost | causes=vulnerability to supply disruption
+quality control | is_a=practice | purpose=catching defects before they reach the customer | causes=fewer returns
+outsourcing | is_a=practice | means=having another firm do work you would otherwise do | purpose=lowering cost or gaining expertise | causes=less control over quality
+human resources | is_a=function | purpose=hiring, developing and retaining the people the business needs
+organisational culture | is_a=the shared assumptions of how things are done here | causes=behaviour that no rule requires | occurs_when=what leaders reward is noticed
+delegation | is_a=practice | purpose=letting decisions be made where the knowledge is | causes=faster decisions | requires=trust
+incentive | is_a=a reward attached to a behaviour | causes=more of the behaviour rewarded | causes=gaming when the measure is not the goal
+
+# --- customers and competition ------------------------------------------------------------------- #
+marketing | purpose=finding, keeping and satisfying customers | has_part=product | has_part=price | has_part=place | has_part=promotion
+brand | is_a=the set of associations a name carries | purpose=letting a customer choose without investigating each time | causes=a price premium when trust is high
+pricing | is_a=decision | purpose=setting what is charged | causes=demand changing | requires=knowing what customers value
+competition | causes=pressure to improve | causes=profits being competed away over time
+competitive advantage | is_a=a reason customers choose this firm | purpose=explaining why profits are not competed away | has_kind=lower cost | has_kind=differentiation
+differentiation (in business) | is_a=competitive advantage | means=offering something rivals do not | causes=less pressure on price
+market share | is_a=a firm's share of the sales in its market | purpose=measuring position against rivals
+customer retention | is_a=keeping existing customers | purpose=growing without paying to acquire someone new each time | causes=higher lifetime value
+churn | is_a=the rate at which customers leave | causes=growth stalling even when new customers arrive
+monopoly | is_a=market with one seller | causes=less pressure to innovate
+entrepreneurship | is_a=activity | purpose=building something new under uncertainty | requires=tolerance of failure
+innovation | is_a=putting a new idea into use | purpose=creating value that did not exist | causes=existing products becoming obsolete
+scaling | is_a=growing output without growing cost in proportion | requires=processes that do not depend on one person
+governance | is_a=how a company is directed and held to account | purpose=stopping managers acting against the owners | has_part=board of directors
+stakeholder | is_a=anyone affected by what a business does | has_kind=customer | has_kind=employee | has_kind=supplier | has_kind=shareholder | has_kind=community
