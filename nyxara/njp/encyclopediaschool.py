@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.njp.encyclopedia import Article, Coverage, Encyclopedia, taught_on_wikipedia
 from nyxara.njp.passage import PassageReader, _bare, _toks, _words

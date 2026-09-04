@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.njp.passage import (LESSONS, Demonstration, KnowledgeObject, PassageReader,
-                                Shape, taught_reader)
+from nyxara.njp.passage import (Demonstration, KnowledgeObject, PassageReader,
+                                taught_reader)
 from nyxara.njp.passageschool import HELD_OUT, SEALED, examine, grounder_baseline
 
 

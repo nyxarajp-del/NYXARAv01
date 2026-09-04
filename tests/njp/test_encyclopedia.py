@@ -206,6 +206,27 @@ def test_reading_the_corpus_files_nothing(book, reader):
     assert len(grounder.facts) == before
 
 
+def test_a_new_export_does_not_take_a_name_that_was_already_taken():
+    """Both of these did, silently, and only the linter noticed.
+
+    `Coverage` belongs to `njp.concepts` and `Relation` to the universe; the encyclopedia's and the
+    passage reader's were exported unqualified and replaced them in the package namespace. Nothing
+    failed, nothing raised — the same shape of defect as the overwritten genome module, and the
+    reason this assertion exists rather than a promise to be careful.
+    """
+    import nyxara.njp as njp
+
+    assert njp.Coverage.__module__ == "nyxara.njp.concepts"
+    assert njp.Relation.__module__.startswith("nyxara.njp.")
+    assert njp.Relation is not njp.ReadRelation
+    assert njp.Coverage is not njp.ReadingCoverage
+    assert njp.ReadingCoverage.__module__ == "nyxara.njp.encyclopedia"
+    assert njp.ReadRelation.__module__ == "nyxara.njp.passage"
+    for name in ("ReadingCoverage", "ReadRelation", "Encyclopedia", "Article",
+                 "KnowledgeObject", "PassageReader", "taught_on_wikipedia"):
+        assert name in njp.__all__
+
+
 # --------------------------------------------------------------------------------------------- #
 #  the brain
 # --------------------------------------------------------------------------------------------- #

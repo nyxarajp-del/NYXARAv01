@@ -414,12 +414,17 @@ from nyxara.njp.boundary import (
     Necessary,
 )
 from nyxara.njp.conceptgenome import Genome, Kinship, read_genome
-# V.48. `Demonstration` belongs to `njp.coding` in this namespace and `Shape` to `njp.reasoning`,
-# so both are qualified here rather than shadowing modules that had the name first. `Relation` is
-# free, and it is the right word for what it is: one relation read out of a passage.
+# V.48. `Demonstration` belongs to `njp.coding` in this namespace, `Shape` to `njp.reasoning` and
+# `Relation` to `njp.field`, so all three are qualified rather than shadowing modules that had the
+# name first. Written unqualified, `Relation` and `Coverage` silently replaced two live exports and
+# nothing but the linter noticed — the same shape of defect as the overwritten genome module, and
+# caught this time before it shipped.
+# V.49. `Coverage` is already `njp.concepts`', so the encyclopedia's is qualified — it counts
+# what a reading run produced over a corpus, which is a different thing from concept coverage and
+# must not answer to the same name.
 from nyxara.njp.encyclopedia import (
     Article,
-    Coverage,
+    Coverage as ReadingCoverage,
     Encyclopedia,
     taught_on_wikipedia,
 )
@@ -427,7 +432,7 @@ from nyxara.njp.passage import (
     Demonstration as ReadingLesson,
     KnowledgeObject,
     PassageReader,
-    Relation,
+    Relation as ReadRelation,
     Shape as ReadingShape,
     taught_reader,
 )
@@ -620,9 +625,9 @@ __all__ = [
     # NJP V.46/V.47 — what cannot work, and what a concept is made of
     "Boundary", "HardConstraint", "Necessary", "Impossible", "Funnel",
     "Genome", "Kinship", "read_genome",
-    "KnowledgeObject", "PassageReader", "Relation", "ReadingLesson", "ReadingShape",
+    "KnowledgeObject", "PassageReader", "ReadRelation", "ReadingLesson", "ReadingShape",
     "taught_reader",
-    "Article", "Coverage", "Encyclopedia", "taught_on_wikipedia",
+    "Article", "ReadingCoverage", "Encyclopedia", "taught_on_wikipedia",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

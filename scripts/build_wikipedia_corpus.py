@@ -132,7 +132,7 @@ def lead_of(wikitext: str, *, sentences: int = 4) -> str:
     text = _HEADING.sub(" ", text)
     lines = [line.strip() for line in text.splitlines()]
     # A line opening on a list, table or indent marker is layout, not a sentence.
-    lines = [line for line in lines if line and not line[0] in "*:;|!#"]
+    lines = [line for line in lines if line and line[0] not in "*:;|!#"]
     joined = _SPACE.sub(" ", " ".join(lines)).strip()
     parts = _SENTENCE.split(joined)
     return " ".join(parts[:sentences]).strip()

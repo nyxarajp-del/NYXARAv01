@@ -38,7 +38,7 @@ import gzip
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 __all__ = ["Article", "Coverage", "Encyclopedia", "CORPUS", "WIKIPEDIA_LESSONS",
            "taught_on_wikipedia"]
