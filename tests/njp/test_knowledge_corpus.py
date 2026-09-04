@@ -120,11 +120,18 @@ def test_predicate_is_reachable_by_something(predicate):
         name for values in _PREDICATE_AFFINITY.values()
         for name in (values if isinstance(values, dict) else [values])
     }
+    # `njp/predator.py` is the fifth reader, added at V.39. It goes after an explanation offering
+    # two answers and asks whether the store says they exclude each other — so `excludes` is
+    # retrievable by an organ rather than by a question, which is a reader this list did not have
+    # a category for. Adding the organ is the honest move; loosening the assertion would not be.
+    from nyxara.njp.predator import EXCLUDES
+
     reachable = (predicate in _GENERAL_ANSWER
                  or predicate in affinity_names
                  or predicate in _TRANSITIVE_PRIOR
                  or predicate in _FUNCTIONAL
-                 or predicate in kc._ASKABLE)
+                 or predicate in kc._ASKABLE
+                 or predicate in EXCLUDES)
     assert reachable, f"{predicate} is stored by nothing that can read it back"
 
 

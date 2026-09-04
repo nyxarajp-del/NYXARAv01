@@ -1026,21 +1026,33 @@ def load_brain(path: str = "", *, brain: Any = None, broad: bool = False,
         wide = os.path.join(here, _BROAD)
         if os.path.exists(wide):
             if immune:
-                ingest_triples(got, _guarded(got, wide), source="conceptnet")
+                import os as _os
+
+                filtered = _guarded(got, wide)
+                try:
+                    ingest_triples(got, filtered, source="conceptnet")
+                finally:
+                    _os.unlink(filtered)
             else:
                 ingest_triples(got, wide, source="conceptnet")
     return got
 
 
-def _guarded(brain: Any, path: str) -> List[Dict[str, Any]]:
-    """The broad corpus with what would damage an answer held back.
+def _guarded(brain: Any, path: str) -> str:
+    """The broad corpus with what would damage an answer held back. Returns **a path**.
 
-    The curated corpus is the only declared incumbent, and it is declared rather than inferred
-    because it is the one that twenty versions of examinations have been run against. Everything
-    else earns its standing.
+    A path and not a list, and that is a defect fixed rather than a preference.
+    :func:`~nyxara.njp.ingest.ingest_triples` takes a *file* — it opens what it is given — so the
+    first version, which handed it the filtered rows directly, ingested **nothing**. Silently:
+    ``load_brain(broad=True)`` returned 4,382 subjects, exactly the curated count, and reported no
+    error at all. The V.44 measurement had used a temporary file and so was real; the shipped path
+    did not, and did nothing. Caught by ``test_the_broad_corpus_multiplies_what_she_has_heard_of``,
+    which is the only reason this comment is not still a lie in a docstring.
     """
     import gzip
     import json
+    import os
+    import tempfile
 
     from nyxara.njp.immune import Immune
 
@@ -1049,7 +1061,13 @@ def _guarded(brain: Any, path: str) -> List[Dict[str, Any]]:
     opener = gzip.open if path.endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as handle:  # type: ignore[operator]
         rows = [json.loads(line) for line in handle if line.strip()]
-    return list(guard.filter_triples(rows, source="conceptnet"))
+    kept = list(guard.filter_triples(rows, source="conceptnet"))
+    handle_out = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False,
+                                             encoding="utf-8")
+    with handle_out as out:
+        for row in kept:
+            out.write(json.dumps(row) + "\n")
+    return handle_out.name
 
 
 def examine(*, limit: int = DEFAULT_LIMIT, seed: int = DEFAULT_SEED,

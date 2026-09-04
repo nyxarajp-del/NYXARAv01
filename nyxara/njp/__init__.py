@@ -413,7 +413,7 @@ from nyxara.njp.boundary import (
     Impossible,
     Necessary,
 )
-from nyxara.njp.genome import Genome, Kinship, read_genome
+from nyxara.njp.conceptgenome import Genome, Kinship, read_genome
 from nyxara.njp.provenance import (
     Blame,
     Claim as ProvenanceClaim,

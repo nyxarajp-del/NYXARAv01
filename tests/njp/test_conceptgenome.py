@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.njp.explain import Explainer
-from nyxara.njp.genome import SLOT_RELATIONS, SLOTS, Genome, read_genome
+from nyxara.njp.conceptgenome import SLOT_RELATIONS, SLOTS, Genome, read_genome
 
 
 class T:

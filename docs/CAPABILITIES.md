@@ -60,7 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
-| 39m | Concept genome (a concept as eight named slots — roles, relations, constraints, causal, temporal, transformations, exceptions, invariants — so a comparison says **where** two concepts differ rather than only how much. The fingerprint holds no vocabulary at all, so kinship is found across vocabularies that share nothing; an unclassified relation is dropped rather than absorbed; and the common structure is never given a name) | `nyxara.njp.genome` | NEW |
+| 39m | Concept genome (a concept as eight named slots — roles, relations, constraints, causal, temporal, transformations, exceptions, invariants — so a comparison says **where** two concepts differ rather than only how much. The fingerprint holds no vocabulary at all, so kinship is found across vocabularies that share nothing; an unclassified relation is dropped rather than absorbed; and the common structure is never given a name) | `nyxara.njp.conceptgenome` | NEW |
 | 39l | Impossibility and boundary (what *cannot* work under a set of constraints, with the **unsatisfiable core** — the smallest responsible subset, found by removal — and the derivation that reached it; plus a pruning funnel that names which constraint eliminated what and which never bound. Nothing is concluded from an absence: unstated is unknown, not false) | `nyxara.njp.boundary` | NEW |
 | 39k | Invariant → law → executable theory (what survives across situations whose **vocabularies share nothing** — found by structural alignment, not by recurring names — refused when one situation, when it could not have failed, or when an exception would have to be hidden. Then compiled: `Theory.predict` takes a situation never seen, aligns it, and says what the law requires to be there, which is a falsifiable claim produced by a rule nobody wrote) | `nyxara.njp.theory` | NEW |
 | 39j | Cognitive immune system (a new claim that would make an existing question unanswerable is **quarantined** — kept, retrievable, out of the store — while everything that merely adds is admitted, and standing is *earned* by having quarantined claims confirmed rather than declared. Built against a measured regression and it repairs it: the broad corpus's 130,274 subjects kept in full, `recall` back to the curated level, 8.8% of claims isolated. The response runs both ways: a challenger that outranks the incumbent displaces it) | `nyxara.njp.immune` + `nyxara.njp.general` | NEW |
@@ -4349,7 +4349,7 @@ second is how a planner starts proving things impossible because nobody mentione
 things *are*. A set of edges cannot distinguish *"has a part that does X"* from *"turns into
 something that does X"* — different concepts, same edge count.
 
-`njp/genome.py` gives a concept the Master's eight slots — roles, relations, constraints, causal,
+`njp/conceptgenome.py` gives a concept the Master's eight slots — roles, relations, constraints, causal,
 temporal, transformations, exceptions, invariants — so a fingerprint can say **where** two concepts
 differ rather than only how much:
 
@@ -4378,6 +4378,32 @@ claims to have found. Structure first, label second — a test checks the gloss 
 
 Run it: `Boundary(constraints).render()`, `Boundary().prune(candidates, tests)`,
 `read_genome(explainer, "pump").compare(read_genome(explainer, "heart"))`.
+
+
+##### Two defects the full suite caught, and one of them was destruction
+
+Fifteen tests went red on the full run. Two were long-standing; the rest were mine, and the first
+is the worst thing done in this session.
+
+**`njp/genome.py` already existed and was overwritten.** The Reasoning Genome of V.06 — which
+compresses what she knows about her *own reasoning* rather than about concepts — was destroyed by
+a file written straight over it. `brain.genome` became `None` and fifteen tests across
+`test_reasoning_shapes`, `test_school` and `test_skills` went with it. The original is restored
+from git and the newcomer is `njp/conceptgenome.py`: both organs compress a structure, neither is
+the other, and the one that arrived second takes the longer name. Nothing but the suite would have
+caught it — the new module imported cleanly, its own tests passed, and the docs described a module
+that no longer existed.
+
+**`load_brain(broad=True)` was doing nothing at all.** `ingest_triples` takes a *file* and the V.44
+wiring handed it a list, so the immune-filtered corpus was silently discarded: 4,382 subjects
+returned where 130,274 were expected, with no error anywhere. The V.44 measurement had used a
+temporary file and was real; the shipped path did not, and was not. It writes a file now, and the
+numbers match what V.44 reported.
+
+**And `excludes` was reachable by nothing the test knew about.** `test_predicate_is_reachable_by_
+something` asserts no relation is stored where nothing can read it back — and `excludes`, added at
+V.39, is read by `njp/predator.py` rather than by any question. The organ was added to the test's
+list of readers; loosening the assertion would not have been the honest move.
 
 
 ### Reachable over the wire
