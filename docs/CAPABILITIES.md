@@ -60,6 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 39b | Communication (the half of language that is about **people** — what was done by saying it, what "he" names or that nothing settles it, whether a claim can hold beside one made twenty turns ago, what somebody else believes that is not so, and how much of an answer this hearer asked to carry. `nyxara.social.tom` has been a real recursive belief engine for many versions and nothing in `njp/` could put a **sentence** into it; now a sentence drives it) | `nyxara.njp.discourse` + `nyxara.njp.discourseschool` + `nyxara.social.tom` | UPGRADED |
+| 39h | The closed loop (observations → structure → latent hypothesis → experiment → revision → a prediction nobody asked for, as one runnable cycle: hidden causes proposed and never believed, interventions chosen by how much they move *the question you are about to be asked*, revision in both directions, an autopsy that keeps the edge that carried a failed claim, and five distinct reasons for not knowing. Measured on randomly generated worlds with unobserved variables where **declining is sometimes the only pass**. It beats reconstruction on structure, on latents and on ending with the right kind of world — and the loop does **not close**: 0.125, the same as the reconstructor) | `nyxara.njp.loop` + `nyxara.njp.discovery` | PARTIAL |
 | 39g | Breadth, measured (`njp/breadth.py` asks what no other exam here can: of things a person might name, what fraction does she have any fact about. ConceptNet's English assertions ship as a second corpus — 4,382 subjects become 130,274 — and it is **off by default** because measuring it honestly showed 12× the facts buys 2.8 points on subjects nobody mentioned, nothing on derivation, and costs `recall` 1.00 → 0.70 and 23× the time per question) | `nyxara.njp.breadth` + `nyxara/njp/data/world_broad.jsonl.gz` | NEW |
 | 39f | Structure discovery and cross-domain abstraction (she does not only walk the stored graph — she recovers which causal structures the *observations* support, reporting a whole Markov equivalence class rather than picking one of three indistinguishable orientations, with add/remove/reverse/merge/split as named operations and an MDL-style score that never overrules the evidence. And she finds subgraphs in different domains that are the same graph under a renaming — a structure-preserving bijection on shape alone, since the vocabularies share nothing — returning one abstraction reaching three domains with every role aligned, and leaving it unnamed) | `nyxara.njp.surgery` + `nyxara.njp.fusion` | NEW |
 | 39e | Self-attack on explanations (`njp/adversary` goes after a *belief*; nothing went after a *composition*, where every fact can be true and the sentence still false. Four attacks, each carrying the stated triple that licenses it: two answers the store says exclude each other — reported as a dispute and never resolved; chains the target `requires` on both sides — a conjunction, not a list; a hop at the confidence floor, marked and not withdrawn; and a stated counterexample. It runs *after* the walk, never inside it, so it cannot suppress its own evidence) | `nyxara.njp.predator` + `nyxara.njp.explaingauntlet` | NEW |
@@ -3996,6 +3997,105 @@ What this file adds is the honest instrument for saying which of the two a given
 
 Run it: `python -m nyxara.njp.breadth --against <triples.jsonl.gz> --sample 1500`,
 `load_brain(broad=True)`.
+
+
+#### NJP V.42 — the closed loop, and the benchmark that says it does not close yet
+
+The Master's reading of the ConceptNet result was sharper than mine: twelve times the facts moved
+unseen-entity coverage 6.0% → 8.8% and derivation 2.9% → 3.0%, so **the missing thing was never
+facts**. Every organ this package has built for reasoning is a *step* — `surgery` recovers a
+structure, `predator` attacks an explanation, `fusion` finds a shared shape — and each passed its
+own paper. None of them is a loop.
+
+> Intelligence = the ability to kill your own explanations and replace them with better ones.
+> Not simply generating more explanations.
+
+##### `njp/discovery.py` — a world with no answer in it
+
+Every benchmark here so far hands her something. `explaingauntlet` mints a world and then **states
+its edges**. Even `surgery` gets observations derived from a graph the exam already knows, and is
+graded on getting that graph back. That is **reconstruction**.
+
+This one gives her observations and nothing else — and half the worlds contain a **latent**: a
+cause that appears in no observation, has no name, and is not in the list of things she is told
+about. Over the observed variables alone, `A → B` and `A ← H → B` imply *exactly* the same
+dependencies. Five staged papers: recover a structure that implies what was observed; hold **both**
+readings where nothing separates them; name an **intervention** that would; revise on its result;
+and predict the effect of an intervention on a pair that appeared in none of the four.
+
+Three properties make it hard rather than merely long. The world **refuses the held-out pair** as
+an experiment, so stage five cannot be bought by asking it. A third of the worlds are built so that
+**declining is the right answer** — nothing permitted can settle them — and answering one is a
+failure however the coin lands. And whether a world is decidable is **computed by exhaustive search**
+over the admissible model set, not set by whoever wrote it.
+
+##### `njp/loop.py` — the cycle
+
+`Latents` proposes an unobserved common cause wherever one would carry the same dependence, keeps
+only what stays observationally consistent, and marks every one `HYPOTHETICAL` — which nothing but
+an intervention can lift. `Experiments` scores every intervention by **how much of the disagreement
+about the question you are about to be asked** it would remove, over what it costs. `Loop.revise`
+removes what the result refutes and keeps what it does not. `Autopsy` records a failed prediction
+with the model and the edge that carried it. And not knowing is a **reason**, not a shrug — five of
+them, each naming a different remedy, each reachable and each pinned by a test.
+
+##### It scored 1.000, and that was the templates
+
+On three hand-written world shapes the loop scored 1.000 on every stage. That is exactly the number
+a system tuned to three templates would score and there was no way to tell the two apart from
+outside. So the templates were deleted: the graphs are drawn at random, the latents are drawn at
+random, and the conditional-independence profile is emitted **complete** — every pair against every
+subset — because with singletons only, "implies what was observed" is weaker than Markov
+equivalence and the admissible set inflated to 1,503 models where the loop held 57. Every number
+downstream of that was computed against a fiction.
+
+**On 24 randomly generated worlds:**
+
+```
+        structure  latent  experiment  revise  predict   closed  right-kind
+cold        0.458   0.000       0.125   0.167    0.125    0.125       0.316
+loop        0.708   0.708       0.125   0.250    0.125    0.125       0.538
+```
+
+The loop is better than the reconstructor at holding a structure that fits (0.458 → 0.708), at
+refusing to invent the absence of a hidden cause (0.000 → 0.708), at revising (0.167 → 0.250) and
+at ending up holding the right kind of world (0.316 → 0.538, against a coin flip). **And the closed
+loop is 0.125 for both.** It does not close.
+
+That is the result. The architecture is built, every part of it is measured and falsifiable, and on
+worlds nobody designed for it the cycle does not yet produce a correct prediction about something
+it was never asked. Reporting the 1.000 would have been available and would have been false.
+
+##### Three defects found on the way, one of them conceptual
+
+**An empty observed-only class is evidence of a latent, not a dead end.** `Loop.models` built
+latent variants *out of* Surgeon's Markov class, and on a world with real confounding it returned
+**zero models where 75 were admissible** — because when a latent confounds two variables, often no
+DAG over the observed variables fits at all: every orientation implies a collider the data denies.
+The class is correctly empty, and reading that as failure left nothing to propose from. This was
+the single defect that put the loop *below* the reconstructor.
+
+**An experiment that cannot move the aim is not cheap, it is wasted.** Scoring interventions by
+models eliminated, the loop converged and plateaued at 0.675 on the templated worlds — a third of
+them ran out of useful experiments while still split on the one question they were about to be
+asked. Eliminating nineteen of twenty models buys nothing if the twentieth disagrees with the
+survivor about the thing you need. Aim on: 1.000. Aim off: 0.625. A test pins both.
+
+**A variable no model mentions was answered with "no".** The mutilation reaches nothing, so a
+confident negative fell out of never having heard of the thing. *Nothing connects these* and *I
+hold no model that mentions this* are different answers with different remedies, which is why
+`Reason` has five members and a test asserts every one is reachable.
+
+##### Where it stops, precisely
+
+The loop enumerates orientations of the skeleton it reads off the observations, and on the failing
+worlds the admissible model it needs is not among them — the skeleton is missing an edge the gold
+model has. Below that sits the honest ceiling: `MAX_MODELS` bounds the enumeration, and a world
+whose admissible set is larger is one where she reasons from a *sample* of the alternatives and
+`Loop.models` says so in its history line. Making the model space right, rather than making the
+loop cleverer, is the next thing.
+
+Run it: `python -m nyxara.njp.discovery --solver cold`, `--solver loop`.
 
 
 ### Reachable over the wire
