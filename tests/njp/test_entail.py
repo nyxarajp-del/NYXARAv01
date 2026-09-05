@@ -74,10 +74,17 @@ def test_a_hypothesis_that_adds_something_says_so():
 #  what she learned, and what she did not
 # --------------------------------------------------------------------------------------------- #
 def test_she_finds_the_containment_rule(taught):
-    """A hypothesis made only of the premise's own words usually follows from it."""
+    """A hypothesis made only of the premise's own words usually follows from it.
+
+    Asserted on the claim rather than on which probe carries it. Two readings say the same thing —
+    ``overlap is all`` and ``adds nothing`` — and the induction takes whichever covers more; on
+    7,226 pairs that was the first and on 36,302 it is the second. Pinning the test to one of them
+    would have failed on a corpus five times the size for no reason at all.
+    """
     yes = [r for r in taught.rules if r.label == "yes"]
     assert yes, "nothing learned about entailment"
-    assert any(name == "overlap" and value == "all" for r in yes for name, value in r.terms)
+    containment = {("overlap", "all"), ("adds nothing", True), ("added", "none")}
+    assert any((name, value) in containment for r in yes for name, value in r.terms)
 
 
 def test_every_rule_carries_the_rate_it_was_kept_at(taught):

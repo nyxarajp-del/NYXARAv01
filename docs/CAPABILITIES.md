@@ -4827,6 +4827,109 @@ reachable only from Python is not reachable from English — and `go_to_reasonin
     entails("A gymnast performing in a competition.", "The gymnast is watching tv.")
         -> unknown, "no rule she has covers this pair"
 
+## V.52 — the whole submix, the half that can be checked, and the knowledge that is missing
+
+Three things were asked for at once, and the honest answer to the first is a number.
+
+### A — the whole chain-of-thought submix, not a sample
+
+V.51 learned from 4,980 rows: **0.00132%** of FLAN. The submix is also published whole, as one
+240 MB file, so there was no reason to sample it. `scripts/build_reasoning_corpus.py` now reads
+**192,696 rows — every one there is** — and pulls out 36,302 unique inference pairs and 23,371
+worked arithmetic problems.
+
+What could not be taken is said rather than skipped: `dialog` is 10.7 GB, `flan2021` 12.6 + 13.3
+GB, `niv2` 14.0 + 5.6 GB and `t0` 18.6 GB — about **75 GB against 20 GB** of writable disk. Those
+are dialogue, translation, summarisation and task instructions; none of them is reasoning data.
+
+Five times the pairs bought almost nothing:
+
+| | pairs | when she answers | with a majority guess where she is silent |
+| --- | --- | --- | --- |
+| V.51 | 7,226 | 0.853 | 0.468 |
+| **V.52** | **36,302** | **0.862** | **0.476** |
+
+**+0.9 points for five times the data.** The same shape as V.41's twelve-times-the-facts for
++2.8pp: more of the same evidence does not buy the structure that is missing. Still exactly **one**
+rule, and it is the same one — a hypothesis that adds no content word to the premise usually
+follows from it, 1,236 pairs at 0.87.
+
+### B — the half where an answer can be checked
+
+23,371 word problems whose rationale is a chain of stated sums. `njp/arithmetic.py` does not learn
+from them first; it **audits** them, recomputing every sum through `njp.calculate`.
+
+| | |
+| --- | --- |
+| every sum exact | **0.897** |
+| every sum, allowing rounding | 0.910 |
+| a sum this parser cannot verify | 0.041 |
+| the chain reaches its stated answer | **0.836** |
+
+Then the harder half. A chain abstracts into a **shape** — `q0 * q1; r0 + q2`, a little program over
+the question's own numbers — and solving is picking the right one:
+
+| | |
+| --- | --- |
+| no shape at all | 0.000 |
+| one shape applied to everything | 0.008 |
+| the commonest shape that binds | **0.008** |
+
+Those last two being equal is the finding: **shape frequency carries no information about which
+problem needs which shape.** 2,315 distinct shapes from 16,359 problems, and the commonest covers
+half a percent. Solving needs reading the question, and reading the question is not what this
+organ does.
+
+### C — the knowledge the hard half needs, mined and measured
+
+V.51 measured that a stored relation linked premise to hypothesis in 14 of 300 contradictions and
+14 of 300 non-contradictions — the knowledge was not in any corpus she had. It **is** in this one,
+said out loud: of 11,352 rationales for *no*, 3,264 say "cannot", 1,984 "at the same time", 1,374
+"either". So `mine_exclusions` reads the marker in the rationale and the two things it names, from
+**training pairs only**, and offers the result to the induction as one more reading.
+
+| | over every pair | when she answers |
+| --- | --- | --- |
+| surface readings only | 0.056 | 0.862 |
+| **with the mined incompatibilities** | **0.056** | **0.862** |
+
+**It changed nothing.** Not one rule, not one point. The probe is not ignored — it appears in the
+near misses (*"a word rules another out is False and added is few and shared is one"*, 710
+counterexamples) — it is simply not clean enough to carry a rule. The first miner was worse and
+its own output said so: crossing whole sentences produced *"man excludes 046, 20, 30, 90"*, which
+is a cross product, not knowledge. Naming only the two things the rationale names cut 61,837
+pairs to 6,490 and gave real ones — `sitting excludes basketball`, `running excludes asleep`,
+`riding excludes boat` — and still moved no number.
+
+And the re-measurement is sharper than before. Of 300 held-out pairs of each label, a stored
+relation links the two sentences in 17 contradictions, 7 neutrals and **24 entailments**: the
+store's relations are *commonest in the class that does not need them*.
+
+### Four defects, each caught by checking rather than assuming
+
+* **The audit reported the corpus wrong about arithmetic it had got right.** A two-operand pattern
+  cut `3/10 * 20/11 = 6/11` into `20 / 11 = 6`; 37% of chains came back "unsound". A step is a whole
+  expression, and the number is 0.897.
+* **Rounding is not error.** `45/4 = 11` has not made a mistake; it has rounded. Counted apart.
+* **A letter is not a failed chain.** Multiple-choice rows answer `(D)`, and counting those as
+  chains that missed their answer understated the corpus by a quarter.
+* **The defensive brackets her calculator refuses.** `njp.calculate` takes `3 * 40` and rejects
+  `(3) * (40)`, so all 23,371 audits returned nothing computed and nothing wrong — a clean sheet
+  that meant the checker had never run.
+
+One more was in the machinery: `induce.search` counted support by scanning every case for every
+combination, and on 25,411 pairs the induction **never finished**. Indexing each reading to the
+cases it holds of gives the same answer in 122 seconds.
+
+Wired at `NJPBrain.check_working` — which recomputes someone's working and names the sum that
+disagrees rather than returning a confidence, because this is the one place in the package where a
+claim can be settled — plus `go_to_arithmetic_school`.
+
+    check_working("Wendy's bill was 5 * 120 = 600 ... she paid 600 - 240 - 70 = 290.", "290")
+        -> sound, reaches its answer
+    check_working("He had 2 + 2 = 5 apples.", "5")
+        -> "2 + 2 = 5, but it is 4"
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,

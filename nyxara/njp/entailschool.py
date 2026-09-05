@@ -102,6 +102,12 @@ def examine(purity: float = 0.72, **kwargs: Any) -> Dict[str, Result]:
     out["taught"] = _mark(taught, held, "taught")
     out["with_fallback"] = _mark(taught, held, "taught + fallback", fallback=True)
 
+    # C's control: the same reasoner with the mined incompatibilities withheld. What the
+    # exclusions were worth is the distance between these two rows and nothing else.
+    surface = Reasoner(purity=purity, mine=False, **kwargs)
+    surface.learn_from(learn)
+    out["no_exclusions"] = _mark(surface, held, "surface readings only")
+
     blind = Reasoner(purity=purity, learn=False, **kwargs)
     blind.learn_from(learn)
     out["no_rules"] = _mark(blind, held, "no rules")
@@ -117,10 +123,23 @@ def examine(purity: float = 0.72, **kwargs: Any) -> Dict[str, Result]:
     return out
 
 
+#: The sweep runs the whole examination once per threshold, and on 36,302 pairs that is minutes
+#: each. It runs on a fixed slice instead — the same slice every time, so the columns are
+#: comparable — and the chosen threshold is then examined on everything.
+SWEEP_PAIRS = 9000
+
+
 def sweep(values: Sequence[float] = (0.55, 0.60, 0.65, 0.72, 0.80, 0.90, 1.00),
           **kwargs: Any) -> List[Tuple[float, Result]]:
     """The examination at each threshold. What sets ``purity`` is this table, not a preference."""
-    return [(value, examine(value, **kwargs)["taught"]) for value in values]
+    rows = read_pairs()[:SWEEP_PAIRS]
+    out: List[Tuple[float, Result]] = []
+    for value in values:
+        learn, held = split(rows)
+        reasoner = Reasoner(purity=value, **kwargs)
+        reasoner.learn_from(learn)
+        out.append((value, _mark(reasoner, held, f"purity {value}")))
+    return out
 
 
 def knowledge_gap(brain: Any = None, sample: int = 300) -> Dict[str, Any]:
@@ -179,14 +198,15 @@ def main() -> None:  # pragma: no cover — a report, not a test
         print("no corpus; run scripts/build_reasoning_corpus.py")
         return
     learn, held = split(pairs)
-    print(f"{len(pairs)} pairs — {len(learn)} learned from, {len(held)} held out\n")
+    print(f"{len(pairs)} pairs — {len(learn)} learned from, {len(held)} held out")
+    print(f"(the sweep below runs on the first {SWEEP_PAIRS} of them)\n")
     print("purity   held-out   answered   when answered   rules")
     for value, result in sweep():
         print(f"  {value:.2f}     {result.accuracy:.3f}      {result.coverage:.3f}"
               f"          {result.when_answered:.3f}        {result.rules}")
     print()
     got = examine()
-    for name in ("base_rate", "no_rules", "taught", "with_fallback"):
+    for name in ("base_rate", "no_rules", "no_exclusions", "taught", "with_fallback"):
         print("  " + got[name].render())
     print("\nby label, taught:")
     for label, (right, asked) in sorted(got["taught"].by_label.items()):

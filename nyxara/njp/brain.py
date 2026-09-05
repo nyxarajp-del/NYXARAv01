@@ -400,6 +400,7 @@ class NJPBrain:
         self.reader = self._build_reader(c)
         self.programmer = self._build_programmer(c)
         self.entailer = self._build_reasoner(c)
+        self.arithmetic = self._build_arithmetic(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
@@ -655,6 +656,17 @@ class NJPBrain:
                               min_precision=self._cfg("discover_min_precision", 0.7),
                               max_order=self._cfg("discover_max_order", 3))
         except Exception:  # noqa: BLE001 — she keeps her pairs, and forms no rules above them
+            return None
+
+    def _build_arithmetic(self, c: Any) -> Any:
+        """The organ that recomputes a worked sum instead of believing it."""
+        if not self._gate("arithmetic", True):
+            return None
+        try:
+            from nyxara.njp.arithmetic import Arithmetic
+
+            return Arithmetic()
+        except Exception:  # noqa: BLE001
             return None
 
     def _build_reasoner(self, c: Any) -> Any:
@@ -1900,6 +1912,17 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a brain without it still parses sentences
             return None
 
+    def _build_arithmetic(self, c: Any) -> Any:
+        """The organ that recomputes a worked sum instead of believing it."""
+        if not self._gate("arithmetic", True):
+            return None
+        try:
+            from nyxara.njp.arithmetic import Arithmetic
+
+            return Arithmetic()
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_reasoner(self, c: Any) -> Any:
         """The organ that answers whether one sentence follows from another.
 
@@ -2343,6 +2366,42 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return out
         return out
+
+    def check_working(self, worked: str, answer: str = "") -> Dict[str, Any]:
+        """Recompute someone's working. Every stated sum, and whether the chain reaches its end.
+
+        The one place in this package where a claim can be **settled** rather than weighed: ``5 *
+        120`` is 600 or it is not. So this returns what disagreed, not a confidence.
+        """
+        out: Dict[str, Any] = {"steps": 0, "sound": False, "reaches": False, "wrong": ""}
+        if self.arithmetic is None:
+            return out
+        try:
+            import re as _re
+
+            from nyxara.njp.arithmetic import Problem
+
+            pattern = _re.compile(r"(?<![\d.)])(\d[\d,.\s()+\-*/×÷]*[\d)])\s*=\s*"
+                                  r"(-?\d[\d,]*(?:\.\d+)?(?:\s*/\s*\d+)?)")
+            steps = tuple((" ".join(a.split()), " ".join(b.split()))
+                          for a, b in pattern.findall(str(worked or ""))
+                          if any(op in a for op in "+-*/×÷"))
+            got = self.arithmetic.check(Problem(worked=str(worked or ""),
+                                                answer=str(answer or ""), steps=steps))
+            out = got.to_dict()
+            out["steps"] = len(steps)
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def go_to_arithmetic_school(self) -> Any:
+        """The corpus audited by recomputation, and how far shape-picking gets on unseen problems."""
+        try:
+            from nyxara.njp.arithmeticschool import run
+
+            return run()
+        except Exception:  # noqa: BLE001
+            return None
 
     def go_to_reasoning_school(self) -> Any:
         """Held-out accuracy, the base rate, the induction-off floor, and the purity sweep."""

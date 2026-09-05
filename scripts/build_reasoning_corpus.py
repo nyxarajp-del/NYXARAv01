@@ -1,18 +1,31 @@
 #!/usr/bin/env python3
-"""Sample the chain-of-thought part of Open-Orca/FLAN into a corpus of reasoning items.
+"""Extract the whole chain-of-thought submix of Open-Orca/FLAN into what can be learned from.
 
-FLAN is 377,759,274 rows and 317 GB. Nothing here downloads it. What this takes is a **spread
-sample** — batches of a hundred rows at random offsets, so the sample crosses the tasks the
-dataset is ordered by instead of reading the first few thousand of one of them.
+An earlier version of this read the rows API and sampled. It worked and it was tiny: 4,980 rows,
+**0.00132%** of the dataset, and two batches drawn uniformly over all 377,759,274 rows returned
+zero chain-of-thought rows at all, because FLAN is ordered by task and CoT is a small band at the
+front. The submix is also published whole, as one 240 MB file, so there is no reason to sample it:
 
-What comes out is not knowledge and not an answer key. It is **worked reasoning**: a premise, a
-hypothesis, the options offered, the answer, and the one line of rationale that says why. Turning
-that into something she can do is `njp.entail`'s job and is measured separately; a downloader that
-also decided what made an answer right would make that measurement impossible to take.
+    curl -L -O https://huggingface.co/datasets/Open-Orca/FLAN/resolve/main/cot_submix_data.jsonl
+    python3 scripts/build_reasoning_corpus.py cot_submix_data.jsonl
 
-    python3 scripts/build_reasoning_corpus.py --batches 40
+That is **192,696 rows — every one there is**. What cannot be taken is said plainly rather than
+quietly skipped: the other submixes are `dialog` 10.7 GB, `flan2021` 12.6 + 13.3 GB, `niv2` 14.0 +
+5.6 GB and `t0` 18.6 GB, about 75 GB against 20 GB of writable disk here. Those are not reasoning
+data — they are dialogue, translation, summarisation and task instructions — and none of them is
+what "learn to reason" asks for.
 
-Licence: CC BY 4.0, recorded on every row.
+Two files come out, because the submix holds two different kinds of reasoning and one organ cannot
+read both:
+
+* **inference pairs** — a premise, a hypothesis, one of three answers, and the line of rationale
+  that says why. From `cot_esnli` mostly. 36,293 of them, unique.
+* **worked arithmetic** — a word problem and a rationale that is a chain of stated sums, each of
+  which can be **recomputed**. From `cot_gsm8k` and `stream_aqua`. This is the half where an answer
+  is checkable rather than merely usual.
+
+Both are extractions, not answers: the rationale is carried through verbatim and nothing here
+decides what makes any of it right.
 """
 
 from __future__ import annotations
@@ -20,104 +33,160 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
-import random
+import re
 import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
-ROWS = "https://datasets-server.huggingface.co/rows"
 DATASET = "Open-Orca/FLAN"
-UA = "NYXARA-research/0.1 (https://github.com/nyxarajp-del/NYXARAv01) reasoning-sample"
 LICENCE = "CC BY 4.0"
-TOTAL = 377_759_274
 
-#: Where the chain-of-thought rows are. FLAN is ordered by task source and CoT is a small block at
-#: the very front — measured by probing: offsets 0 and 100,000 are CoT, 300,000 is already Dialog.
-#: Sampling uniformly over all 377 million rows returned **zero** CoT rows in two batches, which is
-#: what a fraction of that size does to uniform sampling. Named as a range rather than hidden in a
-#: filter, because it is a claim about the file that a future dump could falsify.
-COT_LOW = 0
-COT_HIGH = 200_000
+_ANSWER = re.compile(r"[Tt]he (?:final )?answer is[:\s]+([^\n]+)|[Tt]he final answer:\s*([^\n]+)")
+_QUOTED = re.compile(r'"([^"]{6,400})"')
+#: A stated sum is a whole arithmetic expression and the value claimed for it — not two operands
+#: and a result. Written the narrow way it cut ``3/10 * 20/11 = 6/11`` into ``20 / 11 = 6`` and
+#: then reported the corpus as wrong about it, which would have been a finding about this regex
+#: dressed as a finding about the data. The expression must run from a digit to a digit or a
+#: closing bracket, and must not have another operator or digit pressed against either end.
+_SUM = re.compile(
+    r"(?<![\d.)])(\d[\d,.\s()+\-*/×÷]*[\d)])\s*=\s*"
+    r"(-?\d[\d,]*(?:\.\d+)?(?:\s*/\s*\d+)?)(?![\d.]*\s*[-+*/×÷=])")
+_NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+LABELS = ("yes", "no", "it is not possible to tell")
+MATHS = ("cot_gsm8k", "cot_gsm8k_ii", "stream_aqua", "stream_aqua_ii")
 
-PACE = 1.5
-BACKOFF = 10.0
+
+def rows_of(path: Path) -> Iterator[Dict[str, Any]]:
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except Exception:  # noqa: BLE001 — a malformed row is skipped, not fatal
+                continue
 
 
-def _get(offset: int, length: int, *, tries: int = 5) -> Dict[str, Any]:
-    query = urllib.parse.urlencode({"dataset": DATASET, "config": "default", "split": "train",
-                                    "offset": offset, "length": length})
-    wait = BACKOFF
-    for attempt in range(tries):
-        try:
-            request = urllib.request.Request(f"{ROWS}?{query}", headers={"User-Agent": UA})
-            with urllib.request.urlopen(request, timeout=60) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            if error.code not in (429, 500, 502, 503) or attempt == tries - 1:
-                raise
-        except Exception:  # noqa: BLE001
-            if attempt == tries - 1:
-                raise
-        time.sleep(wait)
-        wait *= 1.8
-    return {}
+def blocks(text: str) -> List[str]:
+    """A worked example ends where its answer line ends. The prompt holds several."""
+    out, start = [], 0
+    for match in _ANSWER.finditer(text):
+        end = text.find("\n", match.end())
+        end = len(text) if end < 0 else end
+        out.append(text[start:end])
+        start = end
+    return out
+
+
+def said_answer(block: str) -> Optional[str]:
+    match = _ANSWER.search(block)
+    if not match:
+        return None
+    said = match.group(1) or match.group(2) or ""
+    said = re.split(r"\s*(?:--+|\*\*)", said.strip())[0]
+    return said.strip().rstrip(".").strip() or None
+
+
+def rationale_of(block: str) -> str:
+    match = _ANSWER.search(block)
+    if not match:
+        return ""
+    before = block[:match.start()].strip().splitlines()
+    return before[-1].strip() if before else ""
+
+
+#: ``30 x 5 / 6 = 25`` writes its multiplication with a letter. Left unhandled the expression
+#: pattern started at ``5 / 6`` instead and the audit reported the corpus wrong about a sum it had
+#: got right — one of five residual disagreements that were all this parser's, checked one by one
+#: against their source text rather than assumed.
+_TIMES = re.compile(r"(?<=\d)\s*[x×]\s*(?=\d)")
+
+
+def steps_of(text: str) -> List[Tuple[str, str]]:
+    """Every stated sum in a rationale, as it was written. Nothing is evaluated here."""
+    out: List[Tuple[str, str]] = []
+    for expression, said in _SUM.findall(_TIMES.sub(" * ", text)):
+        expression = " ".join(expression.split())
+        if not any(op in expression for op in "+-*/×÷"):
+            continue                       # "= 40" with nothing computed is not a step
+        out.append((expression, " ".join(said.split())))
+    return out
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--batches", type=int, default=40)
-    parser.add_argument("--length", type=int, default=100)
-    parser.add_argument("--seed", type=int, default=11)
-    parser.add_argument("--low", type=int, default=COT_LOW)
-    parser.add_argument("--high", type=int, default=COT_HIGH)
-    parser.add_argument("--source", default="CoT", help="_task_source to keep; '' keeps all")
-    parser.add_argument("--out", default="nyxara/njp/data/flan_cot.jsonl.gz")
+    parser.add_argument("dump", help="cot_submix_data.jsonl")
+    parser.add_argument("--pairs", default="nyxara/njp/data/flan_pairs.jsonl.gz")
+    parser.add_argument("--maths", default="nyxara/njp/data/flan_maths.jsonl.gz")
     args = parser.parse_args(argv)
 
-    rng = random.Random(args.seed)
-    kept: List[Dict[str, Any]] = []
-    seen: set = set()
-    tasks: Dict[str, int] = {}
-    for batch in range(args.batches):
-        offset = rng.randrange(args.low, max(args.low + 1, args.high - args.length))
-        try:
-            page = _get(offset, args.length)
-        except Exception as error:  # noqa: BLE001
-            print(f"  offset {offset}: FAILED {error}", file=sys.stderr, flush=True)
-            continue
-        for entry in page.get("rows", []):
-            row = entry.get("row") or {}
-            source = str(row.get("_task_source") or "")
-            if args.source and source != args.source:
+    seen_pairs: Set[Tuple[str, str]] = set()
+    seen_maths: Set[str] = set()
+    pairs: List[Dict[str, Any]] = []
+    maths: List[Dict[str, Any]] = []
+    rows = 0
+    for row in rows_of(Path(args.dump)):
+        rows += 1
+        task = str(row.get("_task_name") or "")
+        whole = f"{row.get('inputs') or ''}\n{row.get('targets') or ''}"
+        for block in blocks(whole):
+            answer = said_answer(block)
+            if answer is None:
                 continue
-            key = (str(row.get("inputs"))[:200], str(row.get("targets"))[:200])
-            if key in seen:
+            low = answer.lower()
+            if low in LABELS:
+                quoted = _QUOTED.findall(block)
+                if len(quoted) < 2:
+                    continue
+                key = (quoted[-2].strip().lower(), quoted[-1].strip().lower())
+                if key in seen_pairs:
+                    continue
+                seen_pairs.add(key)
+                pairs.append({"premise": quoted[-2].strip(), "hypothesis": quoted[-1].strip(),
+                              "label": low, "rationale": rationale_of(block), "task": task,
+                              "dataset": DATASET, "licence": LICENCE})
                 continue
-            seen.add(key)
-            task = str(row.get("_task_name") or "")
-            tasks[task] = tasks.get(task, 0) + 1
-            kept.append({"inputs": row.get("inputs"), "targets": row.get("targets"),
-                         "task": task, "source": source,
-                         "template": str(row.get("_template_type") or ""),
-                         "offset": offset, "dataset": DATASET, "licence": LICENCE})
-        print(f"  batch {batch + 1}/{args.batches} @ {offset}: {len(kept)} kept",
-              file=sys.stderr, flush=True)
-        time.sleep(PACE)
+            if task in MATHS:
+                worked = block[:_ANSWER.search(block).start()].strip()
+                steps = steps_of(worked)
+                if not steps:
+                    continue
+                question = _question_of(block)
+                if not question or question in seen_maths:
+                    continue
+                seen_maths.add(question)
+                maths.append({"question": question, "worked": worked, "answer": answer,
+                              "steps": [list(s) for s in steps], "task": task,
+                              "numbers": _NUMBER.findall(question),
+                              "dataset": DATASET, "licence": LICENCE})
 
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(out, "wt", encoding="utf-8") as handle:
-        for row in kept:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    print(f"{len(kept)} rows across {len(tasks)} tasks -> {out} "
-          f"({out.stat().st_size / 1024:.0f} KB)", file=sys.stderr)
-    for task, count in sorted(tasks.items(), key=lambda kv: -kv[1]):
-        print(f"  {task:<28}{count:>5}", file=sys.stderr)
+    _write(Path(args.pairs), pairs)
+    _write(Path(args.maths), maths)
+    print(f"{rows} rows -> {len(pairs)} inference pairs, {len(maths)} worked problems",
+          file=sys.stderr)
     return 0
+
+
+def _question_of(block: str) -> str:
+    """The problem, which is whatever the prompt asked just before the working began."""
+    text = block.strip()
+    for marker in ("[Question]", "My question is:", "Question:", "q:", "Q:"):
+        if marker in text:
+            text = text.rsplit(marker, 1)[-1]
+    for marker in ("[Answer]", "Your thoughts:", "Stream of consciousness:", "a:", "A:"):
+        if marker in text:
+            text = text.split(marker, 1)[0]
+    return " ".join(text.split())[:600]
+
+
+def _write(path: Path, rows: Sequence[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print(f"  {len(rows):>6} -> {path} ({path.stat().st_size / 1024 / 1024:.1f} MB)",
+          file=sys.stderr)
 
 
 if __name__ == "__main__":

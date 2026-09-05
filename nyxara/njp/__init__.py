@@ -444,6 +444,13 @@ from nyxara.njp.encyclopedia import (
 # caught, which is the third time it has paid for itself. `Pair` is `njp.study`'s. The reasoner's
 # pair is two sentences to be judged, its case a measured occasion and its rule a conjunction of
 # readings; none of them is the thing that had the name first, so none of them keeps it.
+from nyxara.njp.arithmetic import (
+    Arithmetic,
+    Check as WorkingCheck,
+    Problem as WordProblem,
+    Shape as ChainShape,
+    read_problems,
+)
 from nyxara.njp.entail import Pair as Inference, Reasoner, read_pairs
 from nyxara.njp.induce import Case as MeasuredCase, Rule as InducedRule, cover
 from nyxara.njp.programming import (
@@ -659,6 +666,7 @@ __all__ = [
     "Article", "ReadingCoverage", "Encyclopedia", "taught_on_wikipedia",
     "Programmer", "Operation", "Attempt", "ActTrial", "FailureLaw", "Repair",
     "Reasoner", "Inference", "read_pairs", "InducedRule", "MeasuredCase", "cover",
+    "Arithmetic", "WordProblem", "WorkingCheck", "ChainShape", "read_problems",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
