@@ -45,7 +45,7 @@ import itertools
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-__all__ = ["Case", "Rule", "MISSING", "attend", "search", "cover"]
+__all__ = ["Case", "Rule", "AtLeast", "MISSING", "attend", "search", "cover"]
 
 
 class _Missing:
@@ -55,6 +55,56 @@ class _Missing:
 
 #: What a reading a case simply does not have compares equal to: nothing.
 MISSING = _Missing()
+
+
+@dataclass(frozen=True)
+class AtLeast:
+    """A term satisfied by any value **at or above** this one, rather than equal to it.
+
+    Every term here was an equality test until V.56, and that turned out to be the difference
+    between an induction that classifies and one that can rank. Equality over bucketed values
+    cannot express an order: asked which sentence of a passage holds an answer, the cover found
+    ``carries is many`` — true of the right sentence and of every other sentence sharing five or
+    more words with the question — and had no way to say *more than the others*. Argmax over the
+    raw count, one line and no learning, beat it at every setting tried (0.470, 0.337, 0.568,
+    0.570 against 0.618).
+
+    So a reading whose values are ordered may now be tested against a threshold as well as against
+    a value. Nothing else changes: a rule is still a conjunction, still carries its support and its
+    counterexamples, still means what it says when it is read aloud — ``carries is at least 3``.
+
+    Only offered for readings that are actually ordered. A bucket name, a tag, a word: those have
+    no ``>=`` that means anything, and :func:`_forms` does not propose one for them.
+    """
+
+    value: Any
+
+    def __str__(self) -> str:
+        return f"at least {self.value}"
+
+
+def _matches(seen: Any, want: Any) -> bool:
+    """Whether one reading satisfies one term, by equality or by threshold."""
+    if isinstance(want, AtLeast):
+        if seen is MISSING:
+            return False
+        try:
+            return bool(seen >= want.value)
+        except TypeError:      # two values with no order between them do not compare
+            return False
+    return bool(seen == want)
+
+
+def _forms(value: Any) -> Tuple[Any, ...]:
+    """The terms a reading of this value can supply: the value, and a threshold when ordered.
+
+    ``bool`` is excluded on purpose even though it compares: ``capitalised is at least True`` is
+    the same test as ``capitalised is True`` written confusingly, and offering both would double
+    the search for nothing.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return (value,)
+    return (value, AtLeast(value))
 
 
 @dataclass(frozen=True)
@@ -85,7 +135,7 @@ class Rule:
         return self.counterexamples == 0
 
     def holds(self, reading: Mapping[str, Any]) -> bool:
-        return all(reading.get(name, MISSING) == value for name, value in self.terms)
+        return all(_matches(reading.get(name, MISSING), value) for name, value in self.terms)
 
     def render(self) -> str:
         return " and ".join(f"{name} is {value}" for name, value in self.terms) or "always"
@@ -102,8 +152,8 @@ def attend(candidates: Mapping[str, Any], positives: Sequence[Mapping[str, Any]]
         return dict(candidates)
     scored: List[Tuple[float, str]] = []
     for name, value in candidates.items():
-        here = sum(1 for r in positives if r.get(name, MISSING) == value)
-        there = sum(1 for r in negatives if r.get(name, MISSING) == value)
+        here = sum(1 for r in positives if _matches(r.get(name, MISSING), value))
+        there = sum(1 for r in negatives if _matches(r.get(name, MISSING), value))
         scored.append((abs(here / max(1, len(positives)) - there / max(1, len(negatives))), name))
     scored.sort(reverse=True)
     return {name: candidates[name] for _score, name in scored[:keep]}
@@ -138,23 +188,27 @@ def search(candidates: Mapping[str, Any], positives: Sequence[Mapping[str, Any]]
     it was not induced from, which is the only thing that turns a tolerance into a measurement.
     """
     picked = attend(candidates, positives, negatives, max_candidates)
+    # An ordered reading offers two terms rather than one — its value, and a threshold at that
+    # value. For everything else this is a one-element tuple and the search is what it always was.
+    options = {name: _forms(value) for name, value in picked.items()}
     best: Optional[Rule] = None
     for width in range(1, max_terms + 1):
         widest: Optional[Rule] = None
         for names in itertools.combinations(sorted(picked), width):
-            terms = tuple((name, picked[name]) for name in names)
-            rule = Rule(label=label, terms=terms)
-            rule.support = sum(1 for r in positives if rule.holds(r))
-            if rule.support < floor:
-                continue
-            rule.counterexamples = sum(1 for r in negatives if rule.holds(r))
-            if rule.purity >= purity:
-                if widest is None or (rule.support, rule.purity) > (widest.support,
-                                                                    widest.purity):
-                    widest = rule
-            elif best is None or (rule.counterexamples, -rule.support) < (best.counterexamples,
-                                                                         -best.support):
-                best = rule
+            for chosen in itertools.product(*(options[name] for name in names)):
+                terms = tuple(zip(names, chosen))
+                rule = Rule(label=label, terms=terms)
+                rule.support = sum(1 for r in positives if rule.holds(r))
+                if rule.support < floor:
+                    continue
+                rule.counterexamples = sum(1 for r in negatives if rule.holds(r))
+                if rule.purity >= purity:
+                    if widest is None or (rule.support, rule.purity) > (widest.support,
+                                                                        widest.purity):
+                        widest = rule
+                elif best is None or (rule.counterexamples, -rule.support) < (
+                        best.counterexamples, -best.support):
+                    best = rule
         if widest is not None:
             return widest
     return None if exact_only else best

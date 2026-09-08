@@ -245,6 +245,11 @@ def probe_sentence(reading: "Reading", index: int, wanted: str = "",
     asked = fixed.asked
     shared = len(here & asked)
     out: Dict[str, Any] = {
+        # The raw count as well as the bucket. Buckets are what a rule reads aloud well; the count
+        # is what an order can be taken over, and until `induce.AtLeast` existed there was no way
+        # to say "more than the others" — only "in the same band as the others", which every
+        # sentence sharing five or more words with the question also satisfies.
+        "carries_n": shared,
         "carries": _bucket(shared, (0, 1, 2, 4), ("none", "one", "two", "few", "many")),
         "share_of_question": _share(shared, len(asked)),
         "share_of_sentence": _share(shared, len(here)),
