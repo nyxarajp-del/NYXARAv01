@@ -35,10 +35,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.njp.asked import Asked
 from nyxara.njp.askedschool import split as split_questions
-from nyxara.njp.finding import Finder, Reading, candidates, read_passages
+from nyxara.njp.finding import Finder, Reading, Setting, candidates, read_passages
 
 __all__ = ["Result", "SEED", "TRAIN", "LEARN_FROM", "HELD_OUT",
-           "split", "taught_finder", "examine", "run"]
+           "split", "taught_finder", "examine", "decompose", "sentence_baselines",
+           "gold_sentence", "run"]
 
 SEED = 55
 TRAIN = 0.7
@@ -197,6 +198,61 @@ def examine(readings: Optional[Sequence[Reading]] = None) -> Dict[str, Result]:
     out["no_shape"] = _mark("no answer-shape", held,
                             lambda r: blind.find(r.passage, r.question)[0], len(blind.rules))
     return out
+
+
+def gold_sentence(reading: Reading) -> int:
+    """Which sentence of the passage actually holds the answer."""
+    fixed = Setting.of(reading)
+    at = reading.passage.lower().find(reading.answer.lower().strip())
+    return max((i for i, (_t, start) in enumerate(fixed.spans) if start <= at), default=0)
+
+
+def decompose(engine: Finder, held: Sequence[Reading]) -> Dict[str, float]:
+    """Where the accuracy goes: the wrong sentence, or the right one and the wrong words.
+
+    One number is not enough to act on. A reader that is looking in the wrong place and one that
+    is looking in the right place and picking the wrong phrase out of it need different repairs,
+    and the overall figure cannot tell them apart. The first row is the ceiling on both: whether
+    the marked answer is a candidate at all, since a span the generator never proposes cannot be
+    chosen however good the ranking is.
+    """
+    n = max(1, len(held))
+    reachable = right_sentence = answered = right_both = 0
+    for reading in held:
+        gold = gold_sentence(reading)
+        fixed = Setting.of(reading)
+        said, _start = fixed.spans[gold] if gold < len(fixed.spans) else ("", 0)
+        wanted = reading.answer.lower().strip()
+        reachable += int(any(s.key == wanted for s in candidates(said)))
+        if engine.sentence(reading.passage, reading.question) != gold:
+            continue
+        right_sentence += 1
+        got, _why = engine.find(reading.passage, reading.question)
+        answered += int(bool(got))
+        right_both += int(bool(got) and _norm(got) == _norm(reading.answer))
+    return {
+        "gold_is_a_candidate": round(reachable / n, 4),
+        "sentence_right": round(right_sentence / n, 4),
+        "answered_when_sentence_right": round(answered / max(1, right_sentence), 4),
+        "exact_when_sentence_right": round(right_both / max(1, right_sentence), 4),
+        "exact_overall": round(right_both / n, 4),
+    }
+
+
+def sentence_baselines(held: Sequence[Reading]) -> Dict[str, float]:
+    """What the first stage has to beat, and the number that turned out to beat it."""
+    from nyxara.njp.finding import _content
+    n = max(1, len(held))
+    overlap = first = 0
+    for reading in held:
+        fixed = Setting.of(reading)
+        asked = _content(reading.question)
+        weight = [len(fixed.carried[i] & asked) for i in range(len(fixed.spans))]
+        pick = max(range(len(weight)), key=lambda i: weight[i]) if weight else 0
+        gold = gold_sentence(reading)
+        overlap += int(pick == gold)
+        first += int(gold == 0)
+    return {"argmax_overlap": round(overlap / n, 4), "always_first": round(first / n, 4)}
 
 
 def run() -> Dict[str, Any]:  # pragma: no cover — a report, not a test
