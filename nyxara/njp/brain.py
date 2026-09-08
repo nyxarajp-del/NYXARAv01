@@ -402,6 +402,7 @@ class NJPBrain:
         self.entailer = self._build_entailer(c)
         self.arithmetic = self._build_arithmetic(c)
         self.procedures = self._build_procedures(c)
+        self.asked = self._build_asked(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
@@ -1929,6 +1930,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a brain without it still reads passages
             return None
 
+    def _build_asked(self, c: Any) -> Any:
+        """The organ that knows what *kind* of thing a question is asking for.
+
+        Untrained, like the programmer and the entailer: everything it knows comes from questions
+        it has been shown, and a brain shown none should expect nothing of an answer.
+        :meth:`learn_answer_kinds` gives it some.
+        """
+        if not self._gate("asked", True):
+            return None
+        try:
+            from nyxara.njp.asked import Asked
+
+            return Asked()
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_entailer(self, c: Any) -> Any:
         """The organ that answers whether one sentence follows from another.
 
@@ -2416,6 +2433,65 @@ class NJPBrain:
             return out
         return out
 
+    def learn_answer_kinds(self, *, limit: int = 0) -> Dict[str, Any]:
+        """Read the question corpus and induce what kind of answer each shape of question wants.
+
+        Files nothing. What comes out is a set of rules about **questions**, not facts about the
+        world, and the fact store is not where a rule about a question belongs.
+        """
+        out: Dict[str, Any] = {"questions": 0, "rules": 0}
+        if self.asked is None:
+            return out
+        try:
+            from nyxara.njp.asked import read_questions
+            from nyxara.njp.askedschool import shuffled
+
+            # Shuffled before it is cut, never a prefix. The corpus lands on disk in the order the
+            # nine shards were folded, so the first 20,000 rows are one part of one submix — the
+            # same slice bias that made `entailschool`'s first learning curve meaningless.
+            rows = read_questions()
+            if limit:
+                rows = shuffled(rows)[:int(limit)]
+            self.asked.learn_from(rows)
+            out.update({"questions": len(rows), "rules": len(self.asked.rules),
+                        "learned": self.asked.learned()})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def answer_kind(self, question: str) -> Dict[str, Any]:
+        """What kind of answer this question wants, and which rule says so. Silence is allowed."""
+        out: Dict[str, Any] = {"kind": "", "why": ""}
+        if self.asked is None:
+            return out
+        try:
+            kind, why = self.asked.expects(str(question or ""))
+            out.update({"kind": kind, "why": why})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def check_answer(self, question: str, answer: str) -> Dict[str, Any]:
+        """Is this candidate the wrong *kind* of thing for this question?
+
+        A veto and nothing else — it supplies no fact and raises no confidence. Deliberately not
+        wired into :meth:`perceive`: at the bar where it is cheap it can speak about an eighth of
+        questions, and at the bar where it catches a counting question offered a phrase it
+        suppresses one correct answer in thirty-four. That is a trade for the caller to make with
+        the table in :mod:`nyxara.njp.asked` in front of them, not one to make silently for
+        everything the grounder ever answers.
+        """
+        out: Dict[str, Any] = {"wrong_kind": False, "why": "", "expected": ""}
+        if self.asked is None:
+            return out
+        try:
+            wrong, why = self.asked.contradicts(str(question or ""), str(answer or ""))
+            kind, _rule = self.asked.expects(str(question or ""))
+            out.update({"wrong_kind": bool(wrong), "why": why, "expected": kind})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
     def learn_reasoning(self, *, limit: int = 0) -> Dict[str, Any]:
         """Read FLAN's worked inferences and induce what predicts which answer.
 
@@ -2544,6 +2620,21 @@ class NJPBrain:
             from nyxara.njp.procedureschool import examine
 
             return {name: report.to_dict() for name, report in examine().items()}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_asked_school(self) -> Any:
+        """Sit the answer-kind audit: the purity table, the veto table, and the two ablations.
+
+        The veto table is the one to read. It prints how far the veto reaches beside how often it
+        rejects a correct answer, because either number alone can be made to look perfect.
+        """
+        try:
+            from nyxara.njp.askedschool import examine, veto_bar
+
+            return {"kinds": {name: report.to_dict() for name, report in examine().items()},
+                    "veto": [{"bar": bar, "fires_on": fires, "rejects_correct": cost}
+                             for bar, fires, cost in veto_bar()]}
         except Exception:  # noqa: BLE001
             return None
 

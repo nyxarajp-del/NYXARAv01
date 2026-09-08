@@ -469,6 +469,13 @@ from nyxara.njp.passage import (
     Shape as ReadingShape,
     taught_reader,
 )
+from nyxara.njp.asked import (
+    Asked,
+    Question as AskedQuestion,
+    read_questions,
+    satisfies,
+    shape_of,
+)
 from nyxara.njp.procedure import (
     Condition as Branch,
     Lesson as ProcedureLesson,
@@ -680,6 +687,9 @@ __all__ = [
     # silently replacing them, which is what the export-shadowing test exists to stop.
     "Procedure", "ProcedureReader", "ProcedureLesson", "Branch", "RoleShape",
     "taught_procedures",
+    # V.54. `Question` is `njp.asking`'s already, so the question-with-an-answer is qualified at
+    # the door rather than silently replacing it.
+    "Asked", "AskedQuestion", "read_questions", "satisfies", "shape_of",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

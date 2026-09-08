@@ -5125,6 +5125,132 @@ handed, matched on heads so *"a sentence"* satisfies *"a sentence in the English
 returns **what is missing** rather than just "no", because "no" without "what is absent" is not
 usable by anything.
 
+## V.54 — what kind of thing an answer has to be
+
+Asked a thousand real questions out of the read, her fact store answers seventy and gets **none**
+right. These are not near misses:
+
+    "When was the Battle of the Coral Sea fought?"        -> coastal protection
+    "what type of government does japan currently have?"  -> island country
+    "what is the latest operating system for android?"    -> system software
+
+Look at what is wrong with the first. It is not that she does not know the date — she does not, and
+saying so would have been a fine answer. It is that **"coastal protection" cannot be an answer to
+"when"**, and nothing in the package could see that, because nothing in it held any idea of what a
+question is *asking for*. The grounder matches a subject and a predicate and returns whatever
+object scores highest, and an object is an object.
+
+### Before the organ: five ways a corpus row is not a question with an answer
+
+Every number below was found by measuring, and the last two were found by the organ's own
+mistakes. 176,160 rows became **129,954**:
+
+| rows | what they actually were |
+| ---: | --- |
+| 14,485 | the source task exists to produce a **wrong** answer — `cosmosqa_incorrect_answer_generation`, `piqa_wrong_answer_generation` |
+| 7,830 | the answer names an answer *category* instead of giving one: `drop_answer_type_generation` replies to *"How many field goals were made?"* with the word `number` |
+| 13,879 | the answer is a bare multiple-choice label — `(B).`, `b).`, `[1].` |
+| 6,112 | the answer is itself a question |
+| 3,900 | roman-numeral option labels — `(I)`, `(II).` |
+
+The last two are why a filter on task names is not enough. The biggest source of question-shaped
+answers is `glue_qqp_question_paraprashing`, which FLAN spells **without the h**, so a pattern
+looking for `paraphras` walks straight past 6,112 rows. And the option-label pattern is
+deliberately strict about brackets: a first version that allowed a bare `20.` threw away every
+numeric answer `drop_answer_generation` produced.
+
+The roman numerals came out of an **itemised list**, not a rate. Asked which correct answers a
+shape-veto would reject, the reply was `(I)`, `(II).`, and one row whose gold answer is *"How many
+grams are in 5.2 pounds?"* — twice, the mechanism was right and the corpus was wrong.
+
+### The organ: a shape, never a fact
+
+`nyxara/njp/asked.py` learns what *kind* of thing a question wants. Two sets of generic surface
+measurements — one of the question, one of the answer — and **not one of them names a category**.
+Which question reading predicts which answer kind is induced by `njp.induce`, the same greedy
+cover that learned what breaks a program and what makes one sentence follow from another.
+
+What she worked out, and every line of it is a finding rather than a line of code:
+
+    count    opens_two is how many
+    year     opens_two is what year
+    year     opens_two is when was and third_class is DET
+    year     ends_word is out and opens is when
+    polar    opens is do / does / is / are
+    span     opens is what / which / where / who
+
+A test tokenises the module and asserts that `how many`, `when`, `who` and `where` appear nowhere
+in its executable text.
+
+| | right when it fires | fires on | rules |
+| --- | ---: | ---: | ---: |
+| always guess the commonest kind | 0.590 | 1.000 | — |
+| induction switched off | 0.000 | 0.000 | 0 |
+| **taught** | **0.802** | **0.847** | 13 |
+
+By kind: polar 0.840, year 0.828, span 0.801, count 0.764 — and `phrase` 0.333 on three held-out
+cases, reported rather than dropped because a rule with three cases behind it is worth knowing
+about.
+
+### The veto, and the zero that nearly passed for success
+
+The use of all this is `contradicts`, which is a **veto and not an answerer**: it supplies no fact,
+raises no confidence, and abstains wherever it has no rule. So the number that decides whether it
+may be wired into anything is not its accuracy — it is how often it rejects a **correct** answer.
+Every held-out question is handed its own gold answer and the veto is asked.
+
+| bar | veto fires on | rejects a correct answer |
+| ---: | ---: | --- |
+| 0.70 | 0.847 | 0.0492  (246 of 5000) |
+| 0.75 | 0.418 | 0.0378  (189 of 5000) |
+| 0.80 | 0.376 | 0.0292  (146 of 5000) |
+| 0.85 | 0.253 | 0.0040  ( 20 of 5000) |
+| **0.90** | **0.126** | **0.0004  ( 2 of 5000)** |
+
+Half the reach of 0.85 for a tenth of the damage, so 0.90 is the shipped default. But the
+important thing about that table is what it looked like **before the corpus was cleaned**: no rule
+reached 0.90 at all — the purest was 0.855 — so the veto never fired, and this same column read a
+flawless `0.0000`. For about an hour that zero was reported as a result. *A mechanism that does
+nothing is never wrong.* What caught it was printing reach beside cost, and there is now a test
+that refuses a row with one and not the other.
+
+**And the module does not catch the case it was built for.** At the safe bar exactly two rules
+qualify —
+
+    0.932  year   ends_word is out and opens is when
+    0.901  span   opens is which
+
+— so what the veto can actually say is that a `which` question wants something short and that
+*"when did X come out"* wants a year. The counting rule it needed, `opens_two is how many`, comes
+in at **0.816**, and letting it through means a bar of 0.80, which costs `0.0292` — one correct
+answer in thirty-four. Offered a phrase for *"How many field goals were made?"*, the shipped
+configuration says nothing.
+
+That is the finding, and picking 0.80 and calling three percent acceptable would have buried it.
+`veto_purity` is a constructor argument, the table above is in the docstring, and the choice is
+the caller's to make with the numbers in front of them.
+
+### Two fixes the itemised mistakes produced
+
+**A refinement is not a contradiction.** `what year was the film released?` → `1947` was being
+vetoed, because `opens is what` expects a `span` and `1947` reads as a `year`. But `1947` is a
+`year` only because the year test runs *before* the span test; it is a one-token answer either
+way. `satisfies()` now states the lattice — anything short answers a question wanting something
+short, a number answers a count, span and phrase differ only in wordiness — derived from the order
+of the surface tests rather than declared.
+
+**What is left is one construction, and it is named rather than averaged away.** Nearly all the
+remaining cost is the **alternative question**, which opens exactly like a polar one and is not
+one: *"Does Ridge Pond have more nitrogen or oxygen?"* → `oxygen`, *"Does Kasetsart University or
+Bilkent University focus upon agriculture?"* → `Kasetsart University`. `opens is does` predicts
+`polar` at 0.840 and these are the other sixteen percent.
+
+### What this does not do
+
+It does not make her able to answer these questions. She scores **0.000** on them and still does.
+The veto converts some confidently wrong answers into abstentions, which is the difference between
+being unreliable and being honest about a gap — and is not the same as knowing anything.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
