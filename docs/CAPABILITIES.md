@@ -5337,6 +5337,76 @@ ceiling from 0.587 to 0.777 on the leaky split, and no amount of sweeping would 
 Sweeping optimises within an architecture. It cannot tell you the architecture has a hole in it.
 Decompose first.
 
+## V.56 — the induction learns to rank, and it changes nothing
+
+V.55 ended on a diagnosis: this package's induction sorts things into kinds well and picks a best
+badly. `induce.cover` builds conjunctions of equality tests, and asked which sentence of a passage
+holds an answer it lost to one line of argmax at every setting tried. V.56 fixed that, twice, and
+the second fix worked.
+
+### Two wrong answers first
+
+**"Bucketing destroys the order."** Plausible, and it survived six measurements. So `induce.AtLeast`
+was added — a term satisfied by any value at or above its own, so a rule can say `carries_n is at
+least 3` rather than only `carries is many`. The induction duly found exactly that rule, purity
+0.621 on 576 cases, the best rule in every run.
+
+It made no difference: 0.372 to 0.505 against argmax's 0.580. `at least 3` fires on every sentence
+with three or more shared words, so they all tie again. **The rule expresses an order; the ranking
+still treats it as a category.**
+
+### The actual cause is the objective
+
+`cover` is a greedy set cover. It takes the widest clean rule, removes the positives it explains,
+and looks for another — so once `at least 3` is taken, a rung at 5 explains nothing new and **can
+never be induced**. Covering deletes precisely the graded, redundant evidence that a ranking runs
+on. That is not a flaw in the cover; it is what a cover is for.
+
+`induce.ladder` does not cover. One rule per observed value, all of them kept, each carrying its
+own measured purity:
+
+    0.118  carries_n is at least 0        0.844  at least 5
+    0.267  carries_n is at least 1        0.907  at least 6
+    0.445  carries_n is at least 2        0.957  at least 8
+    0.621  carries_n is at least 3        1.000  at least 10
+
+A case at seven satisfies the rungs from zero to seven and scores seven; one at three scores three.
+**Counting rungs is the order, recovered.** On 12,692 sentences with 600 held out:
+
+    argmax over the raw count   0.580
+    ladder of eleven rungs      0.580     <- exactly
+    greedy cover                0.505
+
+Equal to argmax, not better. What it adds is **calibration rather than accuracy**: six shared words
+comes with *"that held the answer 90.7% of the time"* attached. Argmax gives an order and no
+confidence at all. And it is now general — any organ here that must rank has the machinery.
+
+### And it bought nothing downstream
+
+| first stage | sentence | exact | answered |
+| --- | ---: | ---: | ---: |
+| ladder | 0.578 | 0.015 | 0.408 |
+| argmax | 0.580 | 0.015 | 0.408 |
+| greedy cover | 0.505 | **0.017** | 0.432 |
+
+Raising the sentence stage from 0.505 to 0.580 moved the end-to-end number **not at all**, and the
+worst first stage edges the others on exact (10 right against 9, out of 600 — noise).
+
+V.55's own decomposition said this would happen and it was not read: `exact when the sentence is
+right` is **0.026**, so the span stage dominates so completely that the first stage barely
+registers. A whole version was spent improving the stage that was not the bottleneck, after the
+measurement identifying the bottleneck had already been taken and written down.
+
+That is the third method correction of the session, and the sharpest. Decomposing is not enough.
+**Act on the decomposition you already have** before improving the part that is easier to reach.
+
+### What is unaffected
+
+`AtLeast` offers a threshold only for real numbers, and `entail`, `programming`, `procedure` and
+`asked` read strings and bools — so their candidate sets are unchanged and `_matches` reduces to
+`==`. 95 tests across those four suites pass unchanged. Verified rather than assumed, which in this
+session has not been a formality.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
