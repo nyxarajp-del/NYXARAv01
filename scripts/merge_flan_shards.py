@@ -47,6 +47,47 @@ def rows_of(path: Path) -> Iterator[Dict[str, Any]]:
         return
 
 
+_WH = ("what", "who", "when", "where", "which", "why", "how", "whose", "whom", "name the",
+       "name a")
+
+
+def _ascii_share(text: str) -> float:
+    return sum(1 for c in text if ord(c) < 128) / max(1, len(text))
+
+
+def usable(kind: str, row: Dict[str, Any]) -> bool:
+    """Whether this row is what its kind claims to be. The extractor is broad; this is not.
+
+    Written after a cold reading was taken against the raw ``qa`` extraction and came back 0.000.
+    The number would have been about the extractor, not the reader: "What are the software testers
+    aware of?" had been paired with the answer ``yes``, "How many people migrated to Thuringia?"
+    with ``(2).``, and a Portuguese sentence with its Galician translation. Those are a
+    classification task, a broken span and a translation task, and none of them is a question with
+    an answer.
+
+    So a question-and-answer row has to look like one: a real question word, an answer short enough
+    to be an answer, ``yes``/``no`` only where the question invites it, and both halves in the same
+    script — which is what rules the translation pairs out.
+    """
+    if kind != "qa":
+        return True
+    question = " ".join(str(row.get("question") or "").split())
+    answer = " ".join(str(row.get("answer") or "").split())
+    if not question or not answer or len(answer) > 60:
+        return False
+    low = question.lower()
+    if not (any(low.startswith(w) for w in _WH) or low.split(" ", 1)[0] in
+            ("is", "are", "was", "were", "do", "does", "did", "can", "could", "has", "have")):
+        return False
+    if answer.lower() in ("yes", "no", "true", "false") and low.startswith(_WH):
+        return False
+    if abs(_ascii_share(question) - _ascii_share(answer)) > 0.15:
+        return False
+    if answer.strip("().,\'\" ") == "":
+        return False
+    return True
+
+
 def _key(kind: str, row: Dict[str, Any]) -> int:
     return hash(tuple(" ".join(str(row.get(f) or "").lower().split())[:300]
                       for f in KEY[kind]))
@@ -77,11 +118,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         seen: Set[int] = set()
         kept = 0
         read = 0
+        dropped = 0
         target = out / f"flan_{kind}.merged.jsonl.gz"
         with gzip.open(target, "wt", encoding="utf-8") as handle:
             for source in sources:
                 for row in rows_of(source):
                     read += 1
+                    if not usable(kind, row):
+                        dropped += 1
+                        continue
                     fingerprint = _key(kind, row)
                     if fingerprint in seen:
                         continue
@@ -95,7 +140,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         target.replace(out / f"flan_{kind}.jsonl.gz")
         size = (out / f"flan_{kind}.jsonl.gz").stat().st_size / 1024 / 1024
         print(f"  {kind:<12}{kept:>9,} of {read:>9,} read from {len(sources)} shards"
-              f"  {size:>7.1f} MB", file=sys.stderr)
+              f"  ({dropped:,} were not what the kind claims)  {size:>7.1f} MB",
+              file=sys.stderr)
     return 0
 
 
