@@ -402,11 +402,13 @@ class Finder:
     that has been shown no passages has no idea which part of one is an answer.
     """
 
-    purity: float = 0.30
-    #: The first stage separates one sentence from a handful, so it can be held to a higher bar
-    #: than the second, which separates one span from dozens. Both are set by the sweep in
-    #: :mod:`nyxara.njp.findingschool` and neither is a taste.
-    sentence_purity: float = 0.45
+    #: The bar for the span stage, from the sweep: 0.30 induces one rule and answers 11% of the
+    #: time, 0.20 induces two and answers 48%, 0.12 induces three and answers 57% less accurately.
+    purity: float = 0.20
+    #: The bar for the sentence stage. It still induces its rules — they are reported, and the
+    #: switch to rank by them is still there — but :attr:`sentence_by` does not use them by
+    #: default, because one line of argmax measured better at every setting tried.
+    sentence_purity: float = 0.20
     min_support: int = 12
     min_share: float = 0.02
     max_rules: int = 6

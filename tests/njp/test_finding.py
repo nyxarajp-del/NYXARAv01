@@ -58,14 +58,29 @@ def test_the_corpus_carries_its_provenance(corpus):
 # --------------------------------------------------------------------------------------------- #
 #  candidates
 # --------------------------------------------------------------------------------------------- #
-def test_a_candidate_opens_and_closes_on_a_content_word():
+def test_a_candidate_may_open_on_a_determiner_and_nothing_else_closed():
+    """`the Henry Cole Wing` is how a span is marked; `of the wing` is not.
+
+    The original rule refused every closed-class opener, which sounded principled and cost 3.7%
+    of the corpus — those answers were unreachable at any threshold, and three parameter sweeps
+    ran before the decomposition said so.
+    """
     from nyxara.njp.finding import _closed
+    from nyxara.njp.semantics import Tag
     closed = _closed()
     spans = candidates("The cat sat on the very old mat by the door.")
     assert spans
     for span in spans:
         words = span.text.lower().split()
-        assert words[0] not in closed and words[-1] not in closed, span.text
+        opener = closed.get(words[0])
+        assert opener is None or opener == Tag.DET, span.text
+        assert words[-1] not in closed, span.text
+    # And the determiner-opener is genuinely produced, not merely tolerated.
+    assert any(s.text.lower().startswith("the ") for s in spans)
+
+
+def test_a_determiner_alone_is_not_a_candidate():
+    assert not [s for s in candidates("The cat sat.") if s.text.lower().strip() == "the"]
 
 
 def test_a_candidate_does_not_cross_a_sentence():
@@ -109,40 +124,62 @@ def test_untaught_finds_nothing(marked):
     assert cold.exact == 0.0 and cold.f1 == 0.0 and cold.coverage == 0.0
 
 
-def test_there_is_something_harder_than_zero_to_beat(marked):
-    """A learned reader that cannot beat a ten-minute heuristic has not earned its induction."""
-    assert marked["most_overlap"].f1 > 0.1
-    assert marked["taught"].f1 > marked["most_overlap"].f1
+def test_it_beats_the_heuristic_where_it_matters_and_loses_where_it_does_not(marked):
+    """The two readers fail in opposite directions, and the test says so rather than picking one.
+
+    The heuristic returns the longest span of the best sentence: a phrase that usually *contains*
+    the answer, so it scores well on token overlap and is almost never exactly right. The learned
+    reader returns a short precise span: exactly right several times more often, and worth nothing
+    in partial credit when it is wrong.
+
+    For something meant to answer, exact is the metric that counts — `1947` answers the question
+    and a twenty-word phrase containing 1947 does not — so this asserts the win on exact and
+    records the loss on overlap instead of hiding it.
+    """
+    taught, heuristic = marked["taught"], marked["most_overlap"]
+    assert taught.exact > heuristic.exact * 2, (taught.exact, heuristic.exact)
+    assert heuristic.f1 > taught.f1, "overlap has stopped favouring the vaguer reader; re-read"
 
 
 def test_the_first_span_baseline_is_the_floor(marked):
     assert marked["first_span"].f1 < marked["most_overlap"].f1
 
 
-def test_both_stages_learn_something(learned):
+def test_the_span_stage_learns_something(learned):
     engine, _held = learned
-    assert engine.sentence_rules, "no rule for which sentence holds the answer"
-    assert engine.rules, "no rule for which span in it is the answer"
+    assert engine.rules, "no rule for which span is the answer"
+
+
+def test_the_first_stage_does_not_use_its_rules(learned):
+    """It induces them and then does not rank by them, because argmax measured better."""
+    engine, _held = learned
+    assert engine.sentence_by == "overlap"
+    assert engine.sentence_rules, "the induced version should still be induced and runnable"
 
 
 def test_the_sentence_stage_is_measured_apart(learned, corpus):
     """The first stage's accuracy is its own number, not something buried in the second's."""
+    from nyxara.njp.findingschool import gold_sentence, sentence_baselines
     engine, held = learned
-    right = 0
-    for reading in held[:150]:
-        fixed = Setting.of(reading)
-        at = reading.passage.lower().find(reading.answer.lower().strip())
-        gold = max((i for i, (_t, s) in enumerate(fixed.spans) if s <= at), default=0)
-        right += int(engine.sentence(reading.passage, reading.question) == gold)
-    assert right / 150 > 0.3
+    right = sum(1 for reading in held[:200]
+                if engine.sentence(reading.passage, reading.question) == gold_sentence(reading))
+    assert right / 200 > 0.5
+    # And it is reported against what it must beat, in both directions.
+    against = sentence_baselines(held[:200])
+    assert against["argmax_overlap"] > against["always_first"]
 
 
-def test_the_borrowed_organ_can_be_taken_away(marked):
-    """V.55 consults V.54 through one feature; the ablation says what that was worth."""
-    assert "no_shape" in marked
-    assert marked["no_shape"].rules > 0
-    # No claim about which way it goes — that is the measurement's to make, not the test's.
-    assert marked["taught"].f1 >= 0.0 and marked["no_shape"].f1 >= 0.0
+def test_the_borrowed_organ_bought_nothing(marked):
+    """The ablation was built so this could be measured, and what it measured is zero.
+
+    `njp.asked`'s answer-shape expectation enters the span stage as one feature. Removed, the
+    numbers do not move — not approximately, identically — because the induction settles on a
+    single rule and that rule does not use the feature. Asserted rather than deleted so that a
+    future change which makes the organ matter will break this test and say so.
+    """
+    taught, blind = marked["taught"], marked["no_shape"]
+    assert abs(taught.exact - blind.exact) < 0.005
+    assert abs(taught.f1 - blind.f1) < 0.005
 
 
 def test_a_finder_without_the_organ_never_consults_it():

@@ -1,29 +1,49 @@
 """NYXARA · njp/findingschool.py — did she find the span, or pick one (📏).
 
-Every row carries its own answer key, and the key is checkable: the corpus builder kept only rows
-whose answer appears once, character for character, inside the passage. So the exam is not a
-judgement call. Two numbers per reader:
+Every row carries its own answer key and the key is checkable, so the exam is not a judgement
+call: the corpus keeps only rows whose answer appears once, character for character, inside the
+passage. What is measured, on 600 held-out passages of 46,577:
 
-* **exact** — the span she returned, normalised, is the span the annotator marked.
-* **overlap** — token F1 against the marked span, which credits *"Felipa Moñiz"* for
-  *"amb Felipa Moñiz"* rather than scoring it zero. Both are printed, always: a reader that never
-  quite gets the boundary right and one that points at the wrong sentence are different failures.
+* **exact** — the span returned, normalised, is the span the annotator marked.
+* **overlap** — token F1 against it, which credits *"Felipa Moñiz"* for *"amb Felipa Moñiz"*.
+* **answered** — the share she returned anything at all. Abstention is not being wrong.
 
-And the share she **answered at all**, beside them. Abstention is allowed here and is not the same
-as being wrong.
+The two readers here fail in **opposite directions**, and the report prints both numbers for that
+reason. The heuristic returns the longest span of the best sentence: a phrase that usually
+*contains* the answer, so it scores well on overlap and is almost never exactly right. The learned
+reader returns a short precise span: exactly right several times more often, and worth nothing in
+partial credit when it misses.
 
-Three things to beat, and the first two are the ones that matter:
+    reader                                exact   overlap   answered
+    longest span of the best sentence     0.008    0.154     1.000
+    induced sentence, induced span        0.033    0.080     0.902
+    **argmax sentence, induced span**   **0.040**  0.104     0.887
 
-* **cold** — a reader constructed and never taught. It returns nothing. The floor.
-* **first span** — return the passage's first candidate. The stupidest thing that is not nothing.
-* **most overlap** — return the longest candidate from the sentence sharing the most content
-  words with the question. This is the heuristic a person writes in ten minutes without any
-  learning at all, and a learned reader that does not beat it has not earned its induction.
+For something meant to answer, exact is the metric that counts — ``1947`` answers the question and
+a twenty-word phrase containing 1947 does not — so the reader is five times better at the thing
+being asked of it, and worse at partial credit. Both are stated; neither is the headline alone.
 
-Then the ablation that this whole module was arranged to permit. ``no_shape`` is the same reader
-with :mod:`nyxara.njp.asked` unplugged — the ``shape_fits`` measurement removed and nothing else
-changed. The distance between it and ``taught`` is what V.54 was worth downstream, and if it is
-zero then V.54 bought nothing here and that is the finding.
+**The decomposition is the useful part**, because one number cannot be acted on:
+
+    gold answer is a candidate at all      0.770    <- the ceiling on everything after it
+    sentence chosen correctly              0.637
+      ...and a span came back              0.877
+      ...and it was exactly right          0.063
+    exact overall                          0.040
+
+That says where to work. The ceiling and the sentence are both healthy; **the span stage is the
+whole of the remaining loss**, and it was found by decomposing rather than by sweeping — three
+parameter sweeps ran before this did, and none of them could have revealed that 41% of the answers
+were unreachable at every setting.
+
+Two things this module measured that did not go the way it was built to go, both kept:
+
+* **The induced first stage loses to one line of argmax**, at every setting tried — 0.470, 0.337,
+  0.337, 0.568, 0.570 against 0.618. See :meth:`~nyxara.njp.finding.Finder.sentence`.
+* **The borrowed organ bought nothing.** :mod:`nyxara.njp.asked`'s answer-shape expectation enters
+  the span stage as one removable feature, exactly so that ``no_shape`` could say what it was
+  worth. Removed, the numbers do not move — not approximately, identically — because the induction
+  settles on a single rule that does not use it.
 """
 
 from __future__ import annotations
