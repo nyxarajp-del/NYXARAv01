@@ -57,11 +57,13 @@ _NOT_AN_ANSWER = re.compile(
     r"incorrect|wrong|implausible|distractor|paraphras|question_generation", re.I)
 
 
-#: A bare multiple-choice label: `(B).`, `[1].`, `b).`. Brackets or a closing paren are required,
-#: so a plain number keeps its place as a count.
+#: A bare multiple-choice label: `(B).`, `[1].`, `b).`, `(II).`. Brackets or a closing paren are
+#: required, so a plain number keeps its place as a count. The roman numerals were added after an
+#: itemised list of the veto's mistakes showed `(I)` and `(II).` sitting among them as the
+#: *correct* answers — a second pass of the same finding that produced this filter at all.
 _OPTION_LABEL = re.compile(
-    r"^(?:[\(\[]\s*(?:[0-9]{1,2}|[a-eA-E])\s*[\)\]][.:]?"
-    r"|[0-9]{1,2}\s*[\)\]][.:]?|[a-eA-E]\s*[\)\]][.:]?)\s*$")
+    r"^(?:[\(\[]\s*(?:[0-9]{1,2}|[a-eA-E]|[ivxIVX]{1,4})\s*[\)\]][.:]?"
+    r"|(?:[0-9]{1,2}|[a-eA-E])\s*[\)\]][.:]?)\s*$")
 
 #: Words that name a kind of answer rather than being one.
 _NAMES_A_CATEGORY = frozenset((
