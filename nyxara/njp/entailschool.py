@@ -20,12 +20,13 @@ any other way is a knob turned until the training number looked nice.
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.njp.entail import Pair, Reasoner, read_pairs
 
-__all__ = ["Result", "split", "examine", "sweep", "knowledge_gap", "run"]
+__all__ = ["Result", "shuffled", "split", "examine", "sweep", "knowledge_gap", "run"]
 
 #: Relations the fact store holds that could link two words of a pair. Nothing narrower: the point
 #: of :func:`knowledge_gap` is to be generous about what would count as knowing something.
@@ -69,10 +70,36 @@ class Result:
                 f"({self.rules} rules)")
 
 
+#: The seed every deterministic shuffle in this module uses. Named once so that "the same cut
+#: every run" and "the same cut in :func:`split` as in :func:`curve`" are the same statement.
+SEED = 20250908
+
+
+def shuffled(pairs: Optional[Sequence[Pair]] = None) -> List[Pair]:
+    """The corpus in a fixed pseudo-random order rather than the order the files were folded in.
+
+    This is not a nicety. The broad corpus is the fold of nine shards and lands on disk *in shard
+    order*: 24,909 chain-of-thought pairs, then Flan2021's, then P3's. A prefix cut over that hands
+    :func:`split` a training set drawn from one submix and a "held-out" set drawn from another,
+    which measures transfer between datasets while calling itself held-out — and hands
+    :func:`curve` a first point that is one submix and a last point that is all of them, so the
+    curve would show composition changing and report it as size. Both were true of the first run
+    on this corpus, whose 12,000-pair reading of 0.121 is an artefact of exactly that and is not
+    comparable to anything.
+    """
+    rows = list(pairs if pairs is not None else read_pairs())
+    random.Random(SEED).shuffle(rows)
+    return rows
+
+
 def split(pairs: Optional[Sequence[Pair]] = None,
           train: float = TRAIN) -> Tuple[List[Pair], List[Pair]]:
-    """One deterministic cut. A held-out set that moves between runs is not held out."""
-    rows = list(pairs if pairs is not None else read_pairs())
+    """One deterministic cut, over a deterministically shuffled corpus.
+
+    A held-out set that moves between runs is not held out; a held-out set drawn from a different
+    part of the corpus than the training set is not held out either.
+    """
+    rows = shuffled(pairs)
     cut = int(len(rows) * float(train))
     return rows[:cut], rows[cut:]
 
@@ -93,8 +120,25 @@ def _mark(reasoner: Reasoner, held: Sequence[Pair], name: str, *,
     return out
 
 
-def examine(purity: float = 0.72, **kwargs: Any) -> Dict[str, Result]:
-    learn, held = split()
+#: How many pairs the examination reads when a caller does not say. The broad corpus is 564,166
+#: and a full pass over it is ten minutes of real work, which is right for :func:`run` and wrong
+#: for anything that wants to know whether a mechanism works. Zero means all of them.
+EXAMINE_PAIRS = 40_000
+
+
+def examine(purity: float = 0.72, pairs: Optional[Sequence[Pair]] = None,
+            limit: int = EXAMINE_PAIRS, **kwargs: Any) -> Dict[str, Result]:
+    """The whole examination, with every control, on a deterministic slice of the corpus.
+
+    ``limit`` bounds the slice and ``0`` removes the bound. The slice is taken from
+    :func:`shuffled`, so it is the same mixture as the whole — bounding it changes how much is
+    read and not what is read, which is the only kind of bound that leaves the columns
+    comparable.
+    """
+    rows = shuffled(pairs)
+    if limit:
+        rows = rows[:int(limit)]
+    learn, held = split(rows)
     out: Dict[str, Result] = {}
 
     taught = Reasoner(purity=purity, **kwargs)
@@ -132,7 +176,7 @@ SWEEP_PAIRS = 9000
 def sweep(values: Sequence[float] = (0.55, 0.60, 0.65, 0.72, 0.80, 0.90, 1.00),
           **kwargs: Any) -> List[Tuple[float, Result]]:
     """The examination at each threshold. What sets ``purity`` is this table, not a preference."""
-    rows = read_pairs()[:SWEEP_PAIRS]
+    rows = shuffled()[:SWEEP_PAIRS]
     out: List[Tuple[float, Result]] = []
     for value in values:
         learn, held = split(rows)
@@ -202,7 +246,7 @@ def curve(sizes: Sequence[int] = (12_000, 50_000, 200_000, 800_000),
     and no amount of reading will fix it; if the rule count climbs, it is. Reported as a curve
     rather than a single figure, because a single figure cannot tell those two apart.
     """
-    pairs = read_pairs()
+    pairs = shuffled()
     out: List[Tuple[int, Result, int]] = []
     for size in sizes:
         rows = pairs[:size]
@@ -229,7 +273,7 @@ def main() -> None:  # pragma: no cover — a report, not a test
         print(f"  {value:.2f}     {result.accuracy:.3f}      {result.coverage:.3f}"
               f"          {result.when_answered:.3f}        {result.rules}")
     print()
-    got = examine()
+    got = examine(limit=0)
     for name in ("base_rate", "no_rules", "no_exclusions", "taught", "with_fallback"):
         print("  " + got[name].render())
     print("\nby label, taught:")

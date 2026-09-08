@@ -469,6 +469,14 @@ from nyxara.njp.passage import (
     Shape as ReadingShape,
     taught_reader,
 )
+from nyxara.njp.procedure import (
+    Condition as Branch,
+    Lesson as ProcedureLesson,
+    Procedure,
+    ProcedureReader,
+    RoleShape,
+    taught_procedures,
+)
 from nyxara.njp.provenance import (
     Blame,
     Claim as ProvenanceClaim,
@@ -667,6 +675,11 @@ __all__ = [
     "Programmer", "Operation", "Attempt", "ActTrial", "FailureLaw", "Repair",
     "Reasoner", "Inference", "read_pairs", "InducedRule", "MeasuredCase", "cover",
     "Arithmetic", "WordProblem", "WorkingCheck", "ChainShape", "read_problems",
+    # V.53. `Condition` and `Lesson` were both taken -- by `njp.core`'s conditional and by
+    # `njp.distil`'s teaching step -- so the procedural pair is qualified at the door rather than
+    # silently replacing them, which is what the export-shadowing test exists to stop.
+    "Procedure", "ProcedureReader", "ProcedureLesson", "Branch", "RoleShape",
+    "taught_procedures",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

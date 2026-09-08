@@ -1082,6 +1082,11 @@ _PREDICATE_AFFINITY: Dict[str, Dict[str, float]] = {
     # none, and a fix she worked out by experiment that no question could reach would be a fact
     # stored and unreachable — the defect `njp.ingest`'s docstring names.
     "fixed_by": {"fixed_by": 1.0, "requires": 0.5, "purpose": 0.4},
+    # V.53. `njp.procedure` reads a task definition's answer *space* -- the set of values it
+    # allows and nothing else -- and that is a different claim from what the task produces.
+    # `produces` says "a summary"; `answered_by` says "Yes, No", and answering the second with
+    # the first would name a kind of thing where a list of permitted values was asked for.
+    "answered_by": {"answered_by": 1.0, "produces": 0.4},
     "purpose": {"purpose": 1.0, "involves": 0.7, "means": 0.6, "is_a": 0.5},
     # "What causes X?" asked about the effect and wants the cause. A forward `causes` edge *from*
     # X answers the opposite question, and answering with it is not a weaker answer — it is a
@@ -1158,6 +1163,15 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
      r"(?:fix|repair|solve|avoid|prevent)\s+(?:an?\s+|the\s+)?(?P<s>.+?)\??$", "fixed_by"),
     (r"\bhow\s+is\s+(?:an?\s+|the\s+)?(?P<s>.+?)\s+(?:fixed|avoided|prevented)\??$",
      "fixed_by"),
+    # V.53. The answer space of a procedure, asked for in the four ways a person asks for it.
+    # Written the day the store was measured rather than assumed: `answered_by` rows were being
+    # filed at volume and *every* phrasing of the question returned UNKNOWN, which is the same
+    # unreachable-predicate defect V.49 found in `occurs_in` and V.50 found in `fixed_by`.
+    (r"\bwhat\s+(?:are\s+the\s+)?(?:answers|options|labels|choices|categories|classes)\s+"
+     r"(?:for|of|to|in)\s+(?P<s>.+?)\??$", "answered_by"),
+    (r"\bwhat\s+can\s+(?P<s>.+?)\s+(?:answer|return|output)\??$", "answered_by"),
+    (r"\bwhat\s+(?:does|do)\s+(?P<s>.+?)\s+answer\s+with\??$", "answered_by"),
+    (r"\bwhat\s+is\s+(?P<s>.+?)\s+answered\s+(?:by|with)\??$", "answered_by"),
     # Asked of a process rather than a thing. Before `where is X`, because that pattern is broad
     # enough to swallow "where does fermentation occur" if it gets there first.
     (r"\bwhere\s+do(?:es)?\s+(?P<s>.+?)\s+"

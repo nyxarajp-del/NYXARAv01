@@ -42,11 +42,16 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from nyxara.njp.induce import Rule, cover
 
-__all__ = ["Pair", "Reasoner", "CORPUS", "LABELS", "read_pairs", "probe", "mine_exclusions"]
+__all__ = ["Pair", "Reasoner", "BROAD", "CORPUS", "LABELS", "read_pairs", "probe",
+           "mine_exclusions"]
 
-#: Where ``scripts/build_reasoning_corpus.py`` writes and this reads: the pairs already extracted
-#: from **every** row of the submix. :data:`RAW` is the older sampled file, kept readable so the
-#: parser here stays exercised on the shape the dataset actually ships in.
+#: Where the corpus is read from, most-read first. :data:`BROAD` is the fold of the whole 94.6 GB
+#: read — every submix, not only the chain-of-thought one — and supersedes :data:`CORPUS`, which
+#: ``scripts/build_reasoning_corpus.py`` writes from the CoT submix alone. :data:`RAW` is the
+#: original sampled file, kept readable so the parser here stays exercised on the shape the
+#: dataset actually ships in. Whichever exists first is what :func:`read_pairs` returns, so the
+#: module works in a checkout that has run none of the builders, one of them, or both.
+BROAD = Path(__file__).with_name("data") / "flan_inference.jsonl.gz"
 CORPUS = Path(__file__).with_name("data") / "flan_pairs.jsonl.gz"
 RAW = Path(__file__).with_name("data") / "flan_cot.jsonl.gz"
 
@@ -201,10 +206,13 @@ def read_pairs(path: Optional[Path] = None) -> List[Pair]:
     rows themselves.
     """
     rows: List[Pair] = []
-    source = Path(path) if path is not None else CORPUS
+    source = Path(path) if path is not None else BROAD
     try:
-        if not source.exists():
-            source = RAW
+        if path is None:
+            for candidate in (BROAD, CORPUS, RAW):
+                if candidate.exists():
+                    source = candidate
+                    break
         if not source.exists():
             return rows
         first = _peek(source)

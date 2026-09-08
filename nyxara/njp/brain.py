@@ -399,8 +399,9 @@ class NJPBrain:
         self.encyclopedia = None
         self.reader = self._build_reader(c)
         self.programmer = self._build_programmer(c)
-        self.entailer = self._build_reasoner(c)
+        self.entailer = self._build_entailer(c)
         self.arithmetic = self._build_arithmetic(c)
+        self.procedures = self._build_procedures(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
@@ -1912,19 +1913,31 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a brain without it still parses sentences
             return None
 
-    def _build_arithmetic(self, c: Any) -> Any:
-        """The organ that recomputes a worked sum instead of believing it."""
-        if not self._gate("arithmetic", True):
+    def _build_procedures(self, c: Any) -> Any:
+        """The organ that reads a task definition into goal, prerequisites and answer space.
+
+        Taught, unlike the programmer and the reasoner, because its demonstrations are the
+        module's own and a reader with none of them reads nothing at all -- measured, on all three
+        fields, on every one of the 698 definitions.
+        """
+        if not self._gate("procedure", True):
             return None
         try:
-            from nyxara.njp.arithmetic import Arithmetic
+            from nyxara.njp.procedure import taught_procedures
 
-            return Arithmetic()
-        except Exception:  # noqa: BLE001
+            return taught_procedures()
+        except Exception:  # noqa: BLE001 — a brain without it still reads passages
             return None
 
-    def _build_reasoner(self, c: Any) -> Any:
+    def _build_entailer(self, c: Any) -> Any:
         """The organ that answers whether one sentence follows from another.
+
+        Named ``_build_entailer`` and not ``_build_reasoner``, which is what V.51 called it — and
+        :meth:`_build_reasoner` was already taken, by the deliberate-reasoning organ four hundred
+        lines above. Python keeps the second definition, so from V.51 until this line was written
+        ``self.reasoner`` held an entailment reasoner and ``njp.reason.Reasoner`` was **never
+        constructed at all**. Nothing raised: both objects exist, both are truthy, and the brain
+        went on answering. The linter found it; no test did.
 
         Untrained, for the same reason the programmer is: everything it knows came from pairs it
         was shown, so a brain shown none should know none. :meth:`learn_reasoning` gives it some.
@@ -2314,6 +2327,91 @@ class NJPBrain:
                         subject=condition, predicate="causes", object=law.outcome,
                         confidence=0.85, source="experiment",
                         text=f"{law.outcome}: {law.render()}", provenance="observed"))
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def read_procedure(self, text: str, *, name: str = "", task: str = "",
+                       source: str = "", licence: str = "") -> Any:
+        """Read a task definition into a :class:`~nyxara.njp.procedure.Procedure`. Files nothing.
+
+        The counterpart of :meth:`read_passage`, and separate from :meth:`learn_procedures` for
+        the same reason: extracting is a reading and filing is a decision.
+        """
+        if self.procedures is None:
+            return None
+        try:
+            return self.procedures.read(str(text or ""), name=str(name), task=str(task),
+                                        source=str(source), licence=str(licence))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def can_do(self, name: str, have: Sequence[str] = ()) -> Dict[str, Any]:
+        """Could she run this procedure with what she has been handed, and what is missing?
+
+        Answers from a procedure she has read, never from the fact store: a prerequisite is about
+        this job and not about the world. ``missing`` is returned rather than swallowed, because
+        "no" without "what is absent" is not usable by anything.
+        """
+        out: Dict[str, Any] = {"known": False, "ready": False, "missing": [], "goal": "",
+                               "outputs": []}
+        held = getattr(self, "_procedures_read", {}).get(str(name))
+        if held is None:
+            return out
+        met, missing = held.prerequisites_met(list(have))
+        out.update({"known": True, "ready": met, "missing": missing, "goal": held.goal,
+                    "outputs": list(held.outputs), "action": held.action})
+        return out
+
+    def learn_procedures(self, *, limit: int = 0, file: bool = True) -> Dict[str, Any]:
+        """Read the task-definition corpus and file what each procedure needs and produces.
+
+        Three predicates, and each is a different question in English. ``requires`` answers *what
+        do you need to do X*; ``produces`` answers *what does X give you*; ``answered_by`` answers
+        *what are the answers for X*. A procedure whose answer space is unstated files no
+        ``answered_by`` row rather than an empty one — an answer space of nothing and an unstated
+        answer space are different claims and only one of them is true.
+        """
+        out: Dict[str, Any] = {"read": 0, "filed": 0, "with_goal": 0, "with_outputs": 0,
+                               "actions": {}}
+        if self.procedures is None:
+            return out
+        try:
+            from nyxara.njp.grounding import GroundedTriple
+            from nyxara.njp.procedureschool import read_corpus
+
+            rows = read_corpus()
+            if limit:
+                rows = rows[:int(limit)]
+            store: Dict[str, Any] = getattr(self, "_procedures_read", {})
+            for row in rows:
+                got = self.procedures.read(str(row.get("instruction") or ""),
+                                           task=str(row.get("task") or ""),
+                                           source=str(row.get("source") or ""),
+                                           licence=str(row.get("licence") or ""))
+                out["read"] += 1
+                store[got.name] = got
+                if got.goal:
+                    out["with_goal"] += 1
+                    out["actions"][got.action] = out["actions"].get(got.action, 0) + 1
+                if got.outputs:
+                    out["with_outputs"] += 1
+                if not file or self.grounder is None:
+                    continue
+                claims = [("requires", need) for need in got.given]
+                if got.goal:
+                    claims.append(("produces", got.goal))
+                if got.decides:
+                    claims.append(("answered_by", ", ".join(got.outputs)))
+                for predicate, value in claims:
+                    if not value:
+                        continue
+                    self.grounder._assert(GroundedTriple(
+                        subject=got.name, predicate=self.grounder._predicate(predicate),
+                        object=value, confidence=0.8, source=got.source or "flan",
+                        text=got.text[:400], provenance="read"))
+                    out["filed"] += 1
+            self._procedures_read = store
         except Exception:  # noqa: BLE001
             return out
         return out

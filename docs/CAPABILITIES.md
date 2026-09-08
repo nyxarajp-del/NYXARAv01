@@ -4930,6 +4930,194 @@ claim can be settled — plus `go_to_arithmetic_school`.
     check_working("He had 2 + 2 = 5 apples.", "5")
         -> "2 + 2 = 5, but it is 4"
 
+## V.53 — the whole dataset, read; and the procedure organ it turned out to contain
+
+V.52 said what could not be taken: about 75 GB of FLAN against 20 GB of writable disk. That was a
+statement about *storing* it. Nothing required storing it.
+
+### The full read — 94.6 GB, 83,271,754 rows, 3,830 seconds
+
+`scripts/stream_flan.py` reads all nine submix files over HTTP and never writes one to disk. A
+JSON array arrives as a byte stream; brace depth says where each object ends; a prefilter drops
+the row before it is parsed unless it holds one of the strings a reasoning item must hold. Four
+readers run at once, because four saturate the wire where one does not — **9.6 MB/s alone against
+26 MB/s together**, measured, after two rounds of optimising the regular expression on the
+assumption that the parser was the limit. It was not; the wire was.
+
+| submix | rows | seconds |
+| --- | ---: | ---: |
+| cot_zs | 93,981 | 6 |
+| dialog | 5,499,148 | 423 |
+| flan2021_zsopt | 13,608,974 | 822 |
+| flan2021_zsnoopt | 12,124,188 | 872 |
+| niv2_zs | 5,030,900 | 895 |
+| niv2 | 10,061,950 | 2,467 |
+| t0_zsopt | 18,806,077 | 2,786 |
+| t0_zsnoopt | 18,046,536 | 3,002 |
+| **total** | **83,271,754** | **3,830 (parallel)** |
+
+Folded and deduplicated by `scripts/merge_flan_shards.py`: **564,166** inference pairs, **176,160**
+questions, **23,823** worked sums, **698** task definitions.
+
+**Two silent bugs in the reader, and both were silent in the worst way — at full speed, with no
+error.** A chunk boundary that fell inside a string let the braces in a prompt count as structure,
+so depth climbed and never came back; and the carried partial object's opening brace was counted
+twice. On the same 20 MB the reader went from **994 objects to 18,854**. It had been blind to 95%
+of its input and complaining about none of it.
+
+**What the size bought, stated plainly.** `dialog` is 10.7 GB and 5,499,148 rows and yielded
+**four** items. niv2's 3,796,006 instruction instances are **698 distinct procedures**. Reading
+more of a dataset is not the same as reading more.
+
+### The learning curve, and the exam defect it exposed first
+
+The question V.51 and V.52 both left open: is 0.86 the reader's ceiling or the corpus's? Only a
+curve can tell those apart, so the same examination was run at four sizes.
+
+The first run was meaningless and had to be thrown away. The broad corpus lands on disk in *shard
+order*, and `split()` was a prefix cut — so it trained on chain-of-thought and held out P3, which
+measures transfer between datasets while calling itself held-out, and gave `curve()` a first point
+that was one submix and a last that was all nine. `shuffled()` fixes both, deterministically. The
+12,000-pair reading of **0.121** from before the fix is an artefact of exactly that and is
+comparable to nothing.
+
+On the shuffled corpus the numbers are much lower than V.52's, and the reason is composition, not
+regression: **a third of the broad inference corpus is not inference.** `snli` and `mnli` are;
+`amazon_polarity_Is_this_product_review_positive` and `race_high_Is_this_the_right_answer` are
+yes/no questions the extractor dressed as premise-and-hypothesis. The three labels are the same
+three (99.2% of rows), so the exam is the same exam — the material is harder and more mixed.
+
+| pairs | held-out | answered | when answered | rules |
+| ---: | ---: | ---: | ---: | ---: |
+| 12,000 | 0.045 | 0.064 | 0.706 | 1 |
+| 50,000 | 0.072 | 0.099 | 0.726 | 2 |
+
+The rule count is climbing with the corpus rather than sitting still, which is the reading that
+says the shortage was evidence. It is climbing very slowly.
+
+### Cold on real questions, and the number is 0.000
+
+176,160 real questions came out of the read. Asked 1,000 of them, her shipped world corpus of
+12,910 fact keys answers **7.0%** and gets **0.000** of them right:
+
+    what is the latest operating system for android?  -> "system software"   (want "Android 9 Pie")
+    When was the Battle of the Coral Sea fought?       -> "coastal protection" (want "May 1942")
+    what type of government does japan currently have? -> "island country"   (want "Constitutional monarchy")
+
+Publishing that took one correction first. The initial 0.000 was measured on pairs like
+*"What are the software testers aware of?" -> "yes"* and Portuguese-to-Galician translations — the
+extractor's noise, not her failure. `usable()` cut 887,142 questions to 176,160 before the number
+was taken.
+
+### The procedure organ — plan item #8, and nothing in the package held it
+
+Every organ before this reads a **description**. A task definition is an **instruction**: it is
+addressed to somebody, it says what they will be handed, what they must produce, and what the
+allowed answers are. Read as description, `njp.passage` returns entities `['in task', 'nyxara']`
+and no relations — the whole of it lost, on all four fields, on all 698.
+
+`nyxara/njp/procedure.py` reads one into the parts the plan names — **Goal, Prerequisites,
+Expected result, Failure, Recovery** — and keeps the definition itself:
+
+    "In this task, you are given a question and a context passage. You have to answer the
+     question based on the given passage."
+        given   : question; context passage
+        goal    : answer the question based on the given passage   [answer]
+        outputs : —
+
+    "...classify whether the given summary matches the original review. Generate "True" if the
+     given review and its summary match, otherwise generate "False"."
+        outputs : True | False
+        when the given review and its summary match -> Generate "True"
+        when otherwise                              -> generate "False"
+
+`you are given` occurs in 333 of the 698 and `your task is to` in 251. **Neither is written into
+the module**, and a test tokenises the source to prove it. The shapes come from fourteen real
+definitions with their roles marked by hand, at `njp.passage`'s two levels — a frame that keeps the
+demonstration's own words, and a cued shape that holes every open-class token so `you are <*> a
+<SLOT>` reads *"you are provided with an article"*.
+
+Thirty-six more definitions were drawn by a fixed shuffle and marked by hand on three fields:
+twenty-one to fix the reader against, fifteen **sealed** and read once.
+
+| | overall | given (p / r) | action | outputs (p / r) | kept silent |
+| --- | ---: | --- | ---: | --- | --- |
+| cold | **0.000** | 1.000 / 0.000 | 0.000 | 1.000 / 0.000 | 13/13 |
+| one lesson only | 0.111 | 1.000 / 0.000 | 0.333 | 1.000 / 0.000 | 13/13 |
+| cued shapes only | 0.668 | 0.710 / 0.846 | 0.476 | 1.000 / 0.607 | 13/13 |
+| frames only | 0.845 | 0.950 / 0.731 | 0.952 | 1.000 / 0.607 | 13/13 |
+| **taught** | **0.855** | 0.913 / 0.808 | 0.952 | 1.000 / 0.607 | 13/13 |
+| **sealed** | **0.919** | 0.909 / 0.833 | 0.933 | 1.000 / 0.913 | 9/9 |
+
+`kept silent` is the column that stops the rest being gamed: thirteen of the twenty-one name no
+answer space at all, and a reader that invents one for them is doing damage. It invents none.
+
+Over all 698: a goal in **90.3%**, a prerequisite in **87.0%**, an answer space in **26.8%**, a
+condition in **18.5%**. And the taxonomy of what people actually ask for, out of the reading rather
+than imposed on it: 80 generate, 79 classify, 54 write, 42 convert, 35 choose, 28 find, 28 judge,
+27 return, 25 determine, 25 translate, 23 identify — with **68 she still cannot give a goal to**,
+reported beside the rest rather than dropped.
+
+### Six defects the audit found, and one generalisation it refused
+
+Four of the six were the **same mistake in four places**: a boundary learned as the *word* that
+happened to sit next to a demonstration, where the demonstrations were showing a *tag*.
+
+* **The stop set.** A goal was allowed to end only before one of ten literal words — `answer`,
+  `label`, `sentences` — because `_bare` strips determiners and spans ran across sentence ends.
+  What every demonstration actually shows is one stop: the sentence ended. **39% -> 85%** of the
+  corpus got a goal.
+* **The joiner.** Every demonstration joins its answers with `or`, so `or` is what a word-level
+  joiner learns, and `"A", "B", "C", "D", and "E"` named nothing. A joiner is a conjunction or a
+  comma.
+* **The left edge**, which nothing counted at all until a reading came back with `you need to` as
+  a prerequisite and `with an article of the legal acts` as another.
+* **The coordination test** was reading the *stripped* token stream for the determiner that
+  `_bare` had just removed, so the rule was permanently off and *"a sentence in the English and
+  Hindi language"* was two prerequisites.
+
+**And the fifth time the same move was wrong.** The lead-in word before an answer space was
+generalised to *preposition* — and an answer space does follow `into`, `as` and `from`, but so does
+every other prepositional phrase in the language. Audited precision fell from **1.000 to 0.158**
+and bought no recall at all. The sweep is kept runnable in the module and the switch is off.
+
+* **An apostrophe is not a quote.** `(["'])(.+?)(["'])` opens on the apostrophe of *"the reviewer's
+  sentiment into: ..."* and every pair after it is offset by one, so a definition naming five
+  answers in plain double quotes named none.
+* **A parenthesised list is an example of the input, not an answer space** — *"count the number of
+  vowels (letters 'a', 'e', 'i', 'o', 'u')"* had five vowels as its allowed answers.
+
+### What is left, said rather than papered over
+
+Four audited definitions still name no answer space that is read: `en, ja, de, fr, zh, es` and
+`(Regulation, Decision and Directive)` and `1) positive, and 2) negative` need a lead-in word no
+demonstration shows, and `Return 1 ... else return 0` needs `else` where only `otherwise` was
+taught. Every definition in the corpus that would teach those is a **template sibling of an audited
+item** — the same sentence with a different language or subject in it — and teaching from one would
+make the audit a memory test. The gap is reported instead.
+
+### Reachable from English, and checked rather than assumed
+
+Filing a predicate nothing can ask for is the defect V.49 found in `occurs_in` and V.50 in
+`fixed_by`, and it happened again: `answered_by` rows were filed at volume and **every** phrasing
+of the question returned UNKNOWN. Measured, then fixed.
+
+    learn_procedures()   -> 698 read, 1,731 claims filed, 187 with an answer space
+    "what does <task> require?"        -> question; context passage
+    "what does <task> produce?"        -> answer the question based on the given passage
+    "what are the answers for <task>?" -> yes, no
+    "what can <task> answer?"          -> yes, no
+
+`requires`, `produces` and `answered_by` are three different questions and are filed as three
+predicates: what a task *produces* is "a summary"; what it is *answered by* is "Yes, No", and
+answering the second with the first would name a kind of thing where a list of permitted values
+was asked for.
+
+`NJPBrain.can_do(name, have)` answers whether she could run a procedure with what she has been
+handed, matched on heads so *"a sentence"* satisfies *"a sentence in the English language"* — and
+returns **what is missing** rather than just "no", because "no" without "what is absent" is not
+usable by anything.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
