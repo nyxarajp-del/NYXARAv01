@@ -192,6 +192,30 @@ def run() -> Dict[str, Any]:
             "sweep": [{"purity": value, **result.to_dict()} for value, result in sweep()]}
 
 
+def curve(sizes: Sequence[int] = (12_000, 50_000, 200_000, 800_000),
+          **kwargs: Any) -> List[Tuple[int, Result, int]]:
+    """The same examination at four corpus sizes. The one measurement that settles the argument.
+
+    Every version of this has answered the same question with a different number of pairs and got
+    the same answer — one rule, and about the same accuracy. 7,226 pairs gave 0.853 when she
+    answered; 36,302 gave 0.862. If a million gives 0.87 as well then the shortage is not evidence
+    and no amount of reading will fix it; if the rule count climbs, it is. Reported as a curve
+    rather than a single figure, because a single figure cannot tell those two apart.
+    """
+    pairs = read_pairs()
+    out: List[Tuple[int, Result, int]] = []
+    for size in sizes:
+        rows = pairs[:size]
+        if len(rows) < size * 0.9:
+            break                        # the corpus does not reach this size; do not pretend
+        learn, held = split(rows)
+        reasoner = Reasoner(**kwargs)
+        reasoner.learn_from(learn)
+        out.append((len(rows), _mark(reasoner, held, f"{len(rows)} pairs"),
+                    len(reasoner.rules)))
+    return out
+
+
 def main() -> None:  # pragma: no cover — a report, not a test
     pairs = read_pairs()
     if not pairs:
