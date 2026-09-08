@@ -120,10 +120,17 @@ def _mark(reasoner: Reasoner, held: Sequence[Pair], name: str, *,
     return out
 
 
-#: How many pairs the examination reads when a caller does not say. The broad corpus is 564,166
-#: and a full pass over it is ten minutes of real work, which is right for :func:`run` and wrong
-#: for anything that wants to know whether a mechanism works. Zero means all of them.
-EXAMINE_PAIRS = 40_000
+#: How many pairs the examination reads when a caller does not say. Zero means all of them, which
+#: is what :func:`run` and :func:`curve` pass, and what nothing else should.
+#:
+#: Set from the curve's own timings rather than from taste. Induction over the broad corpus is
+#: badly superlinear -- 12,000 pairs cost 62 seconds and 50,000 cost 617, a fourfold corpus for a
+#: tenfold bill -- so a bound of 40,000 turned a test file into half an hour. Twelve thousand is
+#: the largest slice the curve shows costing under a minute, and it is enough: at that size the
+#: induction already finds the containment rule and answers at 0.706 when it answers, which is
+#: what the mechanism tests are about. What the *corpus* is worth is a different question and
+#: :func:`curve` is where it is asked.
+EXAMINE_PAIRS = 12_000
 
 
 def examine(purity: float = 0.72, pairs: Optional[Sequence[Pair]] = None,

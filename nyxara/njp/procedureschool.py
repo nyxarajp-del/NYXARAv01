@@ -31,8 +31,8 @@ Four controls, and each removes one mechanism rather than turning a number down:
   nothing then the cued level is decoration.
 * **no_frames** — the other half, and the sharper test: only the abstracted shapes remain, so a
   definition can only be read by structure it shares with a demonstration rather than by wording.
-* **one_lesson** — taught the first demonstration alone. Whether twelve lessons were twelve
-  lessons' worth.
+* **one_lesson** — taught the first demonstration alone. Whether fourteen lessons were
+  fourteen lessons' worth.
 """
 
 from __future__ import annotations

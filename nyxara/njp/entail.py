@@ -36,6 +36,7 @@ from __future__ import annotations
 import gzip
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -364,9 +365,12 @@ class Reasoner:
         self.shown = len(pairs)
         if not self.learning or not pairs:
             return self.rules
-        seen = {label: sum(1 for p in pairs if p.label == label) for p in pairs
-                for label in (p.label,)}
-        self.commonest = max(seen, key=lambda label: seen[label]) if seen else ""
+        # One pass. The comprehension this replaces re-scanned every pair for every pair, which
+        # is 1.3 billion comparisons at 36,302 pairs -- slow but survivable, so nothing caught it
+        # -- and 3.2 *hundred billion* at the 564,166 the full read produced, where it stopped
+        # looking like slowness and started looking like a hang.
+        seen = Counter(p.label for p in pairs)
+        self.commonest = seen.most_common(1)[0][0] if seen else ""
         self.excludes = mine_exclusions(pairs) if self.mining else {}
         readings = [(probe(p.premise, p.hypothesis, self.excludes), p.label) for p in pairs]
         for label in sorted({p.label for p in pairs}):

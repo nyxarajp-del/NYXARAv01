@@ -2537,6 +2537,16 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_procedure_school(self) -> Any:
+        """Sit the procedure audit: thirty-six hand-marked definitions, the floor and four
+        ablations, with the sealed fifteen read last."""
+        try:
+            from nyxara.njp.procedureschool import examine
+
+            return {name: report.to_dict() for name, report in examine().items()}
+        except Exception:  # noqa: BLE001
+            return None
+
     def why(self, topic: str, *, sense: str = "any") -> Any:
         """The causal, purposive and enabling chains that end at *topic*."""
         if self.explainer is None:

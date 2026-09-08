@@ -39,7 +39,7 @@ What is read out of one:
 
 **Nothing here is a table of instruction phrases.** ``you are given`` appears in 333 of the 698 and
 ``your task is to`` in 251, and both would have been trivial to type. They are not typed. The
-shapes that read a role are induced from :data:`LESSONS` — twelve definitions with their roles
+shapes that read a role are induced from :data:`LESSONS` — fourteen definitions with their roles
 marked by hand — at the two levels :mod:`nyxara.njp.passage` established: a **frame** keeps the
 demonstration's own words, and a **cued** shape holes every open-class token and keeps only the
 closed class, so ``you are <*> a <SLOT>`` induced from *"you are given a question"* reads *"you are
@@ -433,8 +433,8 @@ def _clauses(raw: str) -> List[Tuple[str, List[Tok], List[str]]]:
     A role does not run past the end of its sentence, and reading the definition as one token
     stream is what hid that. ``_bare`` drops determiners, so *"... of the first one. The sentences
     are separated"* put ``sentences`` immediately after the goal span and the reader duly learned
-    ``sentences`` as a word a goal may stop before — one of ten such words memorised off twelve
-    lessons, which between them let a goal be read in 39% of the corpus and no more. Split here,
+    ``sentences`` as a word a goal may stop before — one of ten such words memorised off the
+    demonstrations, which between them let a goal be read in 39% of the corpus and no more. Split here,
     and the thing every demonstration was actually showing is a single stop: the sentence ended.
     """
     out: List[Tuple[str, List[Tok], List[str]]] = []
@@ -546,9 +546,9 @@ class ProcedureReader:
         """Where a role span stopped, how long it ran, and what separated two of the same role.
 
         The stop is recorded as a **tag**, not as the word that happened to follow. ``END`` is a
-        span that ran to the end of its sentence, and it is what eleven of the twelve goal marks
+        span that ran to the end of its sentence, and it is what all but one of the goal marks
         show; the rest are the closed-class tag of the next token. Recording the word instead is
-        what made the stop set a memory of twelve neighbours rather than a rule about boundaries.
+        what made the stop set a memory of the demonstrations' neighbours rather than a rule about boundaries.
         """
         _, Tag = _table()
         for role, index, i, j in marked:
@@ -754,7 +754,7 @@ class ProcedureReader:
                         # The cap and the comma rule are about where a span may *stop*. A span
                         # that stops at the end of its sentence has stopped where every
                         # demonstration stopped, and is bounded by the sentence rather than by a
-                        # length counted off twelve examples -- which is why a goal of fourteen
+                        # length counted off the demonstrations -- which is why a goal of fourteen
                         # tokens was the longest thing this could read, and six of the audited
                         # definitions state theirs in more.
                         if stop != _END:
