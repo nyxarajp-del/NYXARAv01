@@ -125,16 +125,28 @@ def _score(said: str, wanted: str) -> Tuple[int, float]:
 
 def split(readings: Optional[Sequence[Reading]] = None
           ) -> Tuple[List[Reading], List[Reading]]:
-    """One deterministic cut over a deterministic shuffle, and only rows that keep their promise.
+    """One deterministic cut, **by passage**, over rows that keep their promise.
+
+    By passage and not by row, and that distinction is the whole of this function. SQuAD asks a
+    dozen questions of one paragraph and each is its own row, so cutting the rows puts the same
+    passage on both sides of the split: the reader learns which span of *that paragraph* answers
+    questions about it, and is then examined on the same paragraph. Every V.55 figure measured
+    before this line was written was measured that way, and none of them meant what it said.
 
     A row whose answer is not actually a span of its passage cannot be found and cannot be scored;
     it is dropped here rather than counted as a failure of the reader.
     """
     rows = [r for r in (readings if readings is not None else read_passages())
             if r.holds_its_answer()]
-    random.Random(SEED).shuffle(rows)
-    cut = int(len(rows) * TRAIN)
-    return rows[:cut][:LEARN_FROM], rows[cut:][:HELD_OUT]
+    by_passage: Dict[str, List[Reading]] = {}
+    for row in rows:
+        by_passage.setdefault(row.passage, []).append(row)
+    passages = sorted(by_passage)
+    random.Random(SEED).shuffle(passages)
+    cut = int(len(passages) * TRAIN)
+    learn = [r for passage in passages[:cut] for r in by_passage[passage]]
+    held = [r for passage in passages[cut:] for r in by_passage[passage]]
+    return learn[:LEARN_FROM], held[:HELD_OUT]
 
 
 def taught_finder(learn: Sequence[Reading], *, use_shape: bool = True,
