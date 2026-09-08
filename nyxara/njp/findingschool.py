@@ -35,7 +35,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.njp.asked import Asked
 from nyxara.njp.askedschool import split as split_questions
-from nyxara.njp.finding import Finder, Reading, Setting, candidates, read_passages
+from nyxara.njp.finding import (
+    Finder, Reading, Setting, candidates, gold_key, read_passages,
+)
 
 __all__ = ["Result", "SEED", "TRAIN", "LEARN_FROM", "HELD_OUT",
            "split", "taught_finder", "examine", "decompose", "sentence_baselines",
@@ -203,7 +205,7 @@ def examine(readings: Optional[Sequence[Reading]] = None) -> Dict[str, Result]:
 def gold_sentence(reading: Reading) -> int:
     """Which sentence of the passage actually holds the answer."""
     fixed = Setting.of(reading)
-    at = reading.passage.lower().find(reading.answer.lower().strip())
+    at = reading.passage.lower().find(gold_key(reading.answer))
     return max((i for i, (_t, start) in enumerate(fixed.spans) if start <= at), default=0)
 
 
@@ -222,7 +224,7 @@ def decompose(engine: Finder, held: Sequence[Reading]) -> Dict[str, float]:
         gold = gold_sentence(reading)
         fixed = Setting.of(reading)
         said, _start = fixed.spans[gold] if gold < len(fixed.spans) else ("", 0)
-        wanted = reading.answer.lower().strip()
+        wanted = gold_key(reading.answer)
         reachable += int(any(s.key == wanted for s in candidates(said)))
         if engine.sentence(reading.passage, reading.question) != gold:
             continue

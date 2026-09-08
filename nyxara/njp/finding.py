@@ -54,7 +54,7 @@ from nyxara.njp.asked import Asked, satisfies, shape_of
 from nyxara.njp.induce import Rule, cover
 
 __all__ = ["Reading", "Span", "Setting", "Finder", "CORPUS", "read_passages",
-           "candidates", "probe"]
+           "candidates", "gold_key", "probe"]
 
 CORPUS = Path(__file__).with_name("data") / "flan_reading.jsonl.gz"
 
@@ -67,6 +67,9 @@ MAX_TOKENS = 10
 #: examination time; only the induction is sampled, because a paragraph offers a few thousand
 #: negatives and a hundred passages would otherwise be half a million readings.
 NEGATIVES = 24
+
+#: Punctuation that may sit at either edge of a span without being part of it.
+_EDGE = " .,;:!?\"'()[]“”‘’"
 
 _WORD = re.compile(r"[^\W\d_][\w'’\-]*|\d+(?:[.,]\d+)*", re.UNICODE)
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
@@ -114,7 +117,21 @@ class Span:
 
     @property
     def key(self) -> str:
-        return " ".join(self.text.lower().split())
+        """The form a candidate is compared to a gold answer in.
+
+        Trailing and leading punctuation is stripped from both sides, and that is not tidiness:
+        an annotator's span very often carries the sentence's own full stop — ``Karabakh police.``,
+        ``Czech Republic.`` — while a candidate ends at the last token. Comparing them raw made a
+        tenth of the corpus unreachable by construction, and the decomposition reported it as the
+        generator's failure to propose the answer rather than as a mismatch in how two strings
+        were spelled.
+        """
+        return " ".join(self.text.lower().split()).strip(_EDGE)
+
+
+def gold_key(answer: str) -> str:
+    """A marked answer in the same form :attr:`Span.key` puts a candidate in."""
+    return " ".join(str(answer or "").lower().split()).strip(_EDGE)
 
 
 def _tokens(text: str) -> List[Tuple[str, int, int]]:
@@ -129,6 +146,11 @@ def candidates(passage: str) -> List[Span]:
     ``the`` is a fragment; a span running across a full stop is two things.
     """
     closed = _closed()
+    try:
+        from nyxara.njp.semantics import Tag  # noqa: WPS433
+        determiner = Tag.DET
+    except Exception:  # noqa: BLE001
+        determiner = "DET"
     raw = str(passage or "")
     bounds: List[int] = []
     at = 0
@@ -139,7 +161,13 @@ def candidates(passage: str) -> List[Span]:
     toks = _tokens(raw)
     out: List[Span] = []
     for i, (word, start, _end) in enumerate(toks):
-        if word.lower() in closed:
+        # A determiner may open a span even though it is closed class, because that is how a span
+        # is marked: `the Henry Cole Wing`, `the mid-19th century`. Nothing else closed-class may,
+        # so `of the wing` is still refused. Measured: 3.7% of the corpus's answers open on `the`
+        # and were unreachable without this.
+        if word.lower() in closed and closed.get(word.lower()) != determiner:
+            continue
+        if closed.get(word.lower()) == determiner and i + 1 >= len(toks):
             continue
         for j in range(i, min(len(toks), i + MAX_TOKENS)):
             last, _s, end = toks[j]
@@ -417,7 +445,7 @@ class Finder:
         for reading in readings:
             fixed = Setting.of(reading)
             wanted = self.wants(reading.question)
-            gold = reading.answer.lower().strip()
+            gold = gold_key(reading.answer)
             at = reading.passage.lower().find(gold)
             if at < 0:
                 continue
