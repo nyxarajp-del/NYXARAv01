@@ -162,6 +162,77 @@ def _bucket(n: int, edges: Sequence[int], names: Sequence[str]) -> str:
     return names[-1]
 
 
+def sentences_of(passage: str) -> List[Tuple[str, int]]:
+    """The passage's sentences with the character each starts at."""
+    raw = str(passage or "")
+    out: List[Tuple[str, int]] = []
+    at = 0
+    for piece in _SENTENCE.split(raw):
+        at = raw.find(piece, at)
+        out.append((piece, at))
+        at += len(piece)
+    return out
+
+
+def probe_sentence(reading: "Reading", index: int, wanted: str = "",
+                   *, use_shape: bool = True,
+                   setting: Optional["Setting"] = None) -> Dict[str, Any]:
+    """Generic measurements of one **sentence** of the passage.
+
+    The reader works in two stages, and this is the first, because a one-stage reader cannot be
+    made to work with this machinery: a paragraph offers a thousand spans, one of which is the
+    answer, and :func:`~nyxara.njp.induce.cover` maximises how many positives a rule covers rather
+    than how few negatives it admits. Asked to separate 1 from 999 it returns ``shape is span`` at
+    a purity of 0.075 — true of the answer and of six hundred other things — and ranking by it
+    picks whichever short span comes first. Measured, that scored 0.026 overlap against 0.143 for
+    a ten-minute heuristic.
+
+    Choosing the sentence first is not a trick to make the number better; it is the step that has
+    a base rate an induction can work with. A passage has a handful of sentences, so the answer's
+    sentence is one in five or six rather than one in a thousand.
+    """
+    fixed = setting if setting is not None else Setting.of(reading)
+    said, start = fixed.spans[index] if index < len(fixed.spans) else ("", 0)
+    here = fixed.carried[index] if index < len(fixed.carried) else frozenset()
+    asked = fixed.asked
+    shared = len(here & asked)
+    out: Dict[str, Any] = {
+        "carries": _bucket(shared, (0, 1, 2, 4), ("none", "one", "two", "few", "many")),
+        "share_of_question": _share(shared, len(asked)),
+        "share_of_sentence": _share(shared, len(here)),
+        "position": _bucket(index, (0, 1, 3), ("first", "second", "early", "later")),
+        "length": _bucket(len(_tokens(said)), (8, 20, 40), ("short", "medium", "long",
+                                                            "very long")),
+        "has_number": any(ch.isdigit() for ch in said),
+        "is_only": len(fixed.spans) <= 1,
+    }
+    if use_shape:
+        # The other organ again, and at this level it says whether the sentence contains anything
+        # of the right shape at all — a `when` question wants a sentence with a date in it.
+        out["holds_wanted"] = ("unknown" if not wanted
+                               else "yes" if _holds_kind(said, wanted) else "no")
+    return out
+
+
+def _holds_kind(sentence: str, wanted: str) -> bool:
+    """Does this sentence contain any span of the kind the question wants?"""
+    for span in candidates(sentence):
+        if satisfies(shape_of(span.text), wanted):
+            return True
+    return False
+
+
+def _share(part: int, whole: int) -> str:
+    if not whole:
+        return "none"
+    value = part / whole
+    if value < 0.2:
+        return "little"
+    if value < 0.5:
+        return "some"
+    return "most"
+
+
 @dataclass(frozen=True)
 class Setting:
     """Everything about a passage-and-question that does not change from candidate to candidate.
@@ -175,6 +246,8 @@ class Setting:
 
     asked: frozenset = frozenset()
     sentences: Tuple[str, ...] = ()
+    #: Each sentence with the character it starts at, so a span can be placed in one.
+    spans: Tuple[Tuple[str, int], ...] = ()
     carried: Tuple[frozenset, ...] = ()
     marks: Tuple[int, ...] = ()
     length: int = 0
@@ -189,6 +262,7 @@ class Setting:
             marks.extend(m.start() for m in
                          re.finditer(r"(?<!\w)" + re.escape(word) + r"(?!\w)", low))
         return cls(asked=frozenset(asked), sentences=sentences,
+                   spans=tuple(sentences_of(reading.passage)),
                    carried=tuple(frozenset(_content(s)) for s in sentences),
                    marks=tuple(sorted(marks)), length=len(reading.passage))
 
@@ -272,7 +346,11 @@ class Finder:
     that has been shown no passages has no idea which part of one is an answer.
     """
 
-    purity: float = 0.80
+    purity: float = 0.30
+    #: The first stage separates one sentence from a handful, so it can be held to a higher bar
+    #: than the second, which separates one span from dozens. Both are set by the sweep in
+    #: :mod:`nyxara.njp.findingschool` and neither is a taste.
+    sentence_purity: float = 0.45
     min_support: int = 12
     min_share: float = 0.02
     max_rules: int = 6
@@ -281,6 +359,7 @@ class Finder:
     use_shape: bool = True
     seed: int = 7
     rules: List[Rule] = field(default_factory=list)
+    sentence_rules: List[Rule] = field(default_factory=list)
     near_misses: List[Rule] = field(default_factory=list)
     shown: int = 0
     #: The answer-shape organ, taught separately and consulted as one feature. ``None`` means the
@@ -297,70 +376,121 @@ class Finder:
             return ""
 
     def learn_from(self, readings: Sequence[Reading]) -> List[Rule]:
-        self.rules, self.near_misses = [], []
+        """Two inductions: which sentence holds the answer, and which span inside it is one."""
+        self.rules, self.sentence_rules, self.near_misses = [], [], []
         self.shown = len(readings)
         if not self.learning or not readings:
             return self.rules
         rng = random.Random(self.seed)
-        positives: List[Dict[str, Any]] = []
-        negatives: List[Dict[str, Any]] = []
+        say_yes: List[Dict[str, Any]] = []
+        say_no: List[Dict[str, Any]] = []
+        span_yes: List[Dict[str, Any]] = []
+        span_no: List[Dict[str, Any]] = []
         for reading in readings:
-            spans = candidates(reading.passage)
-            if not spans:
-                continue
+            fixed = Setting.of(reading)
             wanted = self.wants(reading.question)
             gold = reading.answer.lower().strip()
-            right = [s for s in spans if s.key == gold]
-            wrong = [s for s in spans if s.key != gold]
+            at = reading.passage.lower().find(gold)
+            if at < 0:
+                continue
+            holds = max((i for i, (_t, start) in enumerate(fixed.spans) if start <= at),
+                        default=0)
+            for index in range(len(fixed.spans)):
+                marks = probe_sentence(reading, index, wanted, use_shape=self.use_shape,
+                                       setting=fixed)
+                (say_yes if index == holds else say_no).append(marks)
+
+            # The span stage learns **inside the right sentence only**, because that is the
+            # situation it will be used in. Training it against the whole passage would teach it
+            # to solve a problem the first stage has already solved.
+            said, start = fixed.spans[holds] if holds < len(fixed.spans) else ("", 0)
+            here = [Span(text=sp.text, start=sp.start + start, end=sp.end + start,
+                         sentence=holds) for sp in candidates(said)]
+            right = [sp for sp in here if sp.key == gold]
+            wrong = [sp for sp in here if sp.key != gold]
             if not right:
-                continue                    # the corpus promised the span is there; this row lies
-            fixed = Setting.of(reading)
-            positives.append(probe(reading, right[0], wanted, use_shape=self.use_shape,
-                                   setting=fixed))
+                continue
+            span_yes.append(probe(reading, right[0], wanted, use_shape=self.use_shape,
+                                  setting=fixed))
             for span in rng.sample(wrong, min(NEGATIVES, len(wrong))):
-                negatives.append(probe(reading, span, wanted, use_shape=self.use_shape,
-                                       setting=fixed))
-        if not positives:
-            return self.rules
-        rules, near = cover(positives, negatives, label="answer",
-                            min_support=self.min_support, min_share=self.min_share,
-                            max_rules=self.max_rules, max_terms=self.max_terms,
-                            purity=self.purity)
-        self.rules, self.near_misses = rules, near
+                span_no.append(probe(reading, span, wanted, use_shape=self.use_shape,
+                                     setting=fixed))
+
+        if say_yes:
+            rules, near = cover(say_yes, say_no, label="holds",
+                                min_support=self.min_support, min_share=self.min_share,
+                                max_rules=self.max_rules, max_terms=self.max_terms,
+                                purity=self.sentence_purity)
+            self.sentence_rules, self.near_misses = rules, near
+        if span_yes:
+            self.rules, near = cover(span_yes, span_no, label="answer",
+                                     min_support=self.min_support, min_share=self.min_share,
+                                     max_rules=self.max_rules, max_terms=self.max_terms,
+                                     purity=self.purity)
+            self.near_misses.extend(near)
         return self.rules
 
     # -- using it ------------------------------------------------------------------------- #
+    def _score(self, marks: Dict[str, Any], rules: Sequence[Rule]) -> Tuple[int, float]:
+        """How much induced evidence this reading carries: how many rules fire, then how pure.
+
+        Counting first rather than taking the single purest is what makes a set of rules rank
+        rather than merely classify. It is an aggregation of the induction and not a weighting on
+        top of it: no rule is worth more than another until the evidence says one of them is
+        purer, which is exactly the tie-break.
+        """
+        fired = [r for r in rules if r.holds(marks)]
+        return len(fired), sum(r.purity for r in fired)
+
+    def sentence(self, passage: str, question: str) -> int:
+        """Which sentence holds the answer. ``-1`` when nothing has been learned."""
+        reading = Reading(passage=str(passage or ""), question=str(question or ""))
+        fixed = Setting.of(reading)
+        if not self.sentence_rules or not fixed.spans:
+            return -1
+        wanted = self.wants(reading.question)
+        best, chosen = (0, 0.0), -1
+        for index in range(len(fixed.spans)):
+            marks = probe_sentence(reading, index, wanted, use_shape=self.use_shape,
+                                   setting=fixed)
+            score = self._score(marks, self.sentence_rules)
+            if score > best:
+                best, chosen = score, index
+        return chosen
+
     def find(self, passage: str, question: str) -> Tuple[str, str]:
         """The span this passage offers in answer, and the rule that chose it.
 
-        ``("", "")`` when no induced rule fires on any candidate — which is an abstention and is
-        meant to be. A reader with no reason to prefer one span over another has not found the
-        answer; it has picked one.
+        ``("", "")`` when nothing has been learned, or when no induced rule fires on any candidate
+        in the chosen sentence. That is an abstention and is meant to be: a reader with no reason
+        to prefer one span over another has not found the answer, it has picked one.
         """
         reading = Reading(passage=str(passage or ""), question=str(question or ""))
-        spans = candidates(reading.passage)
-        if not spans or not self.rules:
-            return "", ""
-        wanted = self.wants(reading.question)
         fixed = Setting.of(reading)
-        best: Optional[Tuple[float, int, Span, Rule]] = None
-        for span in spans:
-            marks = probe(reading, span, wanted, use_shape=self.use_shape, setting=fixed)
-            for rule in self.rules:
-                if not rule.holds(marks):
-                    continue
-                # Purest rule wins; among spans the same rule fires on, the earliest, because a
-                # tie broken by anything cleverer would be a preference nobody demonstrated.
-                score = (rule.purity, rule.support)
-                if best is None or score > (best[3].purity, best[3].support) or (
-                        score == (best[3].purity, best[3].support) and span.start < best[1]):
-                    best = (rule.purity, span.start, span, rule)
-        if best is None:
+        if not self.rules or not fixed.spans:
             return "", ""
-        return best[2].text, best[3].render()
+        index = self.sentence(reading.passage, reading.question)
+        if index < 0:
+            return "", ""
+        said, start = fixed.spans[index]
+        wanted = self.wants(reading.question)
+        best, chosen, why = (0, 0.0), None, ""
+        for span in candidates(said):
+            placed = Span(text=span.text, start=span.start + start, end=span.end + start,
+                          sentence=index)
+            marks = probe(reading, placed, wanted, use_shape=self.use_shape, setting=fixed)
+            score = self._score(marks, self.rules)
+            if score > best:
+                best, chosen = score, placed
+                why = "; ".join(r.render() for r in self.rules if r.holds(marks))
+        if chosen is None:
+            return "", ""
+        return chosen.text, why
 
     def learned(self) -> Dict[str, Any]:
         return {"shown": self.shown, "rules": [r.render() for r in self.rules],
                 "purities": [round(r.purity, 4) for r in self.rules],
+                "sentence_rules": [r.render() for r in self.sentence_rules],
+                "sentence_purities": [round(r.purity, 4) for r in self.sentence_rules],
                 "near_misses": len(self.near_misses),
                 "consults_asked": bool(self.use_shape and self.asked is not None)}
