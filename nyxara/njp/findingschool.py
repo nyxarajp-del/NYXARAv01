@@ -8,42 +8,42 @@ passage. What is measured, on 600 held-out passages of 46,577:
 * **overlap** — token F1 against it, which credits *"Felipa Moñiz"* for *"amb Felipa Moñiz"*.
 * **answered** — the share she returned anything at all. Abstention is not being wrong.
 
-The two readers here fail in **opposite directions**, and the report prints both numbers for that
-reason. The heuristic returns the longest span of the best sentence: a phrase that usually
-*contains* the answer, so it scores well on overlap and is almost never exactly right. The learned
-reader returns a short precise span: exactly right several times more often, and worth nothing in
-partial credit when it misses.
+The result is mostly negative and is reported that way. On a split that shares **no passage**
+between its halves — 1,500 rows to learn from, 600 held out of 29,256:
 
-    reader                                exact   overlap   answered
-    longest span of the best sentence     0.008    0.154     1.000
-    induced sentence, induced span        0.033    0.080     0.902
-    **argmax sentence, induced span**   **0.040**  0.104     0.887
+    reader                              exact   overlap   answered
+    longest span of the best sentence   0.002    0.149     1.000
+    induced span stage                  0.015    0.042     0.408
 
-For something meant to answer, exact is the metric that counts — ``1947`` answers the question and
-a twenty-word phrase containing 1947 does not — so the reader is five times better at the thing
-being asked of it, and worse at partial credit. Both are stated; neither is the headline alone.
+Seven times the heuristic at returning the answer *exactly*, which is the metric that counts for
+something meant to answer — and 0.015 is a small number by any reading, and the overlap column is
+a rout. The reader does not work. What follows says where it fails, because that is the part worth
+keeping:
 
-**The decomposition is the useful part**, because one number cannot be acted on:
+    gold answer is a candidate at all      0.695   <- the ceiling
+    sentence chosen correctly              0.580
+      ...and a span came back              0.348
+      ...and it was exactly right          0.026
+    exact overall                          0.015
 
-    gold answer is a candidate at all      0.770    <- the ceiling on everything after it
-    sentence chosen correctly              0.637
-      ...and a span came back              0.877
-      ...and it was exactly right          0.063
-    exact overall                          0.040
+Handed the right sentence it picks the right span **one time in forty**. The span stage is not
+close to working, and no threshold in the sweep changes that.
 
-That says where to work. The ceiling and the sentence are both healthy; **the span stage is the
-whole of the remaining loss**, and it was found by decomposing rather than by sweeping — three
-parameter sweeps ran before this did, and none of them could have revealed that 41% of the answers
-were unreachable at every setting.
+**These numbers replace an earlier set that were three to four times higher.** Those were measured
+with a split that cut by row; SQuAD asks a dozen questions of one paragraph, so the same passage
+sat on both sides and the reader was examined on what it had studied. The leak inflated everything
+including the baselines, which is why it was not obvious from any single figure.
 
-Two things this module measured that did not go the way it was built to go, both kept:
+Two things this module was built to measure, and both came back negative:
 
-* **The induced first stage loses to one line of argmax**, at every setting tried — 0.470, 0.337,
-  0.337, 0.568, 0.570 against 0.618. See :meth:`~nyxara.njp.finding.Finder.sentence`.
-* **The borrowed organ bought nothing.** :mod:`nyxara.njp.asked`'s answer-shape expectation enters
-  the span stage as one removable feature, exactly so that ``no_shape`` could say what it was
-  worth. Removed, the numbers do not move — not approximately, identically — because the induction
-  settles on a single rule that does not use it.
+* **The induced first stage loses to one line of argmax** — 0.470, 0.337, 0.337, 0.568, 0.570,
+  0.337 against 0.618 on the leaky split, and 0.580 for the heuristic on the clean one. See
+  :meth:`~nyxara.njp.finding.Finder.sentence`.
+* **The learned answer-shape organ contributes nothing.** Removing it changes no digit. Be precise
+  about what that does and does not say: the two induced rules use ``shape``, which is
+  :func:`~nyxara.njp.asked.shape_of`, a pure surface function; neither uses ``shape_fits``, the
+  feature that consults the *learned* :class:`~nyxara.njp.asked.Asked`. The shared function earns
+  its place. The organ does not.
 """
 
 from __future__ import annotations

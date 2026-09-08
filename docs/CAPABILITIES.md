@@ -5251,6 +5251,92 @@ It does not make her able to answer these questions. She scores **0.000** on the
 The veto converts some confidently wrong answers into abstentions, which is the difference between
 being unreliable and being honest about a gap — and is not the same as knowing anything.
 
+## V.55 — answering from a passage: a corpus that works and a reader that does not
+
+The 0.000 on real questions was never a reading defect. She does not know when the Battle of the
+Coral Sea was fought, and no amount of better reading of an empty store produces a date. So V.55
+asked the question she can be held to — **here is the passage, now find it** — and the answer is
+that she mostly cannot.
+
+### The corpus is the part that worked
+
+29,256 rows from a second full read, and it is the only corpus in this package whose labels
+**cannot be quietly wrong**: a row is kept only if its answer appears in its passage, at word
+boundaries, exactly once. That is checked by the extractor, again by the merge, and again by a
+test over the shipped file.
+
+    squad 12,634   quac 10,297   viquiquad 2,357   drop 1,664   mrqa 1,608   ropes 302   quoref 271
+
+Getting there took three attempts, and the two failures are more instructive than the success.
+*Verbatim-in-prompt* admits every classification row in FLAN, because a classification task spells
+its label vocabulary out in its own instructions — `"classify into yes or no"` contains `no`.
+*Stripping the scaffolding* helped and did not fix it, because for those tasks the instruction **is**
+the prompt. What works is provenance plus verification: corpora that are extractive by
+construction, each row still checked.
+
+### The reader, measured on a split that shares no passage
+
+    reader                              exact   overlap   answered
+    longest span of the best sentence   0.002    0.149     1.000
+    induced span stage                  0.015    0.042     0.408
+
+Seven times the heuristic at returning the answer *exactly* — and 0.015 is a small number, and the
+overlap column is a rout. The decomposition says where it goes:
+
+    gold answer is a candidate at all      0.695   <- the ceiling
+    sentence chosen correctly              0.580
+      ...and a span came back              0.348
+      ...and it was exactly right          0.026
+    exact overall                          0.015
+
+Handed the right sentence, it picks the right span **one time in forty**.
+
+### Three findings, all negative, all of them the point
+
+**The induction cannot rank.** `induce.cover` builds conjunctions of equality tests over *bucketed*
+values. Selecting one item from many needs the winner to satisfy a rule no other item satisfies;
+argmax over a continuous quantity needs no item to be uniquely characterisable, only ordered. Asked
+to pick the sentence, the induction **rediscovered the heuristic's own signal** — `carries is many`,
+`carries is few`, `carries is two`, correctly ordered by purity — and could not use it as well,
+because every sentence sharing five or more words with the question lands in one bucket and ties.
+Six settings, none reaching the heuristic:
+
+    rules   1      2      2      2      3      4        heuristic
+            0.470  0.337  0.337  0.337  0.568  0.570      0.618
+
+Note the 2-rule rows, which refute the obvious reading: it is not that more rules are better. At a
+low enough purity the cover takes one very broad rule that fires on nearly every sentence, and a
+rule that fires on everything discriminates nothing.
+
+This explains the whole session rather than just this module. The organs that **sort things into
+kinds** work — answer-shape 0.802, procedure roles 0.855, passage roles 0.919 sealed. The one asked
+to **pick a best** does not.
+
+**The learned answer-shape organ contributes nothing.** V.54 was wired into V.55 through a single
+removable feature precisely so this could be measured. Removed, not one digit changes. And the
+precise version matters: the two induced rules use `shape`, which is `asked.shape_of()`, a pure
+surface function — neither uses `shape_fits`, the feature that consults the *learned* organ. The
+shared function earns its place; the organ does not.
+
+**The first set of numbers was measured through a leak.** Everything above replaces figures three
+to four times higher, taken with a split that cut by row. SQuAD asks a dozen questions of one
+paragraph, so the same passage sat on both sides and the reader was examined on what it had
+studied. The leak inflated the baselines too, which is why no single figure looked wrong. It was
+caught by a test written as boilerplate, which had only ever run against convenient scratch data —
+those shards repeated passages less. A fast subset of the tests against convenient data is not the
+suite.
+
+### And a method correction worth more than the module
+
+Three parameter sweeps ran before the first decomposition. The decomposition then showed that
+**41% of the answers were unreachable at every setting** — the candidate generator never proposed
+them, because it refused spans opening on a determiner (`the Henry Cole Wing`) and compared
+`Karabakh police.` against `Karabakh police` as unequal strings. Fixing those two things moved the
+ceiling from 0.587 to 0.777 on the leaky split, and no amount of sweeping would have found either.
+
+Sweeping optimises within an architecture. It cannot tell you the architecture has a hole in it.
+Decompose first.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
