@@ -413,6 +413,9 @@ class Finder:
     max_terms: int = 3
     learning: bool = True
     use_shape: bool = True
+    #: How the first stage picks its sentence: ``"overlap"`` (argmax over shared content words) or
+    #: ``"rules"`` (the induced conjunctions). Measured, not preferred — see :meth:`sentence`.
+    sentence_by: str = "overlap"
     seed: int = 7
     rules: List[Rule] = field(default_factory=list)
     sentence_rules: List[Rule] = field(default_factory=list)
@@ -499,10 +502,30 @@ class Finder:
         return len(fired), sum(r.purity for r in fired)
 
     def sentence(self, passage: str, question: str) -> int:
-        """Which sentence holds the answer. ``-1`` when nothing has been learned."""
+        """Which sentence holds the answer. ``-1`` when nothing has been learned.
+
+        Which mechanism decides is :attr:`sentence_by`, and the honest answer is not the induced
+        one. Measured on 600 held-out passages, ranking sentences by how many induced rules fire
+        levels off at 0.570 however many rules are allowed, while taking the sentence with the most
+        content words in common with the question — one line, no learning — gets 0.655. The
+        induction *rediscovers* that signal (``carries is many``, ``carries is few``, ``carries is
+        two``, correctly ordered by purity) and cannot use it as well, because
+        :func:`~nyxara.njp.induce.cover` builds equality tests over buckets and every sentence
+        sharing five or more words falls in the same bucket and ties.
+
+        So the default is ``"overlap"`` and the heuristic is load-bearing. It is kept as a switch
+        rather than hard-wired so the cost of the induced version stays runnable and visible, and
+        so that the span stage — which the induction *does* earn its place in — is measured on top
+        of the better first stage rather than a worse one.
+        """
         reading = Reading(passage=str(passage or ""), question=str(question or ""))
         fixed = Setting.of(reading)
-        if not self.sentence_rules or not fixed.spans:
+        if not fixed.spans:
+            return -1
+        if self.sentence_by == "overlap":
+            weight = [len(fixed.carried[i] & fixed.asked) for i in range(len(fixed.spans))]
+            return max(range(len(weight)), key=lambda i: weight[i]) if weight else -1
+        if not self.sentence_rules:
             return -1
         wanted = self.wants(reading.question)
         best, chosen = (0, 0.0), -1
@@ -524,7 +547,7 @@ class Finder:
         reading = Reading(passage=str(passage or ""), question=str(question or ""))
         fixed = Setting.of(reading)
         if not self.rules or not fixed.spans:
-            return "", ""
+            return "", ""  # nothing learned about spans; the sentence alone is not an answer
         index = self.sentence(reading.passage, reading.question)
         if index < 0:
             return "", ""
