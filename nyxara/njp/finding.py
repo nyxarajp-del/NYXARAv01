@@ -505,13 +505,27 @@ class Finder:
         """Which sentence holds the answer. ``-1`` when nothing has been learned.
 
         Which mechanism decides is :attr:`sentence_by`, and the honest answer is not the induced
-        one. Measured on 600 held-out passages, ranking sentences by how many induced rules fire
-        levels off at 0.570 however many rules are allowed, while taking the sentence with the most
-        content words in common with the question — one line, no learning — gets 0.655. The
-        induction *rediscovers* that signal (``carries is many``, ``carries is few``, ``carries is
-        two``, correctly ordered by purity) and cannot use it as well, because
-        :func:`~nyxara.njp.induce.cover` builds equality tests over buckets and every sentence
-        sharing five or more words falls in the same bucket and ties.
+        one. Taking the sentence with the most content words in common with the question — one
+        line, no learning — gets 0.637 to 0.655 on 600 held-out passages. Ranking by how many
+        induced rules fire does not reach it at any setting tried:
+
+            rules   accuracy
+              1       0.470
+              2       0.337
+              3       0.568
+              4       0.570
+
+        Note the second row, which refutes the obvious reading of the other three. It is *not*
+        that more rules are better: at a low enough purity the greedy cover takes one very broad
+        rule that fires on nearly every sentence, and a rule that fires on everything discriminates
+        nothing, so the count ties across the whole passage. What matters is how finely the rules
+        partition the sentences — broad ones tie everything, narrow ones fire on nothing — and the
+        useful band in between tops out around 0.57.
+
+        Underneath all of it the induction has *rediscovered* the heuristic's own signal
+        (``carries is many``, ``carries is few``, ``carries is two``, correctly ordered by purity)
+        and cannot use it as well, because :func:`~nyxara.njp.induce.cover` builds equality tests
+        over buckets and every sentence sharing five or more words falls in the same bucket.
 
         So the default is ``"overlap"`` and the heuristic is load-bearing. It is kept as a switch
         rather than hard-wired so the cost of the induced version stays runnable and visible, and
