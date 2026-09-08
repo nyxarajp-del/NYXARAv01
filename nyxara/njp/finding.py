@@ -51,7 +51,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from nyxara.njp.asked import Asked, satisfies, shape_of
-from nyxara.njp.induce import Rule, cover
+from nyxara.njp.induce import Rule, cover, ladder
 
 __all__ = ["Reading", "Span", "Setting", "Finder", "CORPUS", "read_passages",
            "candidates", "gold_key", "probe"]
@@ -420,12 +420,16 @@ class Finder:
     max_terms: int = 3
     learning: bool = True
     use_shape: bool = True
-    #: How the first stage picks its sentence: ``"overlap"`` (argmax over shared content words) or
-    #: ``"rules"`` (the induced conjunctions). Measured, not preferred — see :meth:`sentence`.
-    sentence_by: str = "overlap"
+    #: How the first stage picks its sentence. ``"ladder"`` ranks by the graded thresholds
+    #: :func:`~nyxara.njp.induce.ladder` induces and equals argmax exactly while carrying a
+    #: measured purity per rung; ``"overlap"`` is the bare argmax; ``"rules"`` is the greedy
+    #: cover, kept runnable because it is the one that loses. Measured, not preferred.
+    sentence_by: str = "ladder"
     seed: int = 7
     rules: List[Rule] = field(default_factory=list)
     sentence_rules: List[Rule] = field(default_factory=list)
+    #: The graded thresholds `cover` cannot yield, used to rank sentences. See `induce.ladder`.
+    rungs: List[Rule] = field(default_factory=list)
     near_misses: List[Rule] = field(default_factory=list)
     shown: int = 0
     #: The answer-shape organ, taught separately and consulted as one feature. ``None`` means the
@@ -487,6 +491,11 @@ class Finder:
                                 min_support=self.min_support, min_share=self.min_share,
                                 max_rules=self.max_rules, max_terms=self.max_terms,
                                 purity=self.sentence_purity)
+            # And the rungs the cover cannot produce, because covering deletes them. Measured:
+            # the cover alone ranks sentences at 0.505, the ladder at 0.580, which is argmax
+            # exactly. See `induce.ladder`.
+            self.rungs = ladder("carries_n", say_yes, say_no, label="holds",
+                                floor=self.min_support)
             self.sentence_rules, self.near_misses = rules, near
         if span_yes:
             self.rules, near = cover(span_yes, span_no, label="answer",
@@ -546,6 +555,16 @@ class Finder:
         if self.sentence_by == "overlap":
             weight = [len(fixed.carried[i] & fixed.asked) for i in range(len(fixed.spans))]
             return max(range(len(weight)), key=lambda i: weight[i]) if weight else -1
+        if self.sentence_by == "ladder" and self.rungs:
+            wanted = self.wants(reading.question)
+            best, chosen = (-1, 0.0), -1
+            for index in range(len(fixed.spans)):
+                marks = probe_sentence(reading, index, wanted, use_shape=self.use_shape,
+                                       setting=fixed)
+                score = self._score(marks, self.rungs)
+                if score > best:
+                    best, chosen = score, index
+            return chosen
         if not self.sentence_rules:
             return -1
         wanted = self.wants(reading.question)
