@@ -4991,9 +4991,16 @@ three (99.2% of rows), so the exam is the same exam — the material is harder a
 | ---: | ---: | ---: | ---: | ---: |
 | 12,000 | 0.045 | 0.064 | 0.706 | 1 |
 | 50,000 | 0.072 | 0.099 | 0.726 | 2 |
+| 200,000 | 0.042 | 0.057 | 0.732 | **1** |
 
-The rule count is climbing with the corpus rather than sitting still, which is the reading that
-says the shortage was evidence. It is climbing very slowly.
+**The curve answers its question, and the answer is no.** At the 50,000-pair point the rule count
+had gone from one to two and it was tempting to call that a climb; the 200,000-pair point takes it
+back to one. Sixteen times the corpus buys no additional structure — the same lone containment
+rule, answering a twentieth of the pairs at about 0.73 — and `when answered` barely moves across
+the whole range. This is the reading the commit message for the curve said would settle it: *"If a
+million pairs also give ~0.87 with one rule, the shortage is not evidence and no amount of reading
+will fix it."* On this corpus the shortage is not evidence. What is missing is not more premises;
+it is a way of reading a pair that these measurements do not contain.
 
 ### Cold on real questions, and the number is 0.000
 
