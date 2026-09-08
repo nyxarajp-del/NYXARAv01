@@ -155,6 +155,26 @@ def candidates(passage: str) -> List[Span]:
     return out
 
 
+def _neighbours(passage: str, span: "Span") -> Tuple[str, str]:
+    """What sits either side of a span: another content word, a closed-class word, or an edge."""
+    closed = _closed()
+    before = passage[:span.start]
+    after = passage[span.end:]
+    left_words = _WORD.findall(before)
+    right_words = _WORD.findall(after)
+    def name(words: Sequence[str], edge: str) -> str:
+        if not words:
+            return "edge"
+        word = (words[-1] if edge == "left" else words[0]).lower()
+        return "closed" if word in closed else "open"
+    # Punctuation directly against the span is as good a boundary as a closed-class word, and
+    # better: an annotator's span very often ends at a comma or a full stop.
+    touching_left = before[-1:] in (",", ".", ";", ":", "(", "[", '"', "'")
+    touching_right = after[:1] in (",", ".", ";", ":", ")", "]", '"', "'", "?", "!")
+    return ("stop" if touching_left else name(left_words, "left"),
+            "stop" if touching_right else name(right_words, "right"))
+
+
 def _bucket(n: int, edges: Sequence[int], names: Sequence[str]) -> str:
     for edge, name in zip(edges, names):
         if n <= edge:
@@ -294,7 +314,15 @@ def probe(reading: Reading, span: Span, wanted: str = "",
     nearest = fixed.nearest(span.start)
 
     reading_shape = shape_of(span.text)
+    # Whether the span is a whole phrase or a piece of one. Within a single sentence this is the
+    # signal that matters, and it was missing: `Felipa`, `Felipa Moñiz` and `amb Felipa Moñiz` are
+    # all candidates, they share every other measurement, and only one of them is what the
+    # annotator marked. A span whose neighbours are closed class or punctuation is bounded; one
+    # that could be extended by another content word is a fragment of something longer.
+    left, right = _neighbours(reading.passage, span)
     out: Dict[str, Any] = {
+        "bounded_left": left,
+        "bounded_right": right,
         "sentence_carries": _bucket(len(here & asked_words), (0, 1, 3), ("none", "one", "few",
                                                                         "many")),
         "repeats_question": _bucket(len(span_words & asked_words), (0, 1), ("none", "one",
