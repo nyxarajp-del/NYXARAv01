@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
-KINDS = ("inference", "maths", "instruction", "qa")
+KINDS = ("inference", "maths", "instruction", "qa", "reading")
 
 #: What makes two rows the same thing. Not the whole row: the same pair reached by two templates
 #: differs in wording and is one pair.
@@ -31,6 +31,9 @@ KEY: Dict[str, Tuple[str, ...]] = {
     "maths": ("question",),
     "instruction": ("instruction",),
     "qa": ("question",),
+    # A passage may be asked several different questions and each is its own row, so the key is
+    # both halves. Keyed on the passage alone, SQuAD would collapse to one row per paragraph.
+    "reading": ("passage", "question"),
 }
 
 
@@ -75,6 +78,19 @@ def _ascii_share(text: str) -> float:
     return sum(1 for c in text if ord(c) < 128) / max(1, len(text))
 
 
+def _holds_its_answer(row: Dict[str, Any]) -> bool:
+    """The reading corpus's own guarantee, re-checked at merge time rather than trusted.
+
+    The extractor already applied it, but a corpus that can verify itself should be verified at
+    every gate it passes: the answer must appear in the passage, at word boundaries, exactly once.
+    """
+    passage = " ".join(str(row.get("passage") or "").split()).lower()
+    answer = " ".join(str(row.get("answer") or "").split()).lower().strip(" .,;:!?\"'")
+    if not passage or not answer:
+        return False
+    return len(re.findall(r"(?<!\w)" + re.escape(answer) + r"(?!\w)", passage)) == 1
+
+
 def usable(kind: str, row: Dict[str, Any]) -> bool:
     """Whether this row is what its kind claims to be. The extractor is broad; this is not.
 
@@ -89,6 +105,8 @@ def usable(kind: str, row: Dict[str, Any]) -> bool:
     to be an answer, ``yes``/``no`` only where the question invites it, and both halves in the same
     script — which is what rules the translation pairs out.
     """
+    if kind == "reading":
+        return _holds_its_answer(row)
     if kind != "qa":
         return True
     # The task the row came from can say, in its own name, that its answer is not the answer.
