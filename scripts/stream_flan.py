@@ -90,6 +90,84 @@ _TOKEN = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"|[{}]', re.S)
 #: A row worth parsing says one of these somewhere. Checked on the raw slice before `json.loads`,
 #: because most of FLAN is translation, summarisation and dialogue — nothing this extractor can
 #: use — and decoding twenty kilobytes of JSON to discover that is the bulk of the work.
+#: How long a passage may be and still be one somebody could read to answer a question. The floor
+#: keeps out one-line prompts where "the answer is in the passage" is trivially true; the ceiling
+#: keeps the corpus a size the repository can hold.
+MIN_PASSAGE = 120
+MAX_PASSAGE = 2500
+
+#: How long an answer span may be. Beyond this it is a summary of the passage, not a span of it.
+MAX_SPAN = 120
+
+#: And a floor, because a one- or two-character answer matches somewhere in any passage by
+#: accident. `C` matched the option letter in `(associated with "A", "B", "C", "D")` and `no`
+#: matched the word inside *"classify your answers into yes or no"* — both of which are in the
+#: task's own instructions rather than in anything anybody read.
+MIN_SPAN = 4
+
+#: FLAN's prompt furniture: the wrapper a row is dressed in before its actual content. This is
+#: knowledge about how one dataset formats a string, not about language, and it is the same kind
+#: of thing `_PREMISE` and `_QUESTION` already are. Everything up to the last of these goes.
+_SCAFFOLD = re.compile(
+    r"(?:^|\n)\s*(?:Teacher\s*:\s*Now,? understand the problem\?[^\n]*"
+    r"|Detailed Instructions?\s*:"
+    r"|Given the task definition and input, reply with output\."
+    r"|You will be given a definition of a task first[^\n]*"
+    r"|Solve this instance\s*:"
+    r"|Teacher\s*:"
+    r"|Student\s*:"
+    r"|Input\s*:"
+    r"|Problem\s*:)", re.I)
+
+#: Corpora whose answers are spans of the passage **by construction**. This is a statement about
+#: provenance, not about language: SQuAD, Quoref, DROP, ROPES, MRQA, NewsQA, DuoRC, CoQA, QuAC and
+#: the ViquiQuAD family are built by asking annotators to mark a span, so a row from one of them
+#: that also passes the verbatim test is extractive twice over.
+#:
+#: The alternative was tried first and does not work. Requiring only that the answer appear once
+#: in the prompt admits every *classification* row in the dataset, because a classification task
+#: spells its label vocabulary out in its own instructions — "classify into yes or no" contains
+#: `no`, "(i) Hope speech ... (ii) Not Hope Speech" contains `Not Hope Speech`, and the reader
+#: would have learned to find its answers in the task's directions rather than in anything anybody
+#: read. Stripping the scaffolding helped and did not fix it, because for those tasks the
+#: instruction *is* the prompt.
+_EXTRACTIVE = re.compile(
+    r"squad|quoref|mrqa|drop|ropes|duorc|newsqa|coqa|quac|adversarial_qa|viquiquad|"
+    r"triviaqa|trivia_qa|natural_questions|hotpot|narrativeqa|record", re.I)
+
+#: The `In this task ...` sentence itself, which `_INSTRUCTION` already knows how to find.
+_TASK_SENTENCE = re.compile(r"In this task[^\n]{0,400}?\.\s", re.I)
+
+
+#: Where the content starts, when the prompt says so. Same class of thing as `_SCAFFOLD`: how one
+#: dataset labels the part of a string it wants read.
+_CONTENT = re.compile(r"(?:^|\s)(?:Passage|Context|Paragraph|Article|Story|Text|Sentence)\s*:\s*",
+                      re.I)
+
+
+def _passage(text: str) -> str:
+    """The prompt with its task instructions taken off, so what is left is what somebody read."""
+    cut = 0
+    for match in _SCAFFOLD.finditer(text):
+        cut = max(cut, match.end())
+    body = text[cut:]
+    marked = list(_CONTENT.finditer(body))
+    if marked:
+        body = body[marked[-1].end():]
+    body = _TASK_SENTENCE.sub(" ", body)
+    return " ".join(body.split())
+
+
+def _occurs_once(passage: str, answer: str) -> bool:
+    """The answer is in the passage, at word boundaries, and in exactly one place.
+
+    Once, and that is the load-bearing half. A span that appears twice may be either occurrence
+    and the row cannot say which; more to the point, an answer that appears many times is usually
+    a common word that the passage was never claiming as its answer.
+    """
+    found = re.findall(r"(?<!\w)" + re.escape(answer.lower()) + r"(?!\w)", passage.lower())
+    return len(found) == 1
+
 _WORTH = ("answer is", "In this task", "Premise:", "premise:", "Q:", "Question:", "question:")
 
 
@@ -262,6 +340,26 @@ def harvest(row: Dict[str, Any], keep: Keep) -> None:
                         "source": source, "licence": LICENCE},
                  asked.group(1)[:200])
 
+    # a question with the passage that answers it — and the answer verifiably *inside* the passage
+    #
+    # This is the one kind here that validates itself. `qa` keeps a question and a reply and has
+    # to trust that the reply answers it; five separate filters were needed after the fact to
+    # throw out the rows where it did not. Here the test is arithmetic: the answer is kept only
+    # if it appears, character for character, in the text the prompt supplied. A row that passes
+    # cannot be a classification label, an option index, or another question, because none of
+    # those is a substring of the passage.
+    if asked and reply and _EXTRACTIVE.search(task):
+        answered = " ".join(reply.split())
+        context = _passage(prompt[:asked.start()])
+        if (MIN_PASSAGE <= len(context) <= MAX_PASSAGE
+                and MIN_SPAN <= len(answered) <= MAX_SPAN
+                and _occurs_once(context, answered)):
+            keep.add("reading", {"passage": context,
+                                 "question": " ".join(asked.group(1).split()),
+                                 "answer": answered, "task": task,
+                                 "source": source, "licence": LICENCE},
+                     f"{context[:150]}|{asked.group(1)[:120]}")
+
 
 def one_file(name: str, out: str, caps: Dict[str, int], limit_bytes: int,
              tag: str) -> Dict[str, int]:
@@ -295,12 +393,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--maths", type=int, default=120_000)
     parser.add_argument("--instruction", type=int, default=60_000)
     parser.add_argument("--qa", type=int, default=400_000)
+    parser.add_argument("--reading", type=int, default=400_000)
     args = parser.parse_args(argv)
 
     files = (args.only,) if args.only else FILES
     share = max(1, args.workers)
     caps = {"inference": args.inference // share, "maths": args.maths // share,
-            "instruction": args.instruction // share, "qa": args.qa // share}
+            "instruction": args.instruction // share, "qa": args.qa // share,
+            "reading": args.reading // share}
     started = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(one_file, name, args.out, caps, args.bytes, f"{index:02d}"): name
@@ -316,7 +416,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 totals[key] = totals.get(key, 0) + value
     print(f"\nread {len(files)} files in {time.time() - started:.0f}s; "
           f"{totals.get('rows', 0):,} rows", file=sys.stderr)
-    for kind in ("inference", "maths", "instruction", "qa"):
+    for kind in ("inference", "maths", "instruction", "qa", "reading"):
         print(f"  {kind:<12}kept {totals.get('kept_' + kind, 0):>9,} "
               f"of {totals.get('saw_' + kind, 0):>9,} seen", file=sys.stderr)
     return 0
