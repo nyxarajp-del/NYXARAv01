@@ -150,11 +150,23 @@ def test_the_span_stage_learns_something(learned):
     assert engine.rules, "no rule for which span is the answer"
 
 
-def test_the_first_stage_does_not_use_its_rules(learned):
-    """It induces them and then does not rank by them, because argmax measured better."""
+def test_the_first_stage_ranks_by_the_ladder_not_by_the_cover(learned):
+    """Three ways to pick the sentence, and the default is the one that measured best.
+
+    ``rules`` is the greedy cover and gets 0.505; ``overlap`` is bare argmax and gets 0.580;
+    ``ladder`` ranks by the graded thresholds `induce.ladder` produces and gets 0.578 — argmax's
+    accuracy with a measured purity attached to each rung. All three stay runnable, the losing one
+    included, because deleting the configuration that loses deletes the evidence.
+    """
     engine, _held = learned
-    assert engine.sentence_by == "overlap"
-    assert engine.sentence_rules, "the induced version should still be induced and runnable"
+    assert engine.sentence_by == "ladder"
+    assert engine.rungs, "the ladder is empty; the first stage has nothing to rank by"
+    assert engine.sentence_rules, "the cover version should still be induced and runnable"
+    # The rungs are a ladder: thresholds on one reading, and purity climbing with the threshold.
+    from nyxara.njp.induce import AtLeast
+    assert all(isinstance(v, AtLeast) for r in engine.rungs for _n, v in r.terms)
+    climbing = [r.purity for r in engine.rungs]
+    assert climbing == sorted(climbing), climbing
 
 
 def test_the_sentence_stage_is_measured_apart(learned, corpus):
