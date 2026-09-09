@@ -60,12 +60,19 @@ PER_GROUP = 6
 MAX_GROUPS = 120_000
 
 
-def _clip(text: str) -> str:
-    return str(text or "")[:HEAD]
+def _clip(text: str, head: int = 0) -> str:
+    return str(text or "")[:(head or HEAD)]
 
 
-def one_file(name: str, out: str, per_group: int, limit_bytes: int) -> Dict[str, Any]:
-    """One submix, in its own process, writing the groups it saw."""
+def one_file(name: str, out: str, per_group: int, limit_bytes: int,
+             by_task: bool = False, max_target: int = 0, head: int = 0) -> Dict[str, Any]:
+    """One submix, in its own process, writing the groups it saw.
+
+    Two jobs, one pass. Grouped by task *and template* with a few rows each, what comes out is
+    what :mod:`nyxara.njp.shapes` aligns to find the template. Grouped by task alone with many
+    rows and only short answers kept, what comes out is what :mod:`nyxara.njp.tasks` learns the
+    task *from* — a template says what is being asked, and it takes examples to learn the answer.
+    """
     kept: Dict[str, list] = {}
     rows = 0
     full = 0
@@ -79,7 +86,7 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int) -> Dict[str,
             index = str(row.get("_template_idx") or "")
             if not task:
                 continue
-            key = f"{task}\t{index}"
+            key = task if by_task else f"{task}\t{index}"
             here = kept.get(key)
             if here is None:
                 if len(kept) >= MAX_GROUPS:
@@ -88,7 +95,9 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int) -> Dict[str,
                 here = kept[key] = []
             if len(here) >= per_group:
                 continue
-            here.append({"inputs": _clip(row.get("inputs")),
+            if max_target and len(str(row.get("targets") or "")) > max_target:
+                continue
+            here.append({"inputs": _clip(row.get("inputs"), head),
                          "targets": _clip(row.get("targets")),
                          "kind": str(row.get("_template_type") or ""),
                          "source": str(row.get("_task_source") or "")})
@@ -98,7 +107,7 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int) -> Dict[str,
     except Exception as error:  # noqa: BLE001 — one file failing is not the run failing
         print(f"  {name}: stopped after {rows:,} rows — {error}", file=sys.stderr, flush=True)
 
-    target = Path(out) / f"tasks.{name.split('_submix')[0]}.jsonl.gz"
+    target = Path(out) / f"rows.{name.split('_submix')[0]}.jsonl.gz"
     target.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(target, "wt", encoding="utf-8") as handle:
         for key, group in kept.items():
@@ -118,13 +127,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--per-group", type=int, default=PER_GROUP)
     parser.add_argument("--bytes", type=int, default=0)
+    parser.add_argument("--by-task", action="store_true",
+                        help="group by task alone, for learning rather than aligning")
+    parser.add_argument("--max-target", type=int, default=0,
+                        help="keep only rows whose answer is at most this long")
+    parser.add_argument("--head", type=int, default=0)
+    parser.add_argument("--tag", default="tasks")
     args = parser.parse_args(argv)
 
     files = (args.only,) if args.only else FILES
     began = time.time()
     totals = {"rows": 0, "groups": 0, "refused": 0}
     with ProcessPoolExecutor(max_workers=max(1, args.workers)) as pool:
-        futures = [pool.submit(one_file, name, args.out, args.per_group, args.bytes)
+        futures = [pool.submit(one_file, name, args.out, args.per_group, args.bytes,
+                               args.by_task, args.max_target, args.head)
                    for name in files]
         for future in futures:
             try:
