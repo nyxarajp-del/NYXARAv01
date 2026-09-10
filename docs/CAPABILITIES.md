@@ -5615,3 +5615,95 @@ floor of 0.389. Trying several seeds and preferring a pure rule: five rules, 0.6
 **`nyxara/njp/tasks.py` was overwritten.** V.58 first shipped under that name, on top of the V.17
 coding-task bank that `njp/school.py` reaches into in eight places. Nothing caught it because only
 the new test file had been run. Restored byte-for-byte; the module lives at `njp/answering.py`.
+
+---
+
+## V.66–V.68 — three organs re-examined, and what falsifying them actually found
+
+Everything below came from asking one question of code that already existed: **what is this
+compared against?** In each case the answer was *nothing*, and in each case the number that had
+been recorded as a hard result turned out to be a mechanism nobody had tested.
+
+### The entailer had one rule because the bar was set where nothing passes
+
+564,166 pairs, one rule. That had been written down as the honest shape of a negative result. It
+was not. The purity bar stood at 0.72, and natural-language inference read off surface differences
+between two sentences is simply not clean to 0.72.
+
+Decomposed properly — how often a rule fires, how right it is *when* it fires, and what the organ
+scores overall against its own base rate — then repeated on a disjoint slice of the corpus:
+
+| purity | rules | speaks on | right when it speaks | overall | lift |
+|---|---|---|---|---|---|
+| 0.40 | 6 | 1.000 | 0.461 | 0.461 | +0.028 |
+| **0.45** | 6 | 0.783 | 0.540 | **0.504** | **+0.077** |
+| 0.50 | 4–6 | 0.638 | 0.559 | 0.492 | +0.064 |
+| 0.55 | 3–4 | 0.558 | 0.565 | 0.475 | +0.047 |
+| 0.65 | 1 | 0.067 | 0.689 | 0.457 | +0.029 |
+| 0.72 | 1 | 0.052 | 0.780 | 0.463 | +0.030 |
+
+Read the middle two columns together. A high bar does not make the organ **wrong** — at 0.72 its
+one rule is right 78% of the time. It makes it **silent**, firing on one pair in twenty. At 0.45
+the rules are right 54% of the time, reach four pairs in five, and the organ scores 0.504 against a
+base rate of 0.428.
+
+The peak is at 0.45 on both slices by nearly the same margin, and 0.40 collapses to the base rate —
+speaking on everything and saying nothing. A unimodal curve with its maximum in the same place on
+two independent samples is a property of the subject, not of a sample.
+
+Four tests pinned the old regime (`coverage < 0.25`, `accuracy < base_rate`, "one real rule and it
+covers a sliver"). Every one of them was true at 0.72. They are **rewritten, with the superseded
+assertions kept in the replacement's docstring** — a test that quietly changes what it claims is a
+finding quietly rewritten.
+
+### The same relation, asked in two vocabularies, was six classes
+
+FLAN offers `yes / no / it is not possible to tell` in some templates and
+`entailment / contradiction / neutral` in others. Same three relations. The entailer treated them
+as six classes, so the three rare spellings — 401 `entailment`, 391 `contradiction` out of 564,166
+— could never clear a support floor in the thousands, **and each of them sat in the negatives of
+the label it means**. Every `contradiction` pair was evidence against `no`.
+
+`relation_of` folds; `as_asked` puts the spelling back, because the vocabulary belongs to the
+*question* and answering the right relation in the wrong words is still wrong. The school folds the
+gold the same way — otherwise a folded answer is marked wrong on a pair whose template spelled it
+differently, quietly, with a by-label table that still looks sensible.
+
+Worth +0.006 of lift. **Small**, and done anyway: two names for one relation are one relation.
+
+### The passage reader's span stage was never given a baseline
+
+`exact_when_sentence_right = 0.0259` had sat in its report for two versions looking like a hard
+problem. The sentence stage has had a baseline to beat since it was built; the span stage had none.
+
+Given one — every picker seeing the same candidate list, conditioned on the gold span being in it
+so the generator's ceiling cannot hide inside the ranker's score:
+
+| picker | gets the gold span |
+|---|---|
+| **learned ranker** | **0.0456** |
+| fewest question-words | 0.0312 |
+| longest | 0.0216 |
+| first | 0.0168 |
+| random | 0.0144 |
+| shortest | 0.0048 |
+
+The ranker is ranking — three times random, half again the best one-liner. What is wrong is the
+**pool: 142 candidates in the average gold sentence**. No improvement to ranking fetches that back,
+and the version spent raising the sentence stage was spent on the wrong thing for the second time.
+
+One fix tried and reported as a null: `njp.asked` knows what kind of thing a question wants, so
+candidates that cannot be that kind should be droppable. The pool goes from **131.4 to 125.7** —
+four percent — and loses 4.3% of the reachable gold. The organ abstains on 55% of these questions,
+and on the 40% where it answers `span`, a span is what nearly every candidate already is. Only
+`count` and `year` cut hard (132→2.8, 109→5.5) and together they are 24 rows in 600.
+
+**Fifth consecutive null result for one organ feeding another in this package.**
+
+### And two tests that were never broken
+
+The full suite reported timeouts in `tests/growth`. Timed alone: 190s and 227s, both passing,
+against a 300s bar. A test at three quarters of its budget passes on an idle machine and times out
+whenever anything else is using one — and a timeout reads as a hang. Both do real work over the
+live source tree, so the fix is headroom, not speed: an explicit 900s on those two with the
+measured duration written above each, and the global bar left at 300 so a real hang still shows.
