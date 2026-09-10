@@ -13,7 +13,7 @@ import pytest
 from nyxara.njp.finding import (
     Finder, Reading, Setting, candidates, probe, probe_sentence, read_passages, sentences_of,
 )
-from nyxara.njp.findingschool import examine, split, taught_finder
+from nyxara.njp.findingschool import examine, span_baselines, split, taught_finder
 
 
 @pytest.fixture(scope="module")
@@ -245,3 +245,31 @@ def test_split_is_deterministic_and_disjoint(corpus):
     # By passage, not by row. SQuAD asks a dozen questions of one paragraph, so a row-wise cut
     # puts the same passage on both sides and the reader is examined on what it studied.
     assert not ({r.passage for r in a_learn} & {r.passage for r in a_held})
+
+
+# --------------------------------------------------------------------------------------------- #
+#  the span stage, against something
+# --------------------------------------------------------------------------------------------- #
+def test_the_span_ranker_beats_picking_one_at_random(corpus):
+    """The falsification the second stage went two versions without.
+
+    The sentence stage has had a baseline since it was built; the span stage had none, which is
+    how `exact_when_sentence_right = 0.0259` sat in a report looking like a hard problem rather
+    than like a mechanism nobody had tested. It is a hard problem — 142 candidates in the average
+    gold sentence — and the ranker does beat every way of choosing without one.
+    """
+    learn, held = split(corpus)
+    engine = taught_finder(learn[:400])
+    got = span_baselines(engine, held[:150])
+    assert got["rows"] > 50, got
+    assert got["learned"] > got["random"], got
+    assert got["learned"] >= got["shortest"], got
+
+
+def test_the_baselines_all_see_the_same_candidates(corpus):
+    """Conditioned on the gold being reachable, or the generator's ceiling hides inside the ranker."""
+    learn, held = split(corpus)
+    got = span_baselines(taught_finder(learn[:400]), held[:150])
+    assert got["candidates_per_sentence"] > 1
+    assert all(0.0 <= got[k] <= 1.0
+               for k in ("learned", "random", "first", "longest", "shortest", "fewest_asked"))

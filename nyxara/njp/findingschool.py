@@ -56,10 +56,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from nyxara.njp.asked import Asked
 from nyxara.njp.askedschool import split as split_questions
 from nyxara.njp.finding import (
-    Finder, Reading, Setting, candidates, gold_key, read_passages,
+    Finder, Reading, Setting, Span, _content, candidates, gold_key, probe, read_passages,
 )
 
-__all__ = ["Result", "SEED", "TRAIN", "LEARN_FROM", "HELD_OUT",
+__all__ = ["Result", "SEED", "TRAIN", "LEARN_FROM", "HELD_OUT", "span_baselines",
            "split", "taught_finder", "examine", "decompose", "sentence_baselines",
            "gold_sentence", "run"]
 
@@ -273,9 +273,88 @@ def decompose(engine: Finder, held: Sequence[Reading]) -> Dict[str, float]:
     }
 
 
+def span_baselines(engine: Finder, held: Sequence[Reading]) -> Dict[str, float]:
+    """Inside the **gold sentence**, how often is the gold span chosen — and by what?
+
+    The sentence stage has had a baseline to beat since it was built, and the span stage never
+    did, which is how `exact_when_sentence_right = 0.0259` sat in a report for two versions
+    looking like a hard problem rather than like a mechanism nobody had falsified.
+
+    Every picker here sees the same candidate list, so the columns differ only in how they choose.
+    The scores are conditioned on the gold span *being* in that list — otherwise the ceiling
+    (`gold_is_a_candidate`) is folded in and no picker can be told apart from the generator.
+
+    ``learned`` is the induced ranker. If it does not beat ``random``, it is not ranking. If it
+    does not beat ``longest`` or ``fewest_asked``, the rules are worth less than one line.
+
+    Measured, 1,500 read and 600 held out, on the 417 rows where the gold span is reachable:
+
+        learned         0.0456
+        fewest_asked    0.0312
+        longest         0.0216
+        first           0.0168
+        random          0.0144
+        shortest        0.0048
+
+    So the ranker **is** ranking — three times random, half again the best one-liner — and the
+    `exact_when_sentence_right = 0.0259` this was built to explain is not a broken mechanism. It
+    is **142 candidates in the average gold sentence**. The generator, not the ranking, is where
+    this stage is lost, and raising the ranker cannot fetch back a pool that size.
+
+    One thing tried and reported as a null: `njp.asked` knows what kind of thing a question wants,
+    and cutting candidates that cannot be that kind takes the pool from **131.4 to 125.7** — four
+    percent — while losing 4.3% of the reachable gold. The reason is in the per-kind table: the
+    organ abstains on 55% of these questions, and on the 40% where it answers `span`, a span is
+    what nearly every candidate already is. Only `count` and `year` cut hard (132 to 2.8, 109 to
+    5.5) and together they are 24 rows in 600. Fifth consecutive null result for one organ feeding
+    another in this package.
+    """
+    rng = random.Random(SEED)
+    got = {k: 0 for k in ("learned", "random", "first", "longest",
+                          "shortest", "fewest_asked")}
+    reachable = 0
+    pool_sizes: List[int] = []
+    for reading in held:
+        gold = gold_sentence(reading)
+        fixed = Setting.of(reading)
+        if gold >= len(fixed.spans):
+            continue
+        said, start = fixed.spans[gold]
+        pool = candidates(said)
+        wanted = gold_key(reading.answer)
+        if not pool or not any(s.key == wanted for s in pool):
+            continue
+        reachable += 1
+        pool_sizes.append(len(pool))
+        asked = _content(reading.question)
+        want_shape = engine.wants(reading.question)
+
+        best, chosen = (0, 0.0), None
+        for span in pool:
+            placed = Span(text=span.text, start=span.start + start, end=span.end + start,
+                          sentence=gold)
+            marks = probe(reading, placed, want_shape, use_shape=engine.use_shape, setting=fixed)
+            score = engine._score(marks, engine.rules)
+            if score > best:
+                best, chosen = score, span
+        got["learned"] += int(chosen is not None and chosen.key == wanted)
+        got["random"] += int(rng.choice(pool).key == wanted)
+        got["first"] += int(pool[0].key == wanted)
+        got["longest"] += int(max(pool, key=lambda s: len(s.text)).key == wanted)
+        got["shortest"] += int(min(pool, key=lambda s: len(s.text)).key == wanted)
+        # An answer is usually not made of the question's own words.
+        got["fewest_asked"] += int(min(
+            pool, key=lambda s: (len(set(_content(s.text)) & asked), -len(s.text))
+        ).key == wanted)
+
+    out = {name: round(n / max(1, reachable), 4) for name, n in got.items()}
+    out["rows"] = reachable
+    out["candidates_per_sentence"] = round(sum(pool_sizes) / max(1, len(pool_sizes)), 1)
+    return out
+
+
 def sentence_baselines(held: Sequence[Reading]) -> Dict[str, float]:
     """What the first stage has to beat, and the number that turned out to beat it."""
-    from nyxara.njp.finding import _content
     n = max(1, len(held))
     overlap = first = 0
     for reading in held:
