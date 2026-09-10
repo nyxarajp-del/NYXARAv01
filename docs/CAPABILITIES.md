@@ -5788,7 +5788,22 @@ The same 1,007 tasks, thirty-three rows lost out of 280,305. Across the whole re
 skipped 2,957 rows whose clipped prompt repeated one already kept — against 32,821 duplicates in
 the old corpus, so the clip did about 91% of the work and the refusal caught the rest.
 
-**V.64's figures (0.459 against a null of 0.258) stand as measured but were taken over a corpus a
-third of whose tasks carried duplicates.** The re-measurement on the clean corpus is running; until
-it lands, the honest position is that the old figure is unverified rather than wrong, and no
-argument about which way it moves is a substitute for the number.
+**V.64's figures were taken over a corpus a third of whose tasks carried duplicates.** Re-measured
+on the clean one:
+
+| | in scope | beat own floor | accuracy | majority | lift |
+|---|---|---|---|---|---|
+| with shapes | 1,007 | **553 = 0.549** | 0.527 | 0.473 | +0.054 |
+| whole prompt | 1,007 | 553 = 0.549 | 0.526 | 0.473 | +0.053 |
+| shuffled answers | 1,007 | 301 = 0.299 | 0.472 | 0.475 | **−0.002** |
+
+**Above chance +0.250**, against +0.201 on the duplicated corpus. Both halves moved: the system
+0.459 → 0.549 and the null 0.258 → 0.299, and the distance between them grew by a quarter. So the
+error did run downward, as argued — but the argument is worth nothing next to the number, and it
+was made before the number existed, which is the habit this whole organ is meant to break.
+
+Roughly **250 tasks genuinely learned**, against roughly 200 before.
+
+And the shapes contribute exactly nothing again: 553 against 553, the same integer. That is the
+sixth consecutive null for one organ feeding another here, and the first time the two columns have
+been not merely close but identical.
