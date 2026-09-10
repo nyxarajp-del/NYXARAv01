@@ -9,6 +9,8 @@ by reading the instruction — which is identical in every row — instead of th
 
 from __future__ import annotations
 
+import gzip
+import json
 import random
 import statistics
 from collections import Counter
@@ -221,3 +223,67 @@ def test_asking_again_later_gives_the_same_answer_as_during_the_exam():
     assert engine.answer(got, signal.prompt) == engine.answer(got, signal.prompt, got.vocabulary)
     said = [engine.answer(got, r.prompt) for r in rows]
     assert len(set(said)) > 1, "every answer the same means no rule fired"
+
+
+# --------------------------------------------------------------------------------------------- #
+#  the exam over a collection on disk
+# --------------------------------------------------------------------------------------------- #
+def _write(path, groups):
+    """The collector's own output format, so the readers are exercised and not bypassed."""
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        for task, rows in groups:
+            handle.write(json.dumps({"task": task, "template": "0", "rows": rows}) + "\n")
+    return path
+
+
+def _rows(examples):
+    return [{"inputs": e.prompt, "targets": e.answer, "source": "test"} for e in examples]
+
+
+def test_examine_counts_the_three_groups_apart(tmp_path):
+    """A free-text task is *not attempted*, not failed, and the two are different claims."""
+    free = [Example(prompt=TEMPLATE.format(FILLER[i % 3]), answer=f"a sentence {i}",
+                    task="task_free") for i in range(60)]
+    thin = a_task(n=LEAST_EXAMPLES - 5, task="task_thin")
+    path = _write(tmp_path / "rows.test.jsonl.gz",
+                  [("task_reviews", _rows(a_task())),
+                   ("task_free", _rows(free)),
+                   ("task_thin", _rows(thin))])
+    got = examine([path])
+    assert (got.in_scope, got.free_text, got.too_few) == (1, 1, 1)
+    assert got.tasks == 3
+    assert got.won == 1
+
+
+def test_examine_runs_the_null_on_the_same_tasks(tmp_path):
+    """The null must see the same tasks — a floor measured on a different set is not a floor."""
+    path = _write(tmp_path / "rows.test.jsonl.gz", [("task_reviews", _rows(a_task()))])
+    real, null = examine([path]), examine([path], shuffled=True)
+    assert real.in_scope == null.in_scope == 1
+    assert real.results[0].asked == null.results[0].asked
+    assert real.above_chance(null) >= 0.0
+
+
+def test_shapes_by_task_keeps_the_template_with_the_most_rows_behind_it(tmp_path):
+    """A shape induced from six rows is better evidence than one induced from three."""
+    from nyxara.njp.shapes import Shape
+
+    rows = a_task()
+    path = tmp_path / "shapes.test.jsonl.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"task": "task_reviews", "template": "0",
+                                 "rows": _rows(rows[:3])}) + "\n")
+        handle.write(json.dumps({"task": "task_reviews", "template": "1",
+                                 "rows": _rows(rows[3:9])}) + "\n")
+    got = shapes_by_task([path])
+    assert set(got) == {"task_reviews"}
+    assert isinstance(got["task_reviews"], Shape)
+    assert got["task_reviews"].template == "1"
+
+
+def test_a_group_too_thin_to_align_yields_no_shape_rather_than_a_bad_one(tmp_path):
+    path = tmp_path / "shapes.test.jsonl.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"task": "task_reviews", "template": "0",
+                                 "rows": _rows(a_task()[:2])}) + "\n")
+    assert shapes_by_task([path]) == {}

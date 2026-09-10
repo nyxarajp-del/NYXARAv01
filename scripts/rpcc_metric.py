@@ -31,8 +31,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 # --------------------------------------------------------------------------- #

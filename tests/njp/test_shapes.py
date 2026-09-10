@@ -180,3 +180,20 @@ def test_the_readable_form_is_not_the_storable_form():
     assert "parts" not in shape.to_dict()
     assert "parts" in shape.to_row()
     assert HOLE.format(1) in shape.to_dict()["shape"]
+
+
+def test_a_shape_built_by_hand_reads_the_same_way_an_induced_one_does():
+    """`parts` is the whole interface. Nothing about `read` depends on how the parts were found.
+
+    Worth pinning because it is what lets the shipped corpus work: a shape loaded from disk was
+    never induced in that process, and it has to behave identically to one that was.
+    """
+    by_hand = Shape(task="t", parts=("A: ", 0, " B: ", 1))
+    assert by_hand.read("A: one B: two") == ["one", "two"]
+    assert by_hand.read("nothing of the kind") is None
+    assert by_hand.render() == f"A: {HOLE.format(1)} B: {HOLE.format(2)}"
+
+
+def test_a_shape_with_no_holes_reads_nothing_and_claims_nothing():
+    assert Shape(task="t", parts=("just literal text",)).read("just literal text") == []
+    assert Shape(task="t").read("anything") == []
