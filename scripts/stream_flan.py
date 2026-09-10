@@ -43,7 +43,7 @@ import time
 import urllib.request
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
 BASE = "https://huggingface.co/datasets/Open-Orca/FLAN/resolve/main/"
 UA = "NYXARA-research/0.1 (https://github.com/nyxarajp-del/NYXARAv01) full-read"
@@ -62,6 +62,11 @@ FILES: Tuple[str, ...] = (
 )
 
 CHUNK = 1 << 20
+
+#: How many times a transfer that stopped short of `Content-Length` is resumed before the read is
+#: declared failed. Declared failed rather than returned quietly: a short read that returns is
+#: worse than one that raises, because every count downstream is then wrong and nothing says so.
+RETRIES = 4
 
 #: Yielded in place of a row the pre-check ruled out, so the caller still counts it as read. A
 #: reader that silently dropped them could not say how much of the dataset it had been through.
@@ -171,6 +176,56 @@ def _occurs_once(passage: str, answer: str) -> bool:
 _WORTH = ("answer is", "In this task", "Premise:", "premise:", "Q:", "Question:", "question:")
 
 
+def _scan(buffer: str, depth: int, start: int) -> Tuple[List[Any], str, int, int]:
+    """One pass of the brace scanner over what has arrived, and the state it leaves behind.
+
+    Returns the objects closed in this pass, the buffer to carry, and the depth and start to
+    resume from. Pulled out of :func:`objects` so that the reader around it can reconnect and
+    resume a cut transfer without the parser knowing anything happened.
+    """
+    found: List[Any] = []
+    matches = list(_TOKEN.finditer(buffer))
+    # Where the last complete string ended; a quote after that opens one this chunk cannot
+    # close, and every brace beyond it is inside a prompt rather than in the structure.
+    after_strings = 0
+    for match in matches:
+        if match.group(0)[0] == '"':
+            after_strings = match.end()
+    unpaired = buffer.find('"', after_strings)
+    edge = unpaired if unpaired >= 0 else len(buffer)
+
+    cut = 0
+    for match in matches:
+        if match.start() >= edge:
+            break
+        token = match.group(0)
+        if token == "{":
+            if depth == 0:
+                start = match.start()
+            depth += 1
+        elif token == "}":
+            depth -= 1
+            if depth == 0 and start >= 0:
+                raw = buffer[start:match.end()]
+                if any(mark in raw for mark in _WORTH):
+                    try:
+                        found.append(json.loads(raw))
+                    except Exception:  # noqa: BLE001 — a malformed object is skipped
+                        pass
+                else:
+                    found.append(_SKIPPED)
+                cut = match.end()
+                start = -1
+
+    # Carry the object in progress, and **forget the depth that counted its opening brace** — the
+    # next pass re-reads that brace from the start of the carried buffer, so keeping the count
+    # meant counting it twice. That was the other half of the same silence: depth climbed by one
+    # per chunk, never returned to zero, and the reader spent the rest of a nineteen-gigabyte file
+    # convinced it was inside one object.
+    keep_from = start if depth > 0 and start >= 0 else min(max(cut, 0), edge)
+    return found, buffer[keep_from:], 0, -1
+
+
 def objects(url: str, *, limit_bytes: int = 0) -> Iterator[Dict[str, Any]]:
     """Every JSON object in the file, cut out of the byte stream as it arrives.
 
@@ -183,69 +238,63 @@ def objects(url: str, *, limit_bytes: int = 0) -> Iterator[Dict[str, Any]]:
     prompt as structure instead: depth went 1, 2, 3, 4, 5 across successive chunks, not one further
     object ever closed, and the buffer grew without bound. The reader had emitted 994 objects out
     of the first megabyte and then nothing at all — and reported no error, because from its own
-    point of view it was still patiently reading one very large object.
+    point of view it was still patiently reading one very large object. :func:`_scan` stops at the
+    first quote it cannot close, and everything at or after it is carried into the next chunk.
 
-    So the scan stops at the first quote it cannot close. Matches are taken as a list, the earliest
-    unpaired ``"`` is found, everything at or after it is discarded as unscanned, and the buffer
-    carries from there into the next chunk.
+    **The end of the file is the other silence.** A transfer that dies part-way returns an empty
+    block, which is exactly what a finished file returns, so a short read used to be reported as a
+    complete one. That is not hypothetical: ``niv2_submix_data.jsonl`` came back as 602,159 rows
+    on one run and 1,018,810 on the next, neither raising a thing, and both were believed. So the
+    bytes are counted against ``Content-Length``, a shortfall is resumed with a ranged request from
+    where it stopped — the parser's state carries across, since only bytes were lost — and a read
+    that cannot be completed raises rather than returning what it happens to have.
     """
-    request = urllib.request.Request(url, headers={"User-Agent": UA})
     read = 0
+    expected = 0
     buffer = ""
     depth = 0
     start = -1
-    with urllib.request.urlopen(request, timeout=120) as response:
-        while True:
-            block = response.read(CHUNK)
-            if not block:
-                break
-            read += len(block)
-            buffer += block.decode("utf-8", "replace")
-
-            matches = list(_TOKEN.finditer(buffer))
-            # Where the last complete string ended; a quote after that opens one this chunk cannot
-            # close, and every brace beyond it is inside a prompt rather than in the structure.
-            after_strings = 0
-            for match in matches:
-                if match.group(0)[0] == '"':
-                    after_strings = match.end()
-            unpaired = buffer.find('"', after_strings)
-            edge = unpaired if unpaired >= 0 else len(buffer)
-
-            cut = 0
-            for match in matches:
-                if match.start() >= edge:
-                    break
-                token = match.group(0)
-                if token == "{":
-                    if depth == 0:
-                        start = match.start()
-                    depth += 1
-                elif token == "}":
-                    depth -= 1
-                    if depth == 0 and start >= 0:
-                        raw = buffer[start:match.end()]
-                        if any(mark in raw for mark in _WORTH):
-                            try:
-                                yield json.loads(raw)
-                            except Exception:  # noqa: BLE001 — a malformed object is skipped
-                                pass
-                        else:
-                            yield _SKIPPED
-                        cut = match.end()
-                        start = -1
-
-            # Carry the object in progress, and **forget the depth that counted its opening
-            # brace** — the next pass re-reads that brace from the start of the carried buffer, so
-            # keeping the count meant counting it twice. That was the other half of the same
-            # silence: depth climbed by one per chunk, never returned to zero, and the reader spent
-            # the rest of a nineteen-gigabyte file convinced it was inside one object.
-            keep_from = start if depth > 0 and start >= 0 else min(max(cut, 0), edge)
-            buffer = buffer[keep_from:]
-            depth = 0
-            start = -1
-            if limit_bytes and read >= limit_bytes:
-                return
+    tries = 0
+    while True:
+        headers = {"User-Agent": UA}
+        if read:
+            headers["Range"] = f"bytes={read}-"
+        cut_short = ""
+        try:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(request, timeout=120) as response:
+                if not expected:
+                    # Only ever from the first connection: on a ranged request this header is what
+                    # remains, not the size of the whole file.
+                    expected = int(response.headers.get("Content-Length") or 0)
+                while True:
+                    block = response.read(CHUNK)
+                    if not block:
+                        break
+                    read += len(block)
+                    buffer += block.decode("utf-8", "replace")
+                    found, buffer, depth, start = _scan(buffer, depth, start)
+                    for row in found:
+                        yield row
+                    if limit_bytes and read >= limit_bytes:
+                        return
+        except Exception as error:  # noqa: BLE001 — a dropped transfer is resumed, not lost
+            if not expected or tries >= RETRIES:
+                raise
+            cut_short = str(error)
+        if expected and read >= expected:
+            return
+        if not expected:
+            # Nothing to check the read against, so nothing can be claimed about it either way.
+            return
+        tries += 1
+        if tries > RETRIES:
+            raise IOError(f"{url}: stopped at {read:,} of {expected:,} bytes after {RETRIES} "
+                          f"attempts to resume")
+        print(f"  {url.rsplit('/', 1)[-1]}: {read:,} of {expected:,} bytes"
+              f"{' — ' + cut_short if cut_short else ''}; resuming ({tries}/{RETRIES})",
+              file=sys.stderr, flush=True)
+        time.sleep(2 ** tries)
 
 
 class Keep:

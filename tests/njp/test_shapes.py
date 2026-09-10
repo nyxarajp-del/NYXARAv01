@@ -9,7 +9,7 @@ the reconstruction exam every one of them scores perfectly.
 
 from __future__ import annotations
 
-from nyxara.njp.shapes import MAX_SLOTS, Group, Shape, align, induce
+from nyxara.njp.shapes import HOLE, MAX_SLOTS, Group, Shape, align, induce
 from nyxara.njp.shapeschool import LEARN_ROWS, _rebuild, examine, grade
 
 TEMPLATE = ("In this task, you are given a question and a context passage. "
@@ -152,3 +152,31 @@ def test_a_group_that_yields_no_shape_is_counted_not_hidden():
     assert report.groups == 2
     assert report.shaped == 1
     assert report.coverage == 0.5
+
+
+# --------------------------------------------------------------------------------------------- #
+#  the shipped corpus
+# --------------------------------------------------------------------------------------------- #
+def test_a_shipped_shape_still_reads_the_rows_it_was_induced_from(tmp_path):
+    """The round trip, which the readable form silently could not do.
+
+    ``to_dict`` renders holes as ``⟨1⟩`` for a person to look at, and a corpus written from it
+    loads as shapes whose ``parts`` are empty — matching nothing, refusing every row, and saying
+    nothing about it. So what is shipped is ``to_row``, and this is the test that says so.
+    """
+    from nyxara.njp.shapes import read_shapes, write_shapes
+
+    shape = induce(a_group())
+    path = tmp_path / "shapes.jsonl.gz"
+    assert write_shapes([shape], path) == 1
+    back = read_shapes(path)
+    assert len(back) == 1
+    assert back[0].parts == shape.parts
+    assert back[0].read(a_group().prompts[0]) == shape.read(a_group().prompts[0])
+
+
+def test_the_readable_form_is_not_the_storable_form():
+    shape = induce(a_group())
+    assert "parts" not in shape.to_dict()
+    assert "parts" in shape.to_row()
+    assert HOLE.format(1) in shape.to_dict()["shape"]

@@ -44,8 +44,8 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
-__all__ = ["Slot", "Shape", "Group", "align", "induce", "read_groups", "CORPUS",
-           "MIN_ANCHOR", "TRIM"]
+__all__ = ["Slot", "Shape", "Group", "align", "induce", "read_groups", "read_shapes",
+           "write_shapes", "CORPUS", "MIN_ANCHOR", "TRIM"]
 
 CORPUS = Path(__file__).with_name("data") / "flan_shapes.jsonl.gz"
 
@@ -185,10 +185,24 @@ class Shape:
         return found
 
     def to_dict(self) -> Dict[str, Any]:
+        """The readable form: what a person or a report wants to see."""
         return {"task": self.task, "template": self.template, "source": self.source,
                 "shape": self.render(), "slots": [s.to_dict() for s in self.slots],
                 "answers": list(self.answers[:4]), "answer_space": list(self.answer_space),
                 "rows": self.rows}
+
+    def to_row(self) -> Dict[str, Any]:
+        """The storable form, which is a different thing and was missing.
+
+        :meth:`to_dict` renders the template for reading — holes as ``⟨1⟩`` — and that cannot be
+        parsed back into ``parts`` without guessing where a literal ``⟨1⟩`` in somebody's prompt
+        ends and a hole begins. :func:`read_shapes` reads ``parts``, so a corpus written from
+        ``to_dict`` would have loaded as a list of shapes that match nothing at all, silently.
+        """
+        return {"task": self.task, "template": self.template, "source": self.source,
+                "parts": list(self.parts),
+                "slots": [{"index": s.index, "examples": list(s.examples)} for s in self.slots],
+                "answers": list(self.answers), "rows": self.rows}
 
 
 @dataclass
@@ -370,6 +384,18 @@ def read_groups(path: Path) -> Iterator[Group]:
                     source=str((rows[0] if rows else {}).get("source") or ""),
                     prompts=tuple(str(r.get("inputs") or "") for r in rows),
                     targets=tuple(str(r.get("targets") or "") for r in rows))
+
+
+def write_shapes(shapes: Sequence[Shape], path: Optional[Path] = None) -> int:
+    """Ship the induced shapes, one to a line, in the form :func:`read_shapes` reads."""
+    target = Path(path) if path is not None else CORPUS
+    target.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    with gzip.open(target, "wt", encoding="utf-8") as handle:
+        for shape in shapes:
+            handle.write(json.dumps(shape.to_row(), ensure_ascii=False) + "\n")
+            written += 1
+    return written
 
 
 def read_shapes(path: Optional[Path] = None) -> List[Shape]:
