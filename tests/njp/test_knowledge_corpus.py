@@ -233,9 +233,19 @@ def test_shipped_kb_parses_without_warnings():
 
 
 def test_every_question_is_answerable_from_a_triple_in_the_same_build(rows):
-    """The invariant the exam rests on: no question in the QA file has no fact behind it."""
+    """The invariant the exam rests on: no question in the QA file has no fact behind it.
+
+    The grounder is **loaded with these same triples first**, and that is not a convenience. Some
+    question forms cannot be read without the store: `"What is Age of Exploration?"` is either a
+    question about the subject *Age of Exploration* or a question about the ``age`` *of*
+    Exploration, and nothing in the grammar distinguishes them — `_NOUN_OF` resolves it by asking
+    whether the whole phrase is a subject the store knows. An empty grounder knows no subjects, so
+    it reads every such question the second way, which is a path production never takes.
+    """
     held = {(row["subject"], row["predicate"]) for row in rows}
     grounder = Grounder()
+    grounder.load_dict({"facts": [dict(row, source="kb", text="") for row in kc.triples(rows)]})
+    grounder._reindex()
     for pair in kc.qa_pairs(rows):
         # Lowercased first, because that is what `Grounder.answer` does before it reads a
         # question. Reading the raw string here would test a path production never takes.

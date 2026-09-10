@@ -1194,7 +1194,12 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # ``produces`` (see the process-intake tests), so reading the question as ``causes`` meant a
     # verb that could be told and never asked back — the exact defect the comment above this
     # block names. It reaches ``produces`` through `_PREDICATE_ALIASES` like every other spelling.
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:cause|causes|lead\s+to|leads\s+to)\b",
+    # Anchored to the end of the question, and it has to be. `.+?` is non-greedy, so without the
+    # anchor this takes the shortest prefix before *any* occurrence of the word — and "What does
+    # finding the cause require?" read as `causes` about a subject called "finding the". The
+    # causal verb is the last thing a question of this form says; anything after it means the
+    # question was a different one.
+    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:cause|causes|lead\s+to|leads\s+to)\s*\??$",
      "causes"),
     (r"\bwhat\s+(?:happens|results?)\s+(?:from|because\s+of|due\s+to|with)\s+(?P<s>.+?)\??$",
      "causes"),

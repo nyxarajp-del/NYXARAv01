@@ -18,7 +18,21 @@ Three groups, and all three are counted:
   attempted and not counted as failures. They are counted as *not attempted*, which is a different
   and more honest thing.
 * **too few examples** — fewer than thirty instances collected. Beating a majority computed on
-  twenty rows means nothing.
+  twenty rows means nothing, and how little it means was measured rather than assumed. Forty
+  synthetic tasks whose answers were assigned by a coin, at each size:
+
+      rows/task   held out   share that "beat their floor"   mean lift
+           40         12                 0.025                -0.006
+           60         18                 0.175                +0.013
+           90         28                 0.125                +0.008
+          150         45                 0.050                -0.000
+          300         90                 0.000                +0.000
+          600        180                 0.000                +0.000
+
+  The win rate for a learner that has learned nothing is almost entirely a **small held-out set**:
+  with twenty-eight rows held back, clearing a floor by one row happens often, and at ninety it
+  stops happening at all. So the collection asks for three hundred rows of every task, and the
+  number to watch is not the raw win rate but its distance from the shuffled null below.
 
 And one **null**, which is the number everything else has to be read against. Given forty-eight
 readings to choose from and thirty rows to choose on, a rule with support four can come out pure by
