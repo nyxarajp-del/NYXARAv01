@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nyxara.agency.permissions import Authority
 from nyxara.growth.autolearn import GrowthEngine, GrowthReport
 from nyxara.kernel.config import NyxaraSettings, Profile
@@ -66,6 +68,11 @@ def test_foundry_off_by_default():
     assert rep.foundry == []
 
 
+# Runs the whole self-improvement cycle for real — five faculties over the live source tree —
+# and takes 190s on an idle machine. Against the suite's 300s bar that is not headroom, it is a
+# coin toss: it passes alone and times out whenever anything else is using the box. Timing out is
+# then read as a hang, which is exactly the wrong thing to learn about a test that works.
+@pytest.mark.timeout(900)
 def test_self_improvement_runs_on_cadence():
     core = _core_with_experience(2)
     engine = GrowthEngine.from_core(core, enable_self_improvement=True,
