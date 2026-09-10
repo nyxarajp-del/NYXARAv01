@@ -29,10 +29,15 @@ Three groups, and all three are counted:
           300         90                 0.000                +0.000
           600        180                 0.000                +0.000
 
-  The win rate for a learner that has learned nothing is almost entirely a **small held-out set**:
-  with twenty-eight rows held back, clearing a floor by one row happens often, and at ninety it
-  stops happening at all. So the collection asks for three hundred rows of every task, and the
-  number to watch is not the raw win rate but its distance from the shuffled null below.
+  That table says the win rate for a learner that has learned nothing is almost entirely a small
+  held-out set, and **on real tasks it is wrong**. Collecting three hundred rows instead of ninety
+  took the FLAN null the other way, from 0.207 to **0.258**; the gain came from the signal side,
+  0.318 to 0.459. The synthetic tasks drew from nine words, so past some number of rows nothing
+  could be pure by accident; a real task has a long tail, rare words stay rare however many rows
+  are collected, and more learning rows simply means more lucky rules are found.
+
+  Which is the point. The floor is **measured, on the same tasks, every run** — never reasoned
+  about from a model of what noise ought to do. The number to read is `above_chance`.
 
 And one **null**, which is the number everything else has to be read against. Given forty-eight
 readings to choose from and thirty rows to choose on, a rule with support four can come out pure by
@@ -54,6 +59,7 @@ from __future__ import annotations
 
 import random
 import statistics
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -149,7 +155,7 @@ def _shuffled(examples: Sequence[Example], seed: int) -> List[Example]:
 
 def examine(paths: Sequence[Path], shapes: Optional[Dict[str, Shape]] = None,
             *, learner: Optional[TaskLearner] = None, use_shapes: bool = True,
-            shuffled: bool = False, name: str = "") -> Report:
+            shuffled: bool = False, name: str = "", say: int = 0) -> Report:
     """Learn every task the collection holds, and count what was learned."""
     engine = learner or TaskLearner()
     known = shapes or {}
@@ -174,6 +180,12 @@ def examine(paths: Sequence[Path], shapes: Optional[Dict[str, Shape]] = None,
             out.in_scope += 1
             out.results.append(got)
             out.won += int(got.learned_something)
+            # A pass over three thousand tasks at three hundred rows each is an hour of silence
+            # otherwise, and a run nobody can see the progress of is a run nobody can tell from a
+            # hang. Off by default so the exam stays quiet when it is a fixture.
+            if say and out.in_scope % say == 0:
+                print(f"    {out.name}: {out.in_scope:,} in scope, {out.won:,} won",
+                      file=sys.stderr, flush=True)
     return out
 
 
@@ -187,12 +199,14 @@ def run(learn_dir: str, shape_dir: str = "") -> Dict[str, Any]:  # pragma: no co
         shapes = shapes_by_task(sorted(Path(shape_dir).glob("*.jsonl.gz")))
         print(f"{len(shapes):,} task shapes induced\n")
 
-    with_shape = examine(learn_paths, shapes, use_shapes=True)
-    without = examine(learn_paths, shapes, use_shapes=False)
-    null = examine(learn_paths, shapes, use_shapes=False, shuffled=True)
-    print("  " + with_shape.render())
-    print("  " + without.render())
-    print("  " + null.render())
+    # Printed as each finishes rather than all three at the end: the first row is the interesting
+    # one and waiting for the null to finish before showing it helps nobody.
+    with_shape = examine(learn_paths, shapes, use_shapes=True, say=200)
+    print("  " + with_shape.render(), flush=True)
+    without = examine(learn_paths, shapes, use_shapes=False, say=200)
+    print("  " + without.render(), flush=True)
+    null = examine(learn_paths, shapes, use_shapes=False, shuffled=True, say=200)
+    print("  " + null.render(), flush=True)
     print(f"\n  above chance, with shapes  : {with_shape.above_chance(null):+.4f}")
     print(f"  above chance, whole prompt : {without.above_chance(null):+.4f}")
     print(f"\n  free text, not attempted : {with_shape.free_text:,}")

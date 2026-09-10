@@ -5533,38 +5533,62 @@ at a mean lift of +0.013.
 So the exam runs a shuffled-label null — the same tasks with their answers permuted, which destroys
 the signal and leaves size, answer space and skew exactly as they were. On the collection:
 
-All eight submixes, 3,452 tasks seen:
+All eight submixes, three hundred rows of every task, 3,454 tasks seen:
 
 | | in scope | beat own floor | accuracy | majority | lift |
 |---|---|---|---|---|---|
-| whole prompt | 1,056 | **336 = 0.318** | 0.492 | 0.472 | **+0.019** |
-| with shapes | 1,056 | 334 = 0.316 | 0.493 | 0.472 | +0.021 |
-| shuffled answers | 1,056 | 219 = 0.207 | 0.462 | 0.466 | **−0.003** |
+| with shapes | 1,007 | **462 = 0.459** | 0.510 | 0.475 | **+0.035** |
+| whole prompt | 1,007 | 460 = 0.457 | 0.507 | 0.475 | +0.033 |
+| shuffled answers | 1,007 | 260 = 0.258 | 0.472 | 0.474 | **−0.002** |
 
-**Above chance: +0.111.** The null's lift is negative, which is what a null must do; the real lift
-is positive. The null landed at 0.207 on a seven-submix run too, before niv2 was re-read — the same
-number from a different set of tasks, which is what a floor should look like.
+**Above chance: +0.201.** The null's lift is negative, which is what a null must do; the real lift
+is positive.
 
-So the honest reading is: of 3,452 tasks, 1,056 name a small enough answer space to attempt, 336
-beat their own majority, and about 219 of those would have done so on shuffled answers. **Roughly
-117 tasks were genuinely learned.**
+Read plainly: of 3,454 tasks, 1,007 name a small enough answer space to attempt, 462 beat their own
+majority, and about 260 of those would have on shuffled answers. **Roughly 200 tasks were genuinely
+learned.** Of the rest, 2,149 answer in free text and are counted as *not attempted* rather than as
+failures, because this machinery picks among answers it has seen and cannot compose a new one; 298
+had too few examples collected to say anything about.
 
-Of the rest, 2,093 answer in free text and are counted as *not attempted* rather than as failures,
-because this machinery picks among answers it has seen and cannot compose a new one; 303 had too
-few examples collected to say anything about.
+### The prediction that was wrong
+
+Ninety rows per task gave 0.318 above a null of 0.207. Synthetic noise said the null was almost
+entirely a small-held-out-set effect and would go to **zero** at three hundred rows:
+
+    rows/task    40      60      90     150     300     600
+    noise wins  0.025   0.175   0.125   0.050   0.000   0.000
+
+On real FLAN it did the opposite — the null rose from **0.207 to 0.258**. The whole gain came from
+the signal side, 0.318 to 0.459, not from the floor dropping.
+
+The synthetic tasks were a bad model of the real ones, and it is worth saying why: they drew from
+nine words, so past some number of rows every word had been seen often enough that nothing could be
+pure by accident. A real task has a long tail — rare words stay rare however many rows are
+collected — so support-four rules that are pure by luck never stop being available, and more
+learning rows means more of them are found. **This is exactly why the shuffled null is run rather
+than reasoned about.**
+
+### The shapes still contribute nothing
+
+0.459 with them against 0.457 without: two tasks out of a thousand, which is noise. That reverses
+the sign of the ninety-row result (0.316 against 0.318) and means the same thing both times —
+**no effect**. Fourth consecutive null result for one organ feeding another here, and a difference
+that changes sign between runs is not a fifth result in the other direction.
 
 Some of what she worked out, none of it told to her:
 
-    0.964 vs 0.393   'en' when has:de is False / 'es' when has:de is True
-    0.842 vs 0.474   'No' when has:sorry is True            (a dialogue act)
-    0.750 vs 0.286   'Dutch' when has:van is True
+    1.000 vs 0.411   'en' when has:de is False / 'es' when has:de is True
+    0.878 vs 0.189   'Buses' when has:bus is True / 'Flights' when has:trip is True    (5-way)
+    0.722 vs 0.189   'Dutch' when has:van is True / when has:een is True               (5-way)
+    0.667 vs 0.183   'Data Retention' when has:user's is True                          (7-way)
+    0.656 vs 0.178   'anger' when ends is furious                                      (4-way)
+    0.842 vs 0.474   'No' when has:sorry is True              (a dialogue act)
     0.893 vs 0.571   'Gujarati' when has:એક is True
-    0.750 vs 0.214   'Buses' when has:bus is True, 'Flights' when has:trip is True   (8-way)
 
 Language identification from function words, in scripts nothing in this package can read.
 
 **And one the null cannot catch.** `task1207_atomic_classification_atlocation` comes out at 1.000
-against 0.393 on `'No' when has:personx is True`. `personx` is a rendering token of that task's
+against 0.456 on `'No' when has:personx is True`. `personx` is a rendering token of that task's
 template, not a word about the world, and the rule is picking up which template variant carried
 which answer. Shuffling answers does not expose this — the correlation is genuinely in the data —
 so it is a real regularity and not a real *understanding*, and the difference is worth stating
