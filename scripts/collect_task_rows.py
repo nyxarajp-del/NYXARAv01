@@ -60,8 +60,25 @@ PER_GROUP = 6
 MAX_GROUPS = 120_000
 
 
-def _clip(text: str, head: int = 0) -> str:
-    return str(text or "")[:(head or HEAD)]
+def _clip(text: str, head: int = 0, tail: bool = False) -> str:
+    """A prefix, or a suffix when what is wanted is the part that varies.
+
+    Which end to keep depends on the job, and getting it backwards is silent. Alignment wants the
+    **prefix**: rows of one template share their opening, so every clipped row starts where its
+    original starts (V.57 measured 0.373 against 0.966 for the alternative). Learning wants the
+    **suffix**, for the mirror-image reason — the instruction is identical in every row of a task
+    and carries no signal, and what was poured in comes after it.
+
+    Taking the prefix for learning threw away the data and kept the instruction. Measured on the
+    300-row collection: **334 of 1,007 in-scope tasks had repeated prompts**, 11.7% of all rows,
+    and in the worst cases 297 of 300 rows were the *same string* — a task whose instruction runs
+    past 700 characters clipped every row to the same instruction and cut the question off
+    entirely. 160 identical prompts carrying four different answers, which no learner can tell
+    apart and which no null can either.
+    """
+    raw = str(text or "")
+    size = head or HEAD
+    return raw[-size:] if tail else raw[:size]
 
 
 def one_file(name: str, out: str, per_group: int, limit_bytes: int,
@@ -74,8 +91,10 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int,
     task *from* — a template says what is being asked, and it takes examples to learn the answer.
     """
     kept: Dict[str, list] = {}
+    seen_prompts: Dict[str, set] = {}
     rows = 0
     full = 0
+    repeats = 0
     whole = True
     began = time.time()
     try:
@@ -98,7 +117,18 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int,
                 continue
             if max_target and len(str(row.get("targets") or "")) > max_target:
                 continue
-            here.append({"inputs": _clip(row.get("inputs"), head),
+            text = _clip(row.get("inputs"), head, tail=by_task)
+            # A row whose clipped prompt repeats one already kept is not another example of the
+            # task — it is the same string a second time, and a learner shown it in training and
+            # again in the examination has been examined on what it was taught. Counted and
+            # reported rather than dropped silently, so a group that yields few distinct rows says
+            # so instead of looking full.
+            here_seen = seen_prompts.setdefault(key, set())
+            if text in here_seen:
+                repeats += 1
+                continue
+            here_seen.add(text)
+            here.append({"inputs": text,
                          "targets": _clip(row.get("targets")),
                          "kind": str(row.get("_template_type") or ""),
                          "source": str(row.get("_task_source") or "")})
@@ -123,10 +153,12 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int,
             handle.write(json.dumps({"task": task, "template": index, "rows": group},
                                     ensure_ascii=False) + "\n")
     print(f"  {name}: {rows:,} rows in {time.time() - began:.0f}s; "
-          f"{len(kept):,} groups kept, {full:,} refused at the ceiling"
+          f"{len(kept):,} groups kept, {repeats:,} repeated prompts skipped, "
+          f"{full:,} refused at the ceiling"
           f"{'' if whole else '  ** PARTIAL — the read did not finish **'}",
           file=sys.stderr, flush=True)
-    return {"rows": rows, "groups": len(kept), "refused": full, "partial": 0 if whole else 1}
+    return {"rows": rows, "groups": len(kept), "refused": full, "repeats": repeats,
+            "partial": 0 if whole else 1}
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -146,7 +178,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     files = (args.only,) if args.only else FILES
     began = time.time()
-    totals = {"rows": 0, "groups": 0, "refused": 0, "partial": 0}
+    totals = {"rows": 0, "groups": 0, "refused": 0, "repeats": 0, "partial": 0}
     with ProcessPoolExecutor(max_workers=max(1, args.workers)) as pool:
         futures = [pool.submit(one_file, name, args.out, args.per_group, args.bytes,
                                args.by_task, args.max_target, args.head)

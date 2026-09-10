@@ -5707,3 +5707,78 @@ against a 300s bar. A test at three quarters of its budget passes on an idle mac
 whenever anything else is using one — and a timeout reads as a hang. Both do real work over the
 live source tree, so the fix is headroom, not speed: an explicit 900s on those two with the
 measured duration written above each, and the global bar left at 300 so a real hang still shows.
+
+---
+
+## V.74 — measuring the measurement
+
+Four times in one week a number here was read as a fact about a mechanism and turned out to be a
+fact about the measurement. Not one of them was carelessness — in each case the mechanism was
+measured carefully and **the measurement was not measured at all**:
+
+| the number | what was concluded | what was actually wrong |
+|---|---|---|
+| 1 rule from 564,166 pairs | "the entailer cannot learn" | the purity bar was above the subject; nothing was compared |
+| 0.0259 exact, given the right sentence | "finding a span is hard" | the span stage had no baseline; it beats every one there is |
+| 0.23x on a C kernel | "the kernel is slow" | one wall-clock sample decided a correctness gate |
+| 0.318 of tasks beat their floor | "she learned a third of them" | shuffled answers beat their floor 0.207 of the time |
+
+Two of those were optimised against for a whole version before anybody asked what they were being
+compared to. So:
+
+> A system cannot understand its own performance without modelling the measurement process.
+
+`njp/measurement.py` takes a benchmark as an **object** rather than a score and runs against it the
+strategies that know nothing. It reads no code and infers no intent; it runs things and reports
+what they got. Seven checks, one per way a number lied here — **majority**, **chance**,
+**shuffled**, **leakage**, **abstention**, **stability**, **ceiling**.
+
+**A check it cannot run is reported as `not checked`, never as passed**, and `trusted` requires
+more than half the checks to have actually run. That is the whole point: this package has twice
+recorded a mechanism as flawless when it had simply never fired, and a critic that quietly skips
+what it cannot see would be that mistake one level up. A perfect 1.000 on a benchmark supplying
+only the three required fields comes back **not trusted** — scoring well and having been measured
+are different claims.
+
+### The exam is retrodiction, in both directions
+
+Eight measurements from this repository's own history: the four above, and the four repaired forms
+of them. The critic is not told which is which. Passing means separating them — **flagging all
+eight fails this exam rather than passing it**, because a check that always fires carries no
+information, and this package has been caught by exactly that before (a veto with a false-alarm
+rate of 0.0000 that was flawless because it never fired).
+
+    caught        4 of 4   (recall 1.000)
+    false alarms  0 of 4   (rate 0.000)
+
+Each case also names *which* check should catch it, so a right answer for the wrong reason is not
+credited.
+
+### It failed its own exam first, on its own mistake
+
+The first version drew the shuffled null **once**. One draw of a null is precisely the error this
+organ exists to catch — a single sample of a noisy quantity, believed — and it duly missed the
+task-learner case, reporting a comfortable 0.536-against-0.429 margin that was one coin landing.
+The null is now a permutation test over twenty draws, reporting how often shuffled answers reach
+the system's score. That is recorded in `PERMUTATIONS` rather than quietly corrected.
+
+### And it found something no hand-audit had
+
+Run against the real task learner on real FLAN tasks, the leakage check reported **13 of 90
+held-out items were also learned from**. Chasing it: **334 of 1,007 in-scope tasks had repeated
+prompts, 11.7% of all rows, and in the worst cases 297 of 300 rows were the same string.**
+
+The cause is a clip taken from the wrong end. V.57 established that a **prefix** is right for
+alignment — rows of one template share their opening, and a head keeps every clipped row starting
+where its original starts (0.966 against 0.373 for the alternative). For *learning* it is exactly
+backwards: the instruction is identical in every row of a task and carries no signal, and what was
+poured in comes after it. A task whose instruction runs past 700 characters clipped every row to
+that same instruction and cut the question off entirely — 160 identical prompts carrying four
+different answers, which no learner can tell apart and no null can either.
+
+The collector now takes the tail in by-task mode, refuses a row whose clipped prompt repeats one
+already kept, and reports how many it skipped. **V.64's figures (0.459 against a null of 0.258)
+stand as measured but were taken over a corpus a third of whose tasks carried duplicates**; the
+direction of the error is most likely downward, since an identical prompt is unlearnable for the
+system and for the null alike — but that is an argument, not a measurement, and the re-measured
+number is not in yet.

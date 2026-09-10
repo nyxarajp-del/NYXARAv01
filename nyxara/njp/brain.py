@@ -2772,6 +2772,35 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def critique_measurement(self, benchmark: Any) -> Any:
+        """Ask of a benchmark what it is comparing against, before believing what it reports.
+
+        Takes a :class:`~nyxara.njp.measurement.Benchmark` and returns the seven checks, including
+        the ones it could not run — which are reported as *not checked* and never as passed. A
+        number this returns ``trusted=False`` for is not a bad score; it is a score this benchmark
+        cannot support, and the two need different responses.
+        """
+        try:
+            from nyxara.njp.measurement import critique
+
+            return critique(benchmark).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_measurement_school(self) -> Any:
+        """Sit the retrodiction exam: eight measurements from this package's own history.
+
+        Four of them were misleading and four were sound, the critic is not told which, and it has
+        to separate them. Flagging all eight fails this exam rather than passing it.
+        """
+        try:
+            from nyxara.njp.measurementschool import examine
+
+            got = examine()
+            return {k: v for k, v in got.items() if k != "rows"}
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_shape_school(self, path: str = "") -> Any:
         """Sit the reconstruction exam: does the induced template rebuild rows it never saw?"""
         try:

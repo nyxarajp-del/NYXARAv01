@@ -490,6 +490,16 @@ from nyxara.njp.shapes import (
     read_groups as read_task_groups,
     read_shapes,
 )
+# V.74. `Critique` is `njp.metareason`'s — a critique of a *plan*, which is a different thing from
+# a critique of a *measurement* — so the newcomer is qualified at the door rather than taking a
+# name something else already answers to. `Benchmark` and `Finding` are free but qualified with it,
+# because a half-qualified pair reads as though one of them were the general case.
+from nyxara.njp.measurement import (
+    Benchmark as MeasuredBenchmark,
+    Critique as MeasurementCritique,
+    Finding as MeasurementFinding,
+    critique as critique_measurement,
+)
 from nyxara.njp.answering import (
     Example as TaskExample,
     Learned as TaskLearned,
@@ -717,6 +727,9 @@ __all__ = [
     "read_task_groups", "read_shapes",
     # V.58 -- learning to answer a task from examples of it, against its own majority floor.
     "TaskLearner", "TaskExample", "TaskLearned", "probe_fields", "read_task_examples",
+    # V.74 -- asking whether a number measures what it appears to. `Critique` was taken by the
+    # planner's critique of a strategy, which is a different object entirely.
+    "MeasuredBenchmark", "MeasurementCritique", "MeasurementFinding", "critique_measurement",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
