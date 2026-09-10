@@ -367,11 +367,38 @@ def probe(premise: str, hypothesis: str,
 # --------------------------------------------------------------------------------------------- #
 #  the organ
 # --------------------------------------------------------------------------------------------- #
+#: How clean a rule has to be to be kept, and it is a claim about **this subject** rather than a
+#: preference. Natural-language inference read off surface differences between two sentences is not
+#: a decision procedure, and asking it to be one returns nothing.
+#:
+#: 0.72 was the setting for a long time and it was far too high. Decomposed on 12,000 pairs — how
+#: often a rule fires at all, how right it is *when* it fires, and what the whole organ scores
+#: against its own base rate — twice, on two disjoint slices of the corpus:
+#:
+#:     purity   rules   speaks on   right when it speaks   overall   lift
+#:      0.40      6       1.000            0.461            0.461    +0.028
+#:      0.45      6       0.783            0.540            0.504    +0.077   <- and 0.508/+0.075
+#:      0.50      4-6     0.638            0.551            0.492    +0.064
+#:      0.55      3-4     0.558            0.565            0.475    +0.047
+#:      0.65      1       0.067            0.689            0.457    +0.029
+#:      0.72      1       0.052            0.780            0.463    +0.030
+#:
+#: Read the two middle columns together. A high bar does not make the organ wrong — at 0.72 its
+#: rules are right **78%** of the time — it makes them silent, firing on one pair in twenty. At
+#: 0.45 they are right 54% of the time and reach four pairs in five, and the whole organ scores
+#: 0.504 against a base rate of 0.428.
+#:
+#: The peak is at 0.45 on both slices, by nearly the same margin, and 0.40 collapses to the base
+#: rate — it speaks on everything and says nothing. A unimodal curve with its maximum in the same
+#: place on two independent samples is a property of the subject, not of a sample.
+PURITY = 0.45
+
+
 class Reasoner:
     """Learns which readings of a pair predict which answer, and abstains where none does."""
 
     def __init__(self, *, min_support: int = 20, min_share: float = 0.05, max_rules: int = 6,
-                 max_terms: int = 3, learn: bool = True, purity: float = 0.72,
+                 max_terms: int = 3, learn: bool = True, purity: float = PURITY,
                  mine: bool = True) -> None:
         self.min_support = int(min_support)
         self.min_share = float(min_share)

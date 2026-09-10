@@ -25,7 +25,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from nyxara.njp.entail import Pair, Reasoner, read_pairs, relation_of
+from nyxara.njp.entail import PURITY, Pair, Reasoner, read_pairs, relation_of
 
 __all__ = ["Result", "shuffled", "split", "examine", "sweep", "knowledge_gap", "run"]
 
@@ -143,7 +143,7 @@ def _mark(reasoner: Reasoner, held: Sequence[Pair], name: str, *,
 EXAMINE_PAIRS = 12_000
 
 
-def examine(purity: float = 0.72, pairs: Optional[Sequence[Pair]] = None,
+def examine(purity: float = PURITY, pairs: Optional[Sequence[Pair]] = None,
             limit: int = EXAMINE_PAIRS, **kwargs: Any) -> Dict[str, Result]:
     """The whole examination, with every control, on a deterministic slice of the corpus.
 
@@ -192,7 +192,7 @@ def examine(purity: float = 0.72, pairs: Optional[Sequence[Pair]] = None,
 SWEEP_PAIRS = 9000
 
 
-def sweep(values: Sequence[float] = (0.55, 0.60, 0.65, 0.72, 0.80, 0.90, 1.00),
+def sweep(values: Sequence[float] = (0.40, 0.45, 0.50, 0.55, 0.65, 0.72, 0.90),
           **kwargs: Any) -> List[Tuple[float, Result]]:
     """The examination at each threshold. What sets ``purity`` is this table, not a preference."""
     rows = shuffled()[:SWEEP_PAIRS]

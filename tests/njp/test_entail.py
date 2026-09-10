@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.njp.entail import (
-    LABELS, Pair, Reasoner, as_asked, probe, read_pairs, relation_of,
+    LABELS, PURITY, Pair, Reasoner, as_asked, probe, read_pairs, relation_of,
 )
 from nyxara.njp.entailschool import EXAMINE_PAIRS, examine, shuffled, split
 from nyxara.njp.induce import cover
@@ -128,18 +128,28 @@ def test_the_hard_labels_are_reported_as_near_misses_not_rounded_up(taught):
         assert rule.counterexamples > 0
 
 
-def test_she_is_silent_where_nothing_covers_the_pair(taught):
-    said, why = taught.answer("Colourless green ideas sleep furiously.",
-                              "The committee approved the amendment on Tuesday.")
+def test_she_is_silent_where_nothing_covers_the_pair():
+    """Abstention has to survive the bar moving, so it is asked of a reasoner that has one rule.
+
+    At the measured bar of 0.45 the organ reaches four pairs in five, and a pair it happens to
+    cover is not evidence about what it does when it covers nothing. A high bar makes silence easy
+    to demonstrate; what is being tested is that silence exists at all, and that `why` says so.
+    """
+    reasoner = Reasoner(purity=0.95)
+    reasoner.learn_from(shuffled(read_pairs())[:2000])
+    said, why = reasoner.answer("Colourless green ideas sleep furiously.",
+                                "The committee approved the amendment on Tuesday.")
     assert said == "unknown" and why
 
 
-def test_the_fallback_is_not_folded_into_the_answer(taught):
+def test_the_fallback_is_not_folded_into_the_answer():
     """Guessing the commonest label is what a caller gets, not something she worked out."""
+    reasoner = Reasoner(purity=0.95)
+    reasoner.learn_from(shuffled(read_pairs())[:2000])
     weird = ("Colourless green ideas sleep furiously.",
              "The committee approved the amendment on Tuesday.")
-    assert taught.answer(*weird)[0] == "unknown"
-    assert taught.guess(*weird)[0] == taught.commonest
+    assert reasoner.answer(*weird)[0] == "unknown"
+    assert reasoner.guess(*weird)[0] == reasoner.commonest
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -150,14 +160,27 @@ def marked():
     return examine()
 
 
-def test_when_she_answers_she_is_well_above_the_base_rate(marked):
-    assert marked["taught"].when_answered > marked["base_rate"].accuracy + 0.25
+def test_when_she_answers_she_is_above_the_base_rate(marked):
+    """Above it, and not by much. Both halves of that are the result."""
+    assert marked["taught"].when_answered > marked["base_rate"].accuracy
+    assert marked["taught"].when_answered < marked["base_rate"].accuracy + 0.25
 
 
-def test_but_she_answers_only_a_small_share_of_them(marked):
-    """The honest shape of the result: one real rule, and it covers a sliver."""
-    assert marked["taught"].coverage < 0.25
-    assert marked["taught"].accuracy < marked["base_rate"].accuracy
+def test_the_bar_buys_reach_at_the_cost_of_precision_and_that_is_the_trade(marked):
+    """This test used to read `coverage < 0.25` and `accuracy < base_rate`, and it was right.
+
+    At a purity bar of 0.72 the organ had one rule, spoke on one pair in twenty, and scored below
+    its own base rate overall — the honest shape of that result was *one rule covering a sliver*.
+    The bar moved to 0.45 because that was measured to be where it belongs (see
+    :data:`nyxara.njp.entail.PURITY`), and the shape of the result moved with it: several rules,
+    four pairs in five, and above the base rate rather than below.
+
+    The superseded assertions are recorded here rather than deleted, because a test that quietly
+    changes what it claims is a finding quietly rewritten.
+    """
+    assert marked["taught"].coverage > 0.5
+    assert marked["taught"].rules > 1
+    assert marked["with_fallback"].accuracy > marked["base_rate"].accuracy
 
 
 def test_the_rules_do_lift_a_majority_guesser(marked):
@@ -235,3 +258,41 @@ def test_the_reasoner_learns_relations_not_spellings():
     reasoner.learn_from(rows)
     assert {r.label for r in reasoner.rules} <= {"yes", "no", "it is not possible to tell"}
     assert reasoner.commonest in ("yes", "no")
+
+
+# --------------------------------------------------------------------------------------------- #
+#  where the purity bar sits, and what it buys
+# --------------------------------------------------------------------------------------------- #
+def test_a_higher_bar_makes_cleaner_rules_that_fire_less_often(pairs):
+    """The trade the bar is actually making, checked rather than asserted in a comment.
+
+    A bar is not "stricter is safer" here. It buys precision with reach, and on this subject the
+    reach is worth more — which is why the default moved from 0.72 to 0.45. What this pins is the
+    *shape* of the trade, which is what the choice rests on: raise the bar, get fewer rules that
+    speak less often.
+    """
+    learn, held = split(pairs[:3000])
+    reach = {}
+    for bar in (0.45, 0.72):
+        reasoner = Reasoner(purity=bar)
+        reasoner.learn_from(learn)
+        spoke = sum(1 for p in held
+                    if reasoner.answer(p.premise, p.hypothesis)[0] != "unknown")
+        reach[bar] = (len(reasoner.rules), spoke / max(1, len(held)))
+    assert reach[0.45][0] >= reach[0.72][0], reach
+    assert reach[0.45][1] > reach[0.72][1], reach
+
+
+def test_no_rule_a_reasoner_keeps_is_below_its_own_bar():
+    """The bar is a promise about what was kept, and a rule under it is a broken promise."""
+    rows = [Pair(premise="a cat sat on a warm mat by the fire",
+                 hypothesis="a cat sat down" if i % 2 else "no cat sat down",
+                 label="yes" if i % 2 else "no") for i in range(120)]
+    reasoner = Reasoner(purity=0.6, min_support=4, min_share=0.05)
+    reasoner.learn_from(rows)
+    assert all(rule.purity >= 0.6 for rule in reasoner.rules), \
+        [(r.render(), r.purity) for r in reasoner.rules]
+
+
+def test_the_default_is_the_measured_one_not_a_number_in_a_signature():
+    assert Reasoner().purity == PURITY
