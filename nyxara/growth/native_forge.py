@@ -63,6 +63,11 @@ class NativeForge:
         #: Why the last :meth:`forge` returned nothing, one line per language tried. Cleared at
         #: the start of every forge, so it always describes the most recent attempt.
         self.refusals: List[str] = []
+        #: What the compiler said the last time it failed — its stderr, or the exception raised
+        #: trying to start it at all.
+        self._last_build = ""
+        #: The two wall times behind the last speedup, in seconds: (pure Python, native).
+        self._last_times = (0.0, 0.0)
 
     @staticmethod
     def _cfg() -> Any:
@@ -106,12 +111,23 @@ class NativeForge:
         cmd = ["rustc", "-O", "--crate-type", "cdylib", str(src), "-o", str(so)]
         return so if self._run(cmd, workdir) and so.exists() else None
 
-    @staticmethod
-    def _run(cmd: List[str], cwd: Path) -> bool:
+    def _run(self, cmd: List[str], cwd: Path) -> bool:
+        """Run the compiler, and keep what it said when it did not work.
+
+        `subprocess.run` here can fail for reasons that have nothing to do with the source — the
+        fork itself can fail when the parent process is large, which is what happens to this forge
+        after a long test session and is invisible if the error is discarded. Both the compiler's
+        own stderr and any exception raised getting to it are recorded.
+        """
         try:
             r = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=60)
-            return r.returncode == 0
-        except Exception:  # noqa: BLE001 — a build failure is an honest no-op
+            if r.returncode == 0:
+                return True
+            self._last_build = (r.stderr or r.stdout or "").strip()[:400] or \
+                f"exit {r.returncode}"
+            return False
+        except Exception as error:  # noqa: BLE001 — a build failure is an honest no-op
+            self._last_build = f"{type(error).__name__}: {error}"
             return False
 
     @staticmethod
@@ -130,8 +146,7 @@ class NativeForge:
                 return False
         return True
 
-    @staticmethod
-    def _speedup(reference: Callable, native: Callable, samples: Sequence[Tuple],
+    def _speedup(self, reference: Callable, native: Callable, samples: Sequence[Tuple],
                  *, repeats: int = 50) -> float:
         def _time(fn: Callable) -> float:
             t0 = time.perf_counter()
@@ -141,6 +156,10 @@ class NativeForge:
             return time.perf_counter() - t0
         t_native = _time(native) or 1e-9
         t_ref = _time(reference)
+        # Kept so a refusal can say which side was anomalous. A ratio alone cannot: "0.23x" is
+        # equally consistent with a slow kernel and with a reference that was not the pure-Python
+        # function it was supposed to be, and those need opposite repairs.
+        self._last_times = (t_ref, t_native)
         return t_ref / t_native
 
     # ---- the forge ---- #
@@ -187,7 +206,7 @@ class NativeForge:
             so = self._compile_c(source, workdir) if language == "c" \
                 else self._compile_rust(source, workdir)
             if so is None:
-                self._refuse(language, f"did not compile in {workdir}")
+                self._refuse(language, f"did not compile: {self._last_build or 'no detail'}")
                 return None
             lib, fn = self._load(so, symbol, argtypes, restype)
             if not self._equivalent(reference, fn, samples):
@@ -195,7 +214,11 @@ class NativeForge:
                 return None                   # NOT behaviorally identical → reject (fail-closed)
             speedup = self._speedup(reference, fn, samples)
             if speedup < self.min_speedup:
-                self._refuse(language, f"{speedup:.2f}x, under the {self.min_speedup}x bar")
+                t_ref, t_native = self._last_times
+                self._refuse(language,
+                             f"{speedup:.2f}x, under the {self.min_speedup}x bar "
+                             f"(python {t_ref * 1e3:.1f}ms, native {t_native * 1e3:.1f}ms, "
+                             f"reference {getattr(reference, '__qualname__', reference)!r})")
                 return None                   # not measurably faster → keep pure Python
             cert = (f"{language}: identical on {len(samples)} cases; "
                     f"{speedup:.1f}x faster (>= {self.min_speedup}x)")
