@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.njp.entail import LABELS, Reasoner, probe, read_pairs
+from nyxara.njp.entail import (
+    LABELS, Pair, Reasoner, as_asked, probe, read_pairs, relation_of,
+)
 from nyxara.njp.entailschool import EXAMINE_PAIRS, examine, shuffled, split
 from nyxara.njp.induce import cover
 
@@ -185,3 +187,51 @@ def test_purity_below_one_keeps_a_rule_that_is_usually_right():
     assert cover(positives, negatives, label="X", min_support=4, purity=1.0)[0] == []
     kept, _misses = cover(positives, negatives, label="X", min_support=4, purity=0.85)
     assert kept and kept[0].purity == pytest.approx(0.9)
+
+
+# --------------------------------------------------------------------------------------------- #
+#  two vocabularies, three relations
+# --------------------------------------------------------------------------------------------- #
+def test_the_two_spellings_of_a_relation_fold_onto_one():
+    """`entailment` and `yes` are one relation asked in two ways, not two classes."""
+    assert relation_of("entailment") == relation_of("yes") == "yes"
+    assert relation_of("contradiction") == relation_of("no") == "no"
+    assert relation_of("neutral") == relation_of("it is not possible to tell")
+
+
+def test_folding_is_case_and_space_insensitive():
+    assert relation_of("  Entailment ") == "yes"
+
+
+def test_a_label_it_has_never_seen_is_left_alone():
+    """The map is a fold, not a filter. Anything outside it passes through as itself."""
+    assert relation_of("maybe") == "maybe"
+
+
+def test_the_vocabulary_the_question_asked_in_is_given_back():
+    """Answering the right relation in the wrong words is still a wrong answer."""
+    assert as_asked("yes", like="entailment") == "entailment"
+    assert as_asked("yes", like="no") == "yes"
+    assert as_asked("it is not possible to tell", like="neutral") == "neutral"
+
+
+def test_rendering_round_trips_through_the_relation():
+    for spelled in ("entailment", "contradiction", "neutral"):
+        assert as_asked(relation_of(spelled), like=spelled) == spelled
+
+
+def test_the_reasoner_learns_relations_not_spellings():
+    """A corpus written in both vocabularies must induce over three classes, not six."""
+    rows = []
+    for i in range(120):
+        # The same pair, half of it spelled one way and half the other.
+        yes = i % 2 == 0
+        spelled = ("entailment" if i % 4 == 0 else "yes") if yes else (
+            "contradiction" if i % 4 == 1 else "no")
+        rows.append(Pair(premise="a cat sat on a mat and it was warm",
+                         hypothesis="a cat sat down" if yes else "no cat sat down",
+                         label=spelled))
+    reasoner = Reasoner(purity=0.6, min_support=4, min_share=0.05)
+    reasoner.learn_from(rows)
+    assert {r.label for r in reasoner.rules} <= {"yes", "no", "it is not possible to tell"}
+    assert reasoner.commonest in ("yes", "no")

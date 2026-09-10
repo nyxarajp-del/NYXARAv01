@@ -21,10 +21,11 @@ any other way is a knob turned until the training number looked nice.
 from __future__ import annotations
 
 import random
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from nyxara.njp.entail import Pair, Reasoner, read_pairs
+from nyxara.njp.entail import Pair, Reasoner, read_pairs, relation_of
 
 __all__ = ["Result", "shuffled", "split", "examine", "sweep", "knowledge_gap", "run"]
 
@@ -106,17 +107,26 @@ def split(pairs: Optional[Sequence[Pair]] = None,
 
 def _mark(reasoner: Reasoner, held: Sequence[Pair], name: str, *,
           fallback: bool = False) -> Result:
+    """Score against the **relation** the pair holds, not the spelling its template happened to use.
+
+    FLAN asks these three relations in two vocabularies (see :data:`nyxara.njp.entail.RELATIONS`)
+    and the reasoner learns and answers in one of them. Marking a folded answer against an unfolded
+    gold would count `yes` wrong on a pair whose template spelled it `entailment` — punishing her
+    for a difference in the question's wording, and quietly, since the by-label table would still
+    look sensible.
+    """
     out = Result(name=name, rules=len(reasoner.rules))
     speak = reasoner.guess if fallback else reasoner.answer
     for pair in held:
         out.asked += 1
-        right, asked = out.by_label.get(pair.label, (0, 0))
+        want = relation_of(pair.label)
+        right, asked = out.by_label.get(want, (0, 0))
         answer, _why = speak(pair.premise, pair.hypothesis)
-        hit = int(answer == pair.label)
+        hit = int(relation_of(answer) == want)
         if answer != "unknown":
             out.answered += 1
         out.right += hit
-        out.by_label[pair.label] = (right + hit, asked + 1)
+        out.by_label[want] = (right + hit, asked + 1)
     return out
 
 
@@ -163,13 +173,15 @@ def examine(purity: float = 0.72, pairs: Optional[Sequence[Pair]] = None,
     blind.learn_from(learn)
     out["no_rules"] = _mark(blind, held, "no rules")
 
-    commonest = max({p.label for p in learn},
-                    key=lambda label: sum(1 for p in learn if p.label == label))
+    # The floor is computed over the same folded relations the reasoner is scored on, or the two
+    # columns are not comparable.
+    folded = Counter(relation_of(p.label) for p in learn)
+    commonest = folded.most_common(1)[0][0] if folded else ""
     base = Result(name=f"base rate ({commonest})")
     for pair in held:
         base.asked += 1
         base.answered += 1
-        base.right += int(pair.label == commonest)
+        base.right += int(relation_of(pair.label) == commonest)
     out["base_rate"] = base
     return out
 

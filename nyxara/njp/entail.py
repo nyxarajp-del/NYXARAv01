@@ -60,6 +60,42 @@ RAW = Path(__file__).with_name("data") / "flan_cot.jsonl.gz"
 #: task and which are one of the seventeen others — not because anything here knows what they mean.
 LABELS: Tuple[str, ...] = ("yes", "no", "it is not possible to tell")
 
+#: FLAN asks the **same three relations** in two vocabularies. Some templates offer
+#: ``yes / no / it is not possible to tell``; others offer ``entailment / contradiction /
+#: neutral``. They are the same question, and treating them as six classes did two things, both
+#: bad:
+#:
+#: * the three rare spellings could never be learned — 401 `entailment` and 391 `contradiction`
+#:   pairs in a corpus of 564,166, against a support floor in the thousands; and
+#: * worse, each of them sat in the **negatives** of the label it means, so every `contradiction`
+#:   pair was evidence against `no` and every `neutral` pair evidence against `it is not possible
+#:   to tell`.
+#:
+#: Folding is not a tuning knob. Two names for one relation are one relation, and the surface
+#: vocabulary is a property of the *question*, not of the answer — :func:`as_asked` puts it back
+#: when a caller needs the words a particular template offered.
+RELATIONS: Dict[str, str] = {"entailment": "yes", "contradiction": "no",
+                             "neutral": "it is not possible to tell"}
+_SPELLED = {relation: name for name, relation in RELATIONS.items()}
+
+
+def relation_of(label: str) -> str:
+    """The relation this label names, whichever of the two vocabularies it is written in."""
+    said = str(label or "").strip().lower()
+    return RELATIONS.get(said, said)
+
+
+def as_asked(relation: str, like: str) -> str:
+    """Render a relation in the vocabulary some other label uses.
+
+    ``like`` is any label from the template being answered. A task that offered `entailment` gets
+    `entailment` back; one that offered `yes` gets `yes`. Answering in the wrong vocabulary is
+    wrong however right the relation is, and nothing in :meth:`Reasoner.answer` can know which
+    vocabulary was asked for — only the caller holding the question does.
+    """
+    said = str(relation or "").strip().lower()
+    return _SPELLED.get(said, said) if str(like or "").strip().lower() in RELATIONS else said
+
 _ANSWER = re.compile(r"[Tt]he answer is[:\s]+([^\n]+)")
 _QUOTED = re.compile(r'"([^"]{6,400})"')
 _WORD = re.compile(r"[^\W\d_][\w'’-]*|\d+", re.UNICODE)
@@ -369,11 +405,15 @@ class Reasoner:
         # is 1.3 billion comparisons at 36,302 pairs -- slow but survivable, so nothing caught it
         # -- and 3.2 *hundred billion* at the 564,166 the full read produced, where it stopped
         # looking like slowness and started looking like a hang.
-        seen = Counter(p.label for p in pairs)
+        seen = Counter(relation_of(p.label) for p in pairs)
         self.commonest = seen.most_common(1)[0][0] if seen else ""
         self.excludes = mine_exclusions(pairs) if self.mining else {}
-        readings = [(probe(p.premise, p.hypothesis, self.excludes), p.label) for p in pairs]
-        for label in sorted({p.label for p in pairs}):
+        # Folded to the relation, not the spelling — see :data:`RELATIONS`. Without this the two
+        # vocabularies are six classes, three of which are too rare to learn and all six of which
+        # poison each other's negatives.
+        readings = [(probe(p.premise, p.hypothesis, self.excludes), relation_of(p.label))
+                    for p in pairs]
+        for label in sorted({one for _r, one in readings}):
             positives = [r for r, one in readings if one == label]
             negatives = [r for r, one in readings if one != label]
             rules, near = cover(positives, negatives, label=label,
