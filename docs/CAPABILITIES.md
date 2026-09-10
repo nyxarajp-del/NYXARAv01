@@ -5777,8 +5777,18 @@ that same instruction and cut the question off entirely — 160 identical prompt
 different answers, which no learner can tell apart and no null can either.
 
 The collector now takes the tail in by-task mode, refuses a row whose clipped prompt repeats one
-already kept, and reports how many it skipped. **V.64's figures (0.459 against a null of 0.258)
-stand as measured but were taken over a corpus a third of whose tasks carried duplicates**; the
-direction of the error is most likely downward, since an identical prompt is unlearnable for the
-system and for the null alike — but that is an argument, not a measurement, and the re-measured
-number is not in yet.
+already kept, and reports how many it skipped. Re-collected and measured rather than argued about:
+
+| | in-scope tasks | with repeated prompts | repeated rows |
+|---|---|---|---|
+| head 700 (old) | 1,007 | 334 (0.3317) | 32,821 of 280,305 (0.1171) |
+| tail 700 (new) | 1,007 | **0** | **0** of 280,272 |
+
+The same 1,007 tasks, thirty-three rows lost out of 280,305. Across the whole read the collector
+skipped 2,957 rows whose clipped prompt repeated one already kept — against 32,821 duplicates in
+the old corpus, so the clip did about 91% of the work and the refusal caught the rest.
+
+**V.64's figures (0.459 against a null of 0.258) stand as measured but were taken over a corpus a
+third of whose tasks carried duplicates.** The re-measurement on the clean corpus is running; until
+it lands, the honest position is that the old figure is unverified rather than wrong, and no
+argument about which way it moves is a substitute for the number.
