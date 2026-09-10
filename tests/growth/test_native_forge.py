@@ -84,7 +84,11 @@ def test_forge_c_kernel_is_equivalent_and_faster():
     forge = NativeForge(allow_inprocess=True, min_speedup=1.2)
     cand = forge.forge(py_sumsq, samples=_SAMPLES, symbol="sumsq",
                        argtypes=[ctypes.c_long], restype=ctypes.c_long, c_source=_C_SRC)
-    assert cand is not None and cand.language == "c"
+    # `forge` is fail-closed and used to be fail-*silent*: a missing compiler, a compile error, a
+    # wrong answer and a merely-slow kernel all came back as one `None`, so this assertion could
+    # only ever say "nothing came back". `refusals` says which.
+    assert cand is not None, forge.refusals
+    assert cand.language == "c"
     assert cand.speedup >= 1.2 and "identical" in cand.certificate
     # the native kernel returns exactly the Python result
     assert cand.fn(4000) == py_sumsq(4000)
@@ -95,7 +99,8 @@ def test_forge_rust_kernel_is_equivalent_and_faster():
     forge = NativeForge(allow_inprocess=True, min_speedup=1.2)
     cand = forge.forge(py_sumsq, samples=_SAMPLES, symbol="sumsq",
                        argtypes=[ctypes.c_long], restype=ctypes.c_long, rust_source=_RUST_SRC)
-    assert cand is not None and cand.language == "rust"
+    assert cand is not None, forge.refusals
+    assert cand.language == "rust"
     assert cand.fn(8000) == py_sumsq(8000)
 
 
@@ -106,3 +111,30 @@ def test_forge_rejects_a_wrong_native_kernel():
     cand = forge.forge(py_sumsq, samples=_SAMPLES, symbol="sumsq",
                        argtypes=[ctypes.c_long], restype=ctypes.c_long, c_source=wrong_c)
     assert cand is None                                   # equivalence gauntlet rejected it
+
+
+def test_a_refusal_says_which_gate_it_failed():
+    """Fail-closed is right; fail-silent is not, and every branch below is a different problem."""
+    gated = NativeForge(allow_inprocess=False)
+    assert gated.forge(py_sumsq, samples=_SAMPLES, symbol="sumsq",
+                       argtypes=[ctypes.c_long], restype=ctypes.c_long,
+                       c_source=_C_SRC) is None
+    assert any("gated off" in why for why in gated.refusals), gated.refusals
+
+
+@pytest.mark.skipif(not _HAVE_C, reason="no C compiler")
+def test_a_kernel_that_is_merely_slow_is_refused_and_says_so():
+    forge = NativeForge(allow_inprocess=True, min_speedup=10_000.0)
+    assert forge.forge(py_sumsq, samples=_SAMPLES, symbol="sumsq",
+                       argtypes=[ctypes.c_long], restype=ctypes.c_long,
+                       c_source=_C_SRC) is None
+    assert any("under the" in why for why in forge.refusals), forge.refusals
+
+
+@pytest.mark.skipif(not _HAVE_C, reason="no C compiler")
+def test_source_that_does_not_compile_is_refused_and_says_so():
+    forge = NativeForge(allow_inprocess=True, min_speedup=1.0)
+    assert forge.forge(py_sumsq, samples=_SAMPLES, symbol="sumsq",
+                       argtypes=[ctypes.c_long], restype=ctypes.c_long,
+                       c_source="this is not C") is None
+    assert any("did not compile" in why for why in forge.refusals), forge.refusals

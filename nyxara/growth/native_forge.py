@@ -60,6 +60,9 @@ class NativeForge:
                                  else getattr(cfg, "min_speedup", 1.2))
         self.allow_inprocess = bool(allow_inprocess if allow_inprocess is not None
                                     else getattr(cfg, "allow_inprocess_native", False))
+        #: Why the last :meth:`forge` returned nothing, one line per language tried. Cleared at
+        #: the start of every forge, so it always describes the most recent attempt.
+        self.refusals: List[str] = []
 
     @staticmethod
     def _cfg() -> Any:
@@ -148,16 +151,33 @@ class NativeForge:
         best certified :class:`NativeCandidate` — or ``None`` if nothing qualifies. The in-process load
         is gated by ``allow_inprocess``; without it the forge refuses (returns None), honoring the
         containment choice."""
+        self.refusals: List[str] = []
         if not self.allow_inprocess:
+            self._refuse("*", "in-process loading is gated off")
             return None                       # in-process ctypes load is the gated tier (default OFF)
         best: Optional[NativeCandidate] = None
         for language, source in (("c", c_source), ("rust", rust_source)):
-            if not source or not self.available(language):
+            if not source:
+                continue
+            if not self.available(language):
+                self._refuse(language, "no toolchain on PATH")
                 continue
             cand = self._forge_one(language, source, reference, samples, symbol, argtypes, restype)
             if cand is not None and (best is None or cand.speedup > best.speedup):
                 best = cand
         return best
+
+    def _refuse(self, language: str, why: str) -> None:
+        """Record why a kernel was not forged.
+
+        Refusing is right — every branch below stays pure Python rather than risk a wrong answer
+        fast — but refusing **silently** is not. Every failure used to collapse into one `None`:
+        a missing compiler, a compile error, a kernel that computed the wrong thing and a kernel
+        that was merely slow were indistinguishable to the caller, and a test asserting
+        `cand is not None` could only report that nothing came back. The fail-closed behaviour is
+        unchanged; what is added is the reason.
+        """
+        self.refusals.append(f"{language}: {why}")
 
     def _forge_one(self, language: str, source: str, reference: Callable,
                    samples: Sequence[Tuple], symbol: str, argtypes: Sequence[Any],
@@ -167,18 +187,22 @@ class NativeForge:
             so = self._compile_c(source, workdir) if language == "c" \
                 else self._compile_rust(source, workdir)
             if so is None:
+                self._refuse(language, f"did not compile in {workdir}")
                 return None
             lib, fn = self._load(so, symbol, argtypes, restype)
             if not self._equivalent(reference, fn, samples):
+                self._refuse(language, f"not identical to the reference on {len(samples)} cases")
                 return None                   # NOT behaviorally identical → reject (fail-closed)
             speedup = self._speedup(reference, fn, samples)
             if speedup < self.min_speedup:
+                self._refuse(language, f"{speedup:.2f}x, under the {self.min_speedup}x bar")
                 return None                   # not measurably faster → keep pure Python
             cert = (f"{language}: identical on {len(samples)} cases; "
                     f"{speedup:.1f}x faster (>= {self.min_speedup}x)")
             return NativeCandidate(language=language, symbol=symbol, so_path=str(so), fn=fn,
                                    speedup=speedup, cases=len(samples), certificate=cert, _lib=lib)
-        except Exception:  # noqa: BLE001 — any failure means: no native kernel, stay pure Python
+        except Exception as error:  # noqa: BLE001 — any failure means: stay pure Python
+            self._refuse(language, f"{type(error).__name__}: {error}")
             return None
 
     # ---- reversible hot-swap ---- #
