@@ -147,13 +147,30 @@ class NativeForge:
         return True
 
     def _speedup(self, reference: Callable, native: Callable, samples: Sequence[Tuple],
-                 *, repeats: int = 50) -> float:
+                 *, repeats: int = 50, rounds: int = 5) -> float:
+        """How much faster the native kernel is, taken as the **best** of several rounds each.
+
+        One timing of each side is what this used to do, and it decides a correctness gate on a
+        single sample of a quantity that only ever moves one way. Everything that can interfere —
+        another process on the machine, the scheduler, a page fault, frequency scaling — makes a
+        measurement *slower*; nothing makes it spuriously faster. So the minimum of several rounds
+        is the honest estimate of what the code costs, and the mean is an estimate of what the
+        machine was doing at the time.
+
+        The symptom this fixes: a C kernel that measures 39x to 77x faster when the machine is
+        quiet came back at **0.23x** — four times slower than Python — during a long test session,
+        and the forge duly refused it. Not reproducibly; that is the point. A gate that flips on
+        load is not measuring a property of the kernel.
+        """
         def _time(fn: Callable) -> float:
-            t0 = time.perf_counter()
-            for _ in range(repeats):
-                for args in samples:
-                    fn(*args)
-            return time.perf_counter() - t0
+            best = float("inf")
+            for _ in range(max(1, rounds)):
+                t0 = time.perf_counter()
+                for _ in range(repeats):
+                    for args in samples:
+                        fn(*args)
+                best = min(best, time.perf_counter() - t0)
+            return best
         t_native = _time(native) or 1e-9
         t_ref = _time(reference)
         # Kept so a refusal can say which side was anomalous. A ratio alone cannot: "0.23x" is
