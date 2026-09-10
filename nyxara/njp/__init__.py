@@ -476,6 +476,27 @@ from nyxara.njp.asked import (
     satisfies,
     shape_of,
 )
+# V.57 and V.58. Every plain name in this pair is taken: `Slot` is the grammar's, `Example` and
+# `Learned` are the coding faculty's, `Group` and `Shape` are general enough to be anybody's, and
+# `probe` is a verb three modules use. So all of them are qualified at the door. The rule this
+# package keeps is that an export list never renames a thing where it lives and never silently
+# takes a name somebody else already answers to.
+from nyxara.njp.shapes import (
+    Group as TaskGroup,
+    Shape as TaskShape,
+    Slot as TemplateSlot,
+    align as align_prompts,
+    induce as induce_shape,
+    read_groups as read_task_groups,
+    read_shapes,
+)
+from nyxara.njp.answering import (
+    Example as TaskExample,
+    Learned as TaskLearned,
+    TaskLearner,
+    probe as probe_fields,
+    read_examples as read_task_examples,
+)
 from nyxara.njp.procedure import (
     Condition as Branch,
     Lesson as ProcedureLesson,
@@ -690,6 +711,12 @@ __all__ = [
     # V.54. `Question` is `njp.asking`'s already, so the question-with-an-answer is qualified at
     # the door rather than silently replacing it.
     "Asked", "AskedQuestion", "read_questions", "satisfies", "shape_of",
+    # V.57 -- the dataset's own templates, induced by alignment rather than written down. Every
+    # name here is qualified because every plain one was already answered to by something else.
+    "TaskShape", "TaskGroup", "TemplateSlot", "align_prompts", "induce_shape",
+    "read_task_groups", "read_shapes",
+    # V.58 -- learning to answer a task from examples of it, against its own majority floor.
+    "TaskLearner", "TaskExample", "TaskLearned", "probe_fields", "read_task_examples",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

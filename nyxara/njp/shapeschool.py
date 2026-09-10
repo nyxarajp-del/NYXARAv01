@@ -34,9 +34,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from nyxara.njp.shapes import MIN_ANCHOR, Group, Shape, induce
+from nyxara.njp.shapes import MIN_ANCHOR, TRIM, Group, Shape, induce
 
-__all__ = ["Report", "SEED", "LEARN_ROWS", "grade", "examine", "sweep", "run"]
+__all__ = ["Report", "SEED", "LEARN_ROWS", "grade", "examine", "sweep",
+           "sweep_trim", "run"]
 
 SEED = 56
 
@@ -130,7 +131,7 @@ def _one_slot(group: Group) -> Shape:
 
 
 def grade(groups: Sequence[Group], name: str = "", *, least: int = MIN_ANCHOR,
-          degenerate: bool = False) -> Report:
+          degenerate: bool = False, trim: bool = TRIM) -> Report:
     """Induce on four rows of each group and reconstruct the rest."""
     out = Report(name=name)
     for group in groups:
@@ -138,7 +139,7 @@ def grade(groups: Sequence[Group], name: str = "", *, least: int = MIN_ANCHOR,
             continue
         out.groups += 1
         seen, held = _split(group)
-        shape = _one_slot(seen) if degenerate else induce(seen, least)
+        shape = _one_slot(seen) if degenerate else induce(seen, least, trim=trim)
         if shape is None:
             continue
         out.shaped += 1
@@ -179,6 +180,16 @@ def sweep(groups: Sequence[Group],
     """What the anchor length is worth, so it is a measurement rather than a preference."""
     rows = list(groups)
     return [(value, grade(rows, f"anchor {value}", least=value)) for value in values]
+
+
+def sweep_trim(groups: Sequence[Group]) -> List[Tuple[bool, Report]]:
+    """What shortening a rejected anchor is worth, against dropping it whole.
+
+    The mechanism has to be shown to matter by being taken away, which is what the ``False`` row
+    is. If the two rows are the same, the trimming buys nothing and should go.
+    """
+    rows = list(groups)
+    return [(value, grade(rows, f"trim {value}", trim=value)) for value in (False, True)]
 
 
 def run(path: Optional[Path] = None) -> Dict[str, Any]:  # pragma: no cover — a report

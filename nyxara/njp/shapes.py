@@ -44,7 +44,8 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
-__all__ = ["Slot", "Shape", "Group", "align", "induce", "read_groups", "CORPUS"]
+__all__ = ["Slot", "Shape", "Group", "align", "induce", "read_groups", "CORPUS",
+           "MIN_ANCHOR", "TRIM"]
 
 CORPUS = Path(__file__).with_name("data") / "flan_shapes.jsonl.gz"
 
@@ -62,6 +63,21 @@ MAX_SLOTS = 12
 
 #: The mark a slot is rendered with when the shape is shown to a person.
 HOLE = "⟨{}⟩"
+
+#: Whether an anchor that a later row rejects is shortened to the part every row does hold, rather
+#: than dropped whole. On by measurement, and the switch stays so the claim can be taken away
+#: again. Over 13,113 groups of the collection, four rows aligned and the rest reconstructed:
+#:
+#:     trim    shaped   reconstructs   slots   template
+#:     False   0.847    0.925          1.41    336 chars
+#:     True    0.966    0.908          1.52    352 chars
+#:
+#: Read the two columns together rather than separately. Trimming shapes about **1,560 more
+#: groups** and gives back 0.017 of exactness on the larger set it is then judged on — so of all
+#: held-out rows, the share returned character-for-character goes from 0.783 to 0.877. Groups that
+#: were previously refused outright are the ones being added, and they come in slightly harder
+#: than the ones already there, which is what the reconstruction column is showing.
+TRIM = True
 
 #: There is deliberately no clip marker here any more, and the reason is worth keeping. The
 #: collector used to drop the middle of a long prompt and join the ends with an ellipsis; this
@@ -196,12 +212,57 @@ def _shared_runs(a: str, b: str, least: int) -> List[str]:
             for block in matcher.get_matching_blocks() if block.size >= least]
 
 
-def align(prompts: Sequence[str], least: int = MIN_ANCHOR) -> Tuple[Any, ...]:
+def _survives(run: str, rows: Sequence[str], at: Sequence[int]) -> Optional[List[int]]:
+    """Where this run sits in every row, after what has already been consumed — or nothing."""
+    where = [row.find(run, at[i]) for i, row in enumerate(rows)]
+    return where if all(w >= 0 for w in where) else None
+
+
+def _longest(run: str, rows: Sequence[str], at: Sequence[int], least: int,
+             end: bool = False) -> str:
+    """The longest prefix (or suffix) of this run that every row holds.
+
+    Survival is monotone — a shorter prefix of a surviving prefix survives, being a substring of it
+    — so this is a binary search and costs a handful of finds rather than one per length.
+    """
+    low, high, best = least, len(run), ""
+    while low <= high:
+        mid = (low + high) // 2
+        piece = run[-mid:] if end else run[:mid]
+        if _survives(piece, rows, at) is not None:
+            best, low = piece, mid + 1
+        else:
+            high = mid - 1
+    return best
+
+
+def _trimmed(run: str, rows: Sequence[str], at: Sequence[int], least: int) -> str:
+    """The part of an over-proposed run that is actually template.
+
+    A run is proposed from the **first pair**, so it can reach past the template at either end into
+    whatever those two rows happened to share. Two questions that both open ``wh`` propose
+    ``"\nQ: wh"``, and those two characters are enough for row five to reject the entire anchor —
+    the instruction is then lost, not shortened. Trimming recovers what the rows do agree on.
+
+    Both ends are tried, and the trimmed result is trimmed again from the other end, because a run
+    spanning ``[tail of a field][template][head of a field]`` is over-proposed twice over.
+    """
+    front = _longest(run, rows, at, least)
+    if front:
+        front = _longest(front, rows, at, least, end=True) or front
+    back = _longest(run, rows, at, least, end=True)
+    if back:
+        back = _longest(back, rows, at, least) or back
+    return front if len(front) >= len(back) else back
+
+
+def align(prompts: Sequence[str], least: int = MIN_ANCHOR, *, trim: bool = TRIM) -> Tuple[Any, ...]:
     """The parts every one of these strings shares, in order, with the gaps between them as slots.
 
     Two rows are enough to *propose* an anchor and are not enough to trust one: any two English
     passages share ``" and the "`` somewhere. So a run is proposed from the first pair and then
-    has to survive **every** remaining row, in order, or it is dropped.
+    has to survive **every** remaining row, in order. What happens when it does not is the
+    ``trim`` switch: dropped whole, or shortened to the part the rows do share.
     """
     rows = [str(p or "") for p in prompts if str(p or "")]
     if len(rows) < 2:
@@ -214,8 +275,11 @@ def align(prompts: Sequence[str], least: int = MIN_ANCHOR) -> Tuple[Any, ...]:
     kept: List[str] = []
     at = [0] * len(rows)
     for run in proposed:
-        where = [row.find(run, at[i]) for i, row in enumerate(rows)]
-        if any(w < 0 for w in where):
+        where = _survives(run, rows, at)
+        if where is None and trim:
+            run = _trimmed(run, rows, at, least)
+            where = _survives(run, rows, at) if run else None
+        if where is None:
             continue
         kept.append(run)
         at = [w + len(run) for w in where]
@@ -239,9 +303,9 @@ def align(prompts: Sequence[str], least: int = MIN_ANCHOR) -> Tuple[Any, ...]:
     return tuple(parts)
 
 
-def induce(group: Group, least: int = MIN_ANCHOR) -> Optional[Shape]:
+def induce(group: Group, least: int = MIN_ANCHOR, *, trim: bool = TRIM) -> Optional[Shape]:
     """One group of rows into one shape, or ``None`` when they share no template worth the name."""
-    parts = align(group.prompts, least)
+    parts = align(group.prompts, least, trim=trim)
     if not parts:
         return None
     holes = [p for p in parts if isinstance(p, int)]
@@ -270,24 +334,42 @@ def induce(group: Group, least: int = MIN_ANCHOR) -> Optional[Shape]:
 # --------------------------------------------------------------------------------------------- #
 #  the corpus
 # --------------------------------------------------------------------------------------------- #
+def _lines(path: Path) -> Iterator[str]:
+    """The lines of a gzipped shard, stopping where a truncated one stops.
+
+    A collection killed part-way leaves a file with no end-of-stream marker, and reading it raises
+    rather than returning the rows it does hold. Those rows are perfectly good — the run that
+    wrote them read that much of the dataset — so the truncation ends the file instead of losing
+    it. A shard nobody interrupted is unaffected.
+    """
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        while True:
+            try:
+                line = handle.readline()
+            except (EOFError, OSError):
+                return
+            if not line:
+                return
+            yield line
+
+
 def read_groups(path: Path) -> Iterator[Group]:
     """The collector's output, as groups."""
     if not Path(path).exists():
         return
-    with gzip.open(path, "rt", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:  # noqa: BLE001
-                continue
-            rows = row.get("rows") or []
-            yield Group(task=str(row.get("task") or ""),
-                        template=str(row.get("template") or ""),
-                        source=str((rows[0] if rows else {}).get("source") or ""),
-                        prompts=tuple(str(r.get("inputs") or "") for r in rows),
-                        targets=tuple(str(r.get("targets") or "") for r in rows))
+    for line in _lines(Path(path)):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        rows = row.get("rows") or []
+        yield Group(task=str(row.get("task") or ""),
+                    template=str(row.get("template") or ""),
+                    source=str((rows[0] if rows else {}).get("source") or ""),
+                    prompts=tuple(str(r.get("inputs") or "") for r in rows),
+                    targets=tuple(str(r.get("targets") or "") for r in rows))
 
 
 def read_shapes(path: Optional[Path] = None) -> List[Shape]:

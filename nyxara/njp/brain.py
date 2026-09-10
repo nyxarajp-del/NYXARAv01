@@ -403,6 +403,11 @@ class NJPBrain:
         self.arithmetic = self._build_arithmetic(c)
         self.procedures = self._build_procedures(c)
         self.asked = self._build_asked(c)
+        # After `asked` and independent of it. The shape reader holds the dataset's own templates
+        # and the answerer learns to fill them; neither files a fact, so nothing downstream of the
+        # fact store cares in which order they arrive.
+        self.shapes = self._build_shapes(c)
+        self.answerer = self._build_answerer(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
@@ -1946,6 +1951,38 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_shapes(self, c: Any) -> Any:
+        """The dataset's own templates, as she induced them by alignment.
+
+        Empty until :meth:`learn_task_shapes` is called or a shapes corpus is shipped beside the
+        package. A brain that has been shown no tasks knows the form of none of them, and this
+        returns an empty index rather than pretending to a library it does not have.
+        """
+        if not self._gate("shapes", True):
+            return None
+        try:
+            from nyxara.njp.shapes import read_shapes
+
+            return {shape.task: shape for shape in read_shapes()}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_answerer(self, c: Any) -> Any:
+        """The organ that learns to *do* a task from examples of it.
+
+        Untrained, like the programmer and the entailer. What it holds after
+        :meth:`learn_tasks` is one small rule set per task, each carrying the accuracy it reached
+        on rows it was not shown and the majority floor it had to clear to mean anything.
+        """
+        if not self._gate("answering", True):
+            return None
+        try:
+            from nyxara.njp.answering import TaskLearner
+
+            return {"engine": TaskLearner(), "learned": {}}
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_entailer(self, c: Any) -> Any:
         """The organ that answers whether one sentence follows from another.
 
@@ -2492,6 +2529,103 @@ class NJPBrain:
             return out
         return out
 
+    def learn_task_shapes(self, path: str = "", *, limit: int = 0) -> Dict[str, Any]:
+        """Induce the template behind each group of rows the collector kept.
+
+        Files nothing. A shape is a claim about how a *prompt was rendered*, not about the world,
+        and the fact store is not where a claim about a string belongs.
+        """
+        out: Dict[str, Any] = {"groups": 0, "shapes": 0}
+        if self.shapes is None:
+            return out
+        try:
+            from pathlib import Path as _Path
+
+            from nyxara.njp.shapes import induce, read_groups
+
+            paths = sorted(_Path(path).glob("*.jsonl.gz")) if path else []
+            seen = 0
+            for one in paths:
+                for group in read_groups(one):
+                    if limit and seen >= int(limit):
+                        break
+                    seen += 1
+                    if len(group.prompts) < 3:
+                        continue
+                    shape = induce(group)
+                    # The template with the most rows behind it wins: a shape induced from six
+                    # rows is better evidence than one induced from two, and a task may render
+                    # through several templates.
+                    if shape is None:
+                        continue
+                    held = self.shapes.get(group.task)
+                    if held is None or shape.rows > held.rows:
+                        self.shapes[group.task] = shape
+            out.update({"groups": seen, "shapes": len(self.shapes)})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def learn_tasks(self, path: str = "", *, limit: int = 0) -> Dict[str, Any]:
+        """Learn to answer each task from examples of it, and keep only what beat its own floor.
+
+        Files nothing, and claims nothing about a task whose rules did not clear the majority
+        baseline for that task. A rule set that does no better than always saying the commonest
+        answer has learned nothing about the task, whatever its accuracy looks like, so it is
+        counted and discarded rather than kept and quoted.
+        """
+        out: Dict[str, Any] = {"tasks": 0, "learned": 0, "free_text": 0, "too_few": 0}
+        if self.answerer is None:
+            return out
+        try:
+            from pathlib import Path as _Path
+
+            from nyxara.njp.answering import read_examples
+
+            engine = self.answerer["engine"]
+            known = self.shapes or {}
+            seen = 0
+            for one in sorted(_Path(path).glob("*.jsonl.gz")) if path else []:
+                for task, examples in read_examples(one):
+                    if limit and seen >= int(limit):
+                        break
+                    seen += 1
+                    got = engine.learn(examples, known.get(task))
+                    if got is None:
+                        out["too_few"] += 1
+                        continue
+                    if not got.learned_something:
+                        continue
+                    self.answerer["learned"][task] = got
+            out.update({"tasks": seen, "learned": len(self.answerer["learned"])})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def do_task(self, task: str, prompt: str) -> Dict[str, Any]:
+        """Her answer to one instance of a task she was taught, with what it is worth beside it.
+
+        ``accuracy`` and ``majority`` are both returned and neither is decoration: an answer from
+        a task whose two numbers are equal is an answer from a rule set that learned nothing, and
+        a caller that reads only the first number will believe otherwise.
+        """
+        out: Dict[str, Any] = {"answer": "", "accuracy": 0.0, "majority": 0.0, "known": False}
+        if self.answerer is None:
+            return out
+        try:
+            got = self.answerer["learned"].get(str(task or ""))
+            if got is None:
+                return out
+            engine = self.answerer["engine"]
+            # No vocabulary passed: the rules were induced over the one the task was learned with
+            # and `Learned` carries it. Rebuilding one from the prompt in hand would read every
+            # term as missing, fire no rule, and return the majority answer without saying so.
+            out.update({"answer": engine.answer(got, str(prompt or "")),
+                        "accuracy": got.accuracy, "majority": got.majority, "known": True})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
     def learn_reasoning(self, *, limit: int = 0) -> Dict[str, Any]:
         """Read FLAN's worked inferences and induce what predicts which answer.
 
@@ -2635,6 +2769,43 @@ class NJPBrain:
             return {"kinds": {name: report.to_dict() for name, report in examine().items()},
                     "veto": [{"bar": bar, "fires_on": fires, "rejects_correct": cost}
                              for bar, fires, cost in veto_bar()]}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_shape_school(self, path: str = "") -> Any:
+        """Sit the reconstruction exam: does the induced template rebuild rows it never saw?"""
+        try:
+            from pathlib import Path as _Path
+
+            from nyxara.njp.shapes import read_groups
+            from nyxara.njp.shapeschool import LEARN_ROWS, examine
+
+            groups = [g for one in (sorted(_Path(path).glob("*.jsonl.gz")) if path else [])
+                      for g in read_groups(one) if len(g.prompts) >= LEARN_ROWS + 1]
+            return {name: report.to_dict() for name, report in examine(groups).items()}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_answering_school(self, path: str = "", shapes: str = "") -> Any:
+        """Sit the task audit: what she learned, what the shape was worth, and the shuffled null.
+
+        The null is the row to read first. It is the same machinery on the same tasks with the
+        answers permuted, so whatever share of *those* "beats its own floor" is the share that
+        means nothing at all.
+        """
+        try:
+            from pathlib import Path as _Path
+
+            from nyxara.njp.answeringschool import examine, shapes_by_task
+
+            learn = sorted(_Path(path).glob("*.jsonl.gz")) if path else []
+            known = shapes_by_task(sorted(_Path(shapes).glob("*.jsonl.gz"))) if shapes else {}
+            with_shape = examine(learn, known, use_shapes=True)
+            without = examine(learn, known, use_shapes=False)
+            null = examine(learn, known, use_shapes=False, shuffled=True)
+            return {"with_shapes": with_shape.to_dict(), "whole_prompt": without.to_dict(),
+                    "shuffled": null.to_dict(),
+                    "above_chance": without.above_chance(null)}
         except Exception:  # noqa: BLE001
             return None
 

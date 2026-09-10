@@ -70,7 +70,7 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int,
 
     Two jobs, one pass. Grouped by task *and template* with a few rows each, what comes out is
     what :mod:`nyxara.njp.shapes` aligns to find the template. Grouped by task alone with many
-    rows and only short answers kept, what comes out is what :mod:`nyxara.njp.tasks` learns the
+    rows and only short answers kept, what comes out is what :mod:`nyxara.njp.answering` learns the
     task *from* — a template says what is being asked, and it takes examples to learn the answer.
     """
     kept: Dict[str, list] = {}

@@ -57,6 +57,28 @@ class _Missing:
 #: What a reading a case simply does not have compares equal to: nothing.
 MISSING = _Missing()
 
+#: How many of the remaining positives may be tried as a seed when the shared readings yield
+#: nothing. **Not the default** — the default is one, which is what every organ built before this
+#: was measured with, and raising it for all of them would silently restate their numbers.
+#:
+#: What it is for. The seed decides which readings the search may even *look* at, so a signal only
+#: some positives carry is invisible unless a row carrying it is the seed. With one seed the search
+#: then settles for a near miss — an impure conjunction — and :func:`cover` removes what a near
+#: miss covers, so one impure rule swallows most of the positives and the cover ends with the clean
+#: rules underneath it never found. Measured on a task decided entirely by which of six words
+#: appeared: **one** rule induced where six were available, each pure and each covering a sixth of
+#: the rows, and held-out accuracy 0.389 against a floor of 0.389 — nothing learned at all. At six
+#: seeds, five rules and 0.611.
+#:
+#: Why it is not on everywhere. It costs up to six searches instead of one on the fallback path,
+#: and how much that hurts depends entirely on how big the negative set is. On 2,800 inference
+#: pairs it is free — 156s at one seed, 156s at six, the same single rule and the same held-out
+#: 0.434, because the fallback is barely reached. On 8,400 it is not free: it puts
+#: :mod:`nyxara.njp.entailschool`'s twelve-thousand-pair reading past a five-minute test budget it
+#: previously fitted inside. So :mod:`nyxara.njp.answering` asks for it and nothing else does, and
+#: the reason is written down rather than the number quietly changed underneath the other organs.
+SEEDS = 6
+
 
 @dataclass(frozen=True)
 class AtLeast:
@@ -218,7 +240,7 @@ def search(candidates: Mapping[str, Any], positives: Sequence[Mapping[str, Any]]
 def cover(positives: Sequence[Mapping[str, Any]], negatives: Sequence[Mapping[str, Any]], *,
           label: str = "", min_support: int = 4, min_share: float = 0.08, max_rules: int = 4,
           max_terms: int = 3, max_candidates: int = 12,
-          purity: float = 1.0) -> Tuple[List[Rule], List[Rule]]:
+          purity: float = 1.0, seeds: int = 1) -> Tuple[List[Rule], List[Rule]]:
     """Explain these positives with as few exact rules as the evidence needs, and no fewer.
 
     Returns ``(rules, near_misses)``. A near miss is the least-wrong conjunction found when the
@@ -238,7 +260,7 @@ def cover(positives: Sequence[Mapping[str, Any]], negatives: Sequence[Mapping[st
     attempts = 0
     while len(remaining) >= floor and len(rules) < max_rules and attempts < max_rules * 3:
         rule = _one(remaining, negatives, label=label, floor=floor, max_terms=max_terms,
-                    max_candidates=max_candidates, purity=purity)
+                    max_candidates=max_candidates, purity=purity, seeds=seeds)
         attempts += 1
         if rule is None:
             break
@@ -298,15 +320,36 @@ def ladder(name: str, positives: Sequence[Mapping[str, Any]],
     return out
 
 
+
 def _one(positives: Sequence[Mapping[str, Any]], negatives: Sequence[Mapping[str, Any]], *,
          label: str, floor: int, max_terms: int, max_candidates: int,
-         purity: float = 1.0) -> Optional[Rule]:
+         purity: float = 1.0, seeds: int = 1) -> Optional[Rule]:
+    """The widest clean rule these positives support, or the least-wrong one if there is none."""
     if not positives:
         return None
     whole = search(_shared(positives), positives, negatives, label=label, floor=floor,
                    max_terms=max_terms, max_candidates=max_candidates, purity=purity)
     if whole is not None:
         return whole
-    return search(dict(positives[0]), positives, negatives, label=label, floor=floor,
-                  max_terms=max_terms, max_candidates=max_candidates, purity=purity,
-                  exact_only=False)
+    # Seeds spread across the remaining positives rather than taken from the front, so that rows
+    # sharing a signal — which arrive together when the corpus is in any kind of order — do not
+    # take every seed between them.
+    step = max(1, len(positives) // max(1, seeds))
+    clean: List[Rule] = []
+    fallback: Optional[Rule] = None
+    for at in range(0, len(positives), step):
+        got = search(dict(positives[at]), positives, negatives, label=label, floor=floor,
+                     max_terms=max_terms, max_candidates=max_candidates, purity=purity,
+                     exact_only=False)
+        if got is None:
+            continue
+        if got.purity >= purity:
+            clean.append(got)
+        elif fallback is None or (got.counterexamples, -got.support) < (fallback.counterexamples,
+                                                                       -fallback.support):
+            fallback = got
+        if len(clean) >= seeds:
+            break
+    if clean:
+        return max(clean, key=lambda r: (r.support, r.purity))
+    return fallback
