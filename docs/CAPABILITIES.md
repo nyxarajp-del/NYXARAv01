@@ -5432,3 +5432,133 @@ confidence down, and it disappears as she comes to recognise the ground.
 The safety core — corrigibility, oversight, loyalty, honesty — is never governed, rewritten or
 bypassed by anything in the package. Every candidate flows through the identical, unchanged,
 fail-closed sovereign gate. The mind proposes; the kernel disposes; the Master is sovereign.
+
+---
+
+## V.57 — she works out the dataset's shapes instead of being handed mine
+
+The first read of FLAN kept 747,897 rows out of 83,271,754. **Nine tenths of one percent.** Not
+because the rest held nothing — because five hand-written extractors decided in advance what
+knowledge looks like: a `Premise:`, a `Q:`, an `In this task`, a chain of sums, a quoted pair.
+Anything outside them was invisible. `dialog` is 10.7 GB and yielded **four items**.
+
+The fault was not that those patterns were bad. It is that they were *mine*. Somebody wrote down
+what a piece of knowledge looks like, and the reader could then only ever find what that person
+already knew to look for.
+
+So `njp/shapes.py` says nothing about what a task looks like. It uses a fact about the data
+instead: FLAN stamps every row with the task it came from and the index of the template that
+rendered it, so **rows sharing both were produced by one string with holes punched in it**. Given
+six such rows the string is recoverable by alignment — what every row has in common, in order, is
+the template; what differs is what was poured in.
+
+    "In this task, you are given a question and a context passage. You have to answer the
+     question based on the given passage.\nQ: ⟨1⟩, Context: ⟨2⟩"
+
+Two slots, discovered. Nobody wrote `Q:` or `Context:` down; they are what did not vary. The same
+procedure runs on a translation task, a dialogue task, a task in Tamil, and on the shapes nobody
+anticipated, because it never asks what the shape *means*.
+
+### The exam needs no answer key
+
+Induce a template from four rows of a group; hold two back; fill the template with what it reads
+out of a held-out row. **Do you get the row back, character for character?** There is no judgement
+in that and nothing to mark by hand.
+
+Two guards stop the headline being gamed, because the degenerate shape — one hole covering the
+whole prompt — reconstructs *everything* perfectly and knows nothing. So slots-per-shape and
+template-characters are printed beside the reconstruction rate, and the one-slot shape is run as an
+explicit floor.
+
+### Trimming an over-proposed anchor
+
+A run is proposed from the **first pair**, so it reaches past the template into whatever those two
+rows happened to share. Two questions that both open `wh` propose `"\nQ: wh"`, and those two
+characters are enough for row five to reject the anchor — discarding the entire instruction rather
+than shortening it. Over 13,113 real groups:
+
+| trim | shaped | reconstructs | slots | template |
+|---|---|---|---|---|
+| off | 0.847 | 0.925 | 1.41 | 336 chars |
+| on  | **0.966** | 0.908 | 1.52 | 352 chars |
+
+Read together, not separately: trimming shapes about 1,560 more groups and gives back 0.017 of
+exactness on the larger set it is then judged on, so of *all* held-out rows the share returned
+character-for-character goes from **0.783 to 0.877**. The switch stays so the claim can be taken
+away again.
+
+### What it is not
+
+One shape per task with a handful of examples is not the 83 million rows. It is the **form** of all
+of them, which is the thing that generalises, and it fits in a repository where 83 million rows
+never could.
+
+---
+
+## V.58 — learning to *do* the tasks, and the null that says what a win is worth
+
+A shape is a description. It says *"this task asks a question about a passage and answers yes or
+no"*. It cannot answer one. `njp/answering.py` is the other thing: for each task, from examples of
+it, **which readings of what was poured into the slots predict which answer?**
+
+The readings are whether the text holds each of the task's own commonest words, and nothing else —
+no sentiment lexicon, no polarity list, no notion of what any word means. If *terrible* predicts
+*negative*, that is something `induce` found by counting, in a task whose name it never read.
+
+### The floor is not zero
+
+It is **always saying whichever answer was commonest**, computed per task. A two-way task whose
+answers run nine to one is 0.9 for a machine that has learned nothing, so nothing here reports
+accuracy without the majority beside it and `learned something` means *beat its own task's floor*.
+
+### And the floor is not enough either
+
+Given forty-eight readings to choose from and thirty rows to choose on, a rule with support four
+can come out **pure by accident**, and sometimes it helps on the held-out rows too. Measured on
+forty synthetic tasks whose answers were assigned by a coin: **0.175 of them beat their own floor**,
+at a mean lift of +0.013.
+
+So the exam runs a shuffled-label null — the same tasks with their answers permuted, which destroys
+the signal and leaves size, answer space and skew exactly as they were. On the collection:
+
+| | in scope | beat own floor | accuracy | majority | lift |
+|---|---|---|---|---|---|
+| whole prompt | 609 | **204 = 0.335** | 0.496 | 0.470 | **+0.026** |
+| with shapes | 609 | 189 = 0.310 | 0.495 | 0.470 | +0.025 |
+| shuffled answers | 609 | 126 = 0.207 | 0.455 | 0.461 | **−0.005** |
+
+**Above chance: +0.128.** The null's lift is negative, which is what a null must do; the real lift
+is positive. Of the tasks seen, 1,156 answer in free text and are counted as *not attempted* rather
+than as failures, because this machinery picks among answers it has seen and cannot compose a new
+one.
+
+Some of what she worked out, none of it told to her:
+
+    0.964 vs 0.393   'en' when has:de is False / 'es' when has:de is True
+    0.842 vs 0.474   'No' when has:sorry is True          (a dialogue act)
+    0.750 vs 0.286   'Dutch' when has:van is True
+    0.893 vs 0.571   'Gujarati' when has:એક is True
+
+Language identification from function words, in scripts nothing in this package can read.
+
+### The shapes contributed nothing
+
+0.310 with them against 0.335 without. That is the **fourth** consecutive null result for one organ
+feeding another in this package, and it is reported rather than tuned past. The instruction is
+identical in every row of a task, so its words carry no signal and should be pure noise in the
+reading — the measurement says they are, and that reading the slots alone is very slightly worse
+than reading everything, presumably because a shape that fails to parse a row costs that row.
+
+### Two defects this turned up
+
+**The cover could not learn a task decided by any one of several words.** `_one` seeds its search
+from readings *all* remaining positives share; when that yields nothing it fell back to a single
+row and accepted an impure near miss, and `cover` removes what a near miss covers — so one impure
+rule swallowed the positives and the clean rules underneath were never looked for. On a task
+decided entirely by which of six words appeared: one rule where six were available, 0.389 against a
+floor of 0.389. Trying several seeds and preferring a pure rule: five rules, 0.611. It is opt-in at
+`seeds=1`, because on 8,400 inference pairs it costs more than it is worth there.
+
+**`nyxara/njp/tasks.py` was overwritten.** V.58 first shipped under that name, on top of the V.17
+coding-task bank that `njp/school.py` reaches into in eight places. Nothing caught it because only
+the new test file had been run. Restored byte-for-byte; the module lives at `njp/answering.py`.

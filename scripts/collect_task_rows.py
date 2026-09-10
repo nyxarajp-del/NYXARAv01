@@ -76,6 +76,7 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int,
     kept: Dict[str, list] = {}
     rows = 0
     full = 0
+    whole = True
     began = time.time()
     try:
         for row in objects(BASE + name, limit_bytes=limit_bytes):
@@ -105,9 +106,16 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int,
                 print(f"  {name}: {rows:,} rows, {len(kept):,} groups",
                       file=sys.stderr, flush=True)
     except Exception as error:  # noqa: BLE001 — one file failing is not the run failing
+        whole = False
         print(f"  {name}: stopped after {rows:,} rows — {error}", file=sys.stderr, flush=True)
 
-    target = Path(out) / f"rows.{name.split('_submix')[0]}.jsonl.gz"
+    # A shard from a read that did not finish is written — the rows in it are perfectly good, the
+    # run did read them — but under a name nothing downstream globs for. The rows being good is
+    # exactly why this matters: a partial shard is indistinguishable from a complete one by
+    # inspection, so it has to be distinguishable by *name*, or the next run silently reports the
+    # numbers of half a submix as the numbers of a submix.
+    stem = name.split('_submix')[0] + ("" if whole else ".partial")
+    target = Path(out) / f"rows.{stem}.jsonl.gz"
     target.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(target, "wt", encoding="utf-8") as handle:
         for key, group in kept.items():
@@ -115,9 +123,10 @@ def one_file(name: str, out: str, per_group: int, limit_bytes: int,
             handle.write(json.dumps({"task": task, "template": index, "rows": group},
                                     ensure_ascii=False) + "\n")
     print(f"  {name}: {rows:,} rows in {time.time() - began:.0f}s; "
-          f"{len(kept):,} groups kept, {full:,} refused at the ceiling",
+          f"{len(kept):,} groups kept, {full:,} refused at the ceiling"
+          f"{'' if whole else '  ** PARTIAL — the read did not finish **'}",
           file=sys.stderr, flush=True)
-    return {"rows": rows, "groups": len(kept), "refused": full}
+    return {"rows": rows, "groups": len(kept), "refused": full, "partial": 0 if whole else 1}
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -137,7 +146,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     files = (args.only,) if args.only else FILES
     began = time.time()
-    totals = {"rows": 0, "groups": 0, "refused": 0}
+    totals = {"rows": 0, "groups": 0, "refused": 0, "partial": 0}
     with ProcessPoolExecutor(max_workers=max(1, args.workers)) as pool:
         futures = [pool.submit(one_file, name, args.out, args.per_group, args.bytes,
                                args.by_task, args.max_target, args.head)
@@ -152,6 +161,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 totals[key] += got.get(key, 0)
     print(f"read {len(files)} files in {time.time() - began:.0f}s; {totals['rows']:,} rows, "
           f"{totals['groups']:,} groups", file=sys.stderr, flush=True)
+    if totals["partial"]:
+        print(f"  {totals['partial']} of {len(files)} did not finish and were written as "
+              f"`rows.*.partial.jsonl.gz`; re-run those files before quoting any number",
+              file=sys.stderr, flush=True)
+        return 1
     return 0
 
 
