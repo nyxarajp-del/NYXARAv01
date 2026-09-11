@@ -129,6 +129,15 @@ class Intervention:
     holds: Tuple[Held, ...] = ()
     #: Run it, and return whatever the invariants will be read off — typically a benchmark.
     run: Optional[Callable[[], Any]] = None
+    #: The same change written as a **transformation of a setup** rather than as a thunk.
+    #:
+    #: ``run`` is opaque and therefore un-composable: two thunks cannot be applied one after the
+    #: other, so ``A then B`` and ``B then A`` are not even expressible, and neither is the
+    #: interaction between them. V.85 needs both, so an intervention that wants to take part in an
+    #: interaction search supplies this instead — and gets ``run`` for free through
+    #: :meth:`against`. An intervention with only ``run`` still works everywhere it did before and
+    #: is simply not composable, which is reported rather than worked around.
+    change: Optional[Callable[[Any], Any]] = None
     #: Could this change be **shipped**, or only measured? An intervention that consults the right
     #: answer — keep twelve candidates, but make sure the gold one is among them — answers a real
     #: diagnostic question and cannot become a repair, because at run time nobody knows the gold.
@@ -144,6 +153,18 @@ class Intervention:
     def name(self) -> str:
         held = " ".join(f"hold({h.name})" for h in self.holds)
         return f"{self.verb}({self.on})" + (f" {held}" if held else "")
+
+    @property
+    def composable(self) -> bool:
+        return self.change is not None
+
+    def against(self, setup: Any) -> "Intervention":
+        """The same intervention with ``run`` filled in from ``change`` and a starting setup."""
+        if self.change is None:
+            return self
+        return Intervention(verb=self.verb, on=self.on, holds=self.holds,
+                            deployable=self.deployable, says=self.says, change=self.change,
+                            run=lambda: self.change(setup))
 
     def to_dict(self) -> Dict[str, Any]:
         return {"verb": self.verb, "on": self.on, "name": self.name,

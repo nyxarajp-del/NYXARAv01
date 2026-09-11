@@ -503,6 +503,17 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.85. `Interaction` is free and `Reading` is not — `njp.finding` has a Reading, which is a
+# passage and a question, and nothing like one run's per-item scores. `search` and `compose` are
+# both far too general to take bare.
+from nyxara.njp.interact import (
+    Interaction,
+    Reading as PerItemReading,
+    compose as compose_interventions,
+    interaction,
+    mechanisms,
+    search as search_interactions,
+)
 # V.84. `Map` is free; `Knob`, `Held`, `Intervention`, `Outcome` and `Gap` are free; `survey`,
 # `gaps` and `propose` are free. `Intervention` is qualified anyway — `njp.causal` has a notion of
 # intervening on a graph, and a bare name here would read as the general case of that.
@@ -785,6 +796,8 @@ __all__ = [
     "Fieldwork", "MeasuredStage", "diagnose", "span_stage",
     "HypothesisSpace", "Knob", "Held", "Experiment", "Outcome", "BlindSpot",
     "survey", "gaps", "propose",
+    "Interaction", "PerItemReading", "interaction", "mechanisms",
+    "search_interactions", "compose_interventions",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

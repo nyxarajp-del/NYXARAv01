@@ -6610,3 +6610,86 @@ versions, worth about a tenth of the gap.
 
 That is the honest ledger. The map was the right instrument and it did the thing it was built for;
 it did not produce an explanation, because there is not one here yet.
+
+---
+
+## V.85 — what two changes do together that neither does alone
+
+First, a correction to what V.84 was taken to have shown. **The +0.0720 was not an interaction.** It
+was a single-variable intervention — loosening the comparison — in a region nothing had entered.
+No interaction had been measured at all, and that figure came from one breakdown on one held-out
+sample with no interval on it. *Reproducible* was not established and is not claimed here.
+
+What V.84 did establish is the shape that makes this version worth building:
+
+```
+f(A) ≈ 0        f(B) ≈ 0        f(A, B) ≫ 0
+```
+
+A single-variable search cannot see that, ever, however many variables it tries — and V.83 and V.84
+between them ran nine single-variable experiments on one organ and refuted nine hypotheses.
+
+### Two things had to change before the question was even expressible
+
+**Interventions had to become composable.** `Intervention.run` is a thunk, and two thunks cannot be
+applied one after the other — so `A then B` was not expressible, and neither was the interaction
+between them. `Intervention.change` writes the same change as a transformation of a setup.
+
+**And the measurement had to return one reading per item.** An interaction measured on a *score*
+cannot be given a null at all: there is no spread to compare it against, and the honest answer to
+*is 0.088 big?* becomes unavailable rather than yes. A version of this module built on scores would
+be unfalsifiable and should not be written.
+
+### `I = ΔAB − ΔA − ΔB`, and then three attempts to show it is nothing
+
+That ordering is the whole design. The subtraction of four noisy means is very good at being large.
+
+| what it might be | the control |
+|---|---|
+| noise | a bootstrap over items; the interval must not straddle zero |
+| a pipeline order effect | `A then B` against `B then A`; a difference means composing **mutates** |
+| a stateful harness | a **change that does nothing**; it must move nothing, alone or beside something |
+
+The third is the cheapest and the most damning: if applying *nothing* moves the number, every
+figure the harness has produced is suspect — including the flat ones that were believed.
+
+### The exam, and the defect it found in the organ
+
+Six worlds, **four of them ones where finding a pair is wrong**:
+
+| world | want | got | I | order | placebo |
+|---|---|---|---|---|---|
+| synergy | interacting | interacting | **+0.4981** | +0.0000 | +0.0000 |
+| additive | additive | additive | +0.0019 | +0.0000 | +0.0000 |
+| inert | additive | additive | +0.0000 | +0.0000 | +0.0000 |
+| antagonism | interacting | interacting | **−0.3481** | +0.0000 | +0.0000 |
+| order-dependent | order-dependent | order-dependent | +0.0000 | **−0.4982** | +0.0000 |
+| leaky apparatus | apparatus | apparatus | +0.0019 | +0.0000 | **+0.1982** |
+
+**right 6/6, invented 0, missed 0.**
+
+It did not start there. The first run scored 4/6, and the two failures were different in kind.
+
+**The organ's.** I had written the apparatus control *as an interaction* — `I(A, nothing)` — and a
+leak growing linearly with how often the harness has been touched **cancels out of that subtraction
+exactly**. Measured: a do-nothing change moved the leaky fixture **+0.1982** and the control
+reported **+0.0000**. A control written in the same shape as the thing it guards inherits that
+thing's blind spots. The leak is now read directly as well as in composition.
+
+**The fixture's.** My order-dependent world expressed the dependence through a counter both orders
+increment identically, so both orders came out the same and the order effect measured 0.0000 — a
+fixture that could not fail, proving nothing about a control that passed it. Rewritten so one switch
+consumes what the other needs; and then confined to its own world, because the first fix put the
+mechanic in the *intervention* and quietly made three unrelated fixtures order-dependent.
+
+### What it refuses to do
+
+An interaction is **not a mechanism**. `mechanisms()` returns all six candidates on the day one is
+found — *A changes what B does*, *B changes what A does*, *something neither names mediates both*, *one
+is nonlinear and the other crossed a knee*, *an artefact of how they are applied*, *the measurement
+responds to the pair*. Narrowing there would be inventing.
+
+And `search` is exhaustive, not guided — stated in the module rather than hidden. At five
+interventions the pairs are ten and exhaustive is simply correct. An ordering heuristic validated on
+nothing is the fake signal V.84's exam caught in its first minute; the honest place for one is a
+version that can test whether it beats exhaustive where exhaustive is still affordable.

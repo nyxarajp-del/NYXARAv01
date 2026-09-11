@@ -2831,6 +2831,21 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_interaction_school(self) -> Any:
+        """Sit the interaction audit: does it find the pair, or find a pair in everything?
+
+        ``invented`` is the number. ``I = ΔAB − ΔA − ΔB`` is a subtraction of four noisy means and
+        is very good at being large, so four of the six worlds are ones where finding a pair is
+        wrong — including one whose harness leaks and one where composing does not commute. Both
+        produce a large subtraction and neither is an interaction.
+        """
+        try:
+            from nyxara.njp.interactschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_blind_spot_school(self) -> Any:
         """Sit the blind-spot audit: does it find the empty corner, or call every corner empty?
 
