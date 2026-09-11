@@ -5807,3 +5807,91 @@ Roughly **250 tasks genuinely learned**, against roughly 200 before.
 And the shapes contribute exactly nothing again: 553 against 553, the same integer. That is the
 sixth consecutive null for one organ feeding another here, and the first time the two columns have
 been not merely close but identical.
+
+---
+
+## V.77 — why did it fail, tested rather than guessed
+
+`measurement.py` asks whether a number means what it looks like. This asks the question that
+decides what gets worked on, and it is the one this repository has repeatedly got wrong:
+**an observed failure is not its own cause.**
+
+| what failed | what was worked on | what it actually was |
+|---|---|---|
+| entailer, 1 rule from 564,166 pairs | the readings, the corpus | the bar, and no baseline |
+| span stage, 0.0259 exact | the ranker, for two versions | 142 candidates a sentence |
+| task learner, a fifth of tasks | the induction | 90 rows and no null |
+| forge refusing a good kernel | nothing — it was believed | one wall-clock sample |
+
+So a cause here is never a label. Each is a **hypothesis with an experiment that can refute it**,
+and a hypothesis whose experiment was not run comes back *untested* — never as support, and never
+quietly dropped so the survivors look unanimous. The rule that nothing may protect its favourite
+explanation is mechanical rather than aspirational: **an experiment that ran and did not move the
+number refutes its hypothesis**, rather than leaving it open.
+
+Eight hypotheses, and two of them are answered by running a `critique`, because *the benchmark is
+wrong* and *the measurement is noisy* are failure causes like any other. This organ is built on
+the last one rather than beside it.
+
+### The ordering is the design, and getting it wrong cost two runs
+
+The first version ranked every supported cause by how far its experiment moved the number. That is
+wrong twice over: a measurement wobble of 0.03 and a data repair's gain of 0.14 are not the same
+quantity, and a score that will not hold still cannot be attributed to anything at all. So:
+
+1. **measurement** gates — the reading is moving on its own, nothing downstream can be concluded.
+2. **leakage** gates — the score is not about the held-out world, so there is nothing to explain.
+3. the **repairs** compete, because they are all measured in the same units.
+4. **floor** is a fallback — only once every available repair has been tried and none moved
+   anything. Then *these levers do not reach this* is a real finding.
+
+Folding leakage and floor together as "benchmark" was the other error: they need opposite repairs,
+and an attributor that says the same word to both has told nobody which.
+
+### It is allowed to say it does not know
+
+Two repairs that move the number by within `MOVED` of each other are reported as **unseparated**,
+with both named and the missing experiment stated. That is a real state of knowledge, and it is the
+one this package has historically skipped past on the way to a confident answer.
+
+### The exam: eight failures whose cause is known by construction
+
+One per hypothesis, plus one that nothing available explains — where **naming no cause is the
+right answer**. Every fixture supplies every experiment, so no hypothesis is credited for being the
+only one anybody tried.
+
+    correct 8 of 8   wrong 0   unsettled 0   distinct causes named 7
+
+Scored three ways, and the middle one matters most: a **wrong** cause sends real work somewhere
+real and costs more than an honest shrug, so the pass condition requires zero of them. The third
+condition — more than one distinct cause across the eight — exists because an attributor that
+answers `data` to everything would otherwise score full marks on any set of fixtures about data.
+
+### Four rounds of failing its own exam
+
+It scored 4/8, then 5/8, then 6/8 before 8/8, and every repair was a real defect rather than a
+tuned threshold:
+
+* `benchmark` fired whenever the system failed to clear its floor — which is *the failure*, not its
+  cause — so a task whose real fault was a chooser allowed one rule where six were needed was
+  blamed on the benchmark.
+* `root` compared a measurement's wobble against a repair's gain as if they were the same number.
+* The fixtures cut the held-out set at the end of training, so an experiment that added rows also
+  moved the examination. **The organ's own rule is that an experiment changes exactly one thing;
+  the fixtures broke it before the organ did.**
+* The six-way disjunction made "always A" 82% correct, so no learner could beat it and three
+  fixtures collapsed into `floor`. A task whose majority answer is nearly always right tests
+  nothing.
+
+### Cause of cause
+
+`chain` walks from a failure to the failure behind it:
+
+    too few examples: data
+      └── the answer is rarely producible: reachability
+        └── the answer is not in the readings: reading
+
+Only the last is worth repairing and only the first was visible — which is exactly how two versions
+went into the span stage's ranker. The walk reports where it stops rather than implying it reached
+bottom: a chain that ends because nobody recorded what was behind it looks identical to one that
+ends because nothing is.

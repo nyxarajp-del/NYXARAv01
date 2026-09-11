@@ -2787,6 +2787,45 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def why_it_failed(self, failure: Any) -> Any:
+        """Test every hypothesis this failure supplies the means to test, and name the rest.
+
+        Takes a :class:`~nyxara.njp.attribution.Failure` and returns the ranked causes. A
+        hypothesis with no experiment behind it comes back **untested**, never as support — and a
+        ``root`` of ``""`` with rivals named means the evidence did not separate them, which is a
+        real state of knowledge rather than a failure to answer.
+        """
+        try:
+            from nyxara.njp.attribution import attribute
+
+            return attribute(failure).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def why_behind_why(self, failure: Any) -> Any:
+        """Walk from a failure to the failure behind it, and say where the walk stops."""
+        try:
+            from nyxara.njp.attribution import chain
+
+            return [step.to_dict() for step in chain(failure)]
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_attribution_school(self) -> Any:
+        """Sit the attribution exam: eight failures whose cause is known by construction.
+
+        Every fixture supplies every experiment, so no hypothesis is credited for being the only
+        one tried, and one of the eight has no cause any available repair reaches — where naming
+        none is the right answer.
+        """
+        try:
+            from nyxara.njp.attributionschool import examine
+
+            got = examine()
+            return {k: v for k, v in got.items() if k != "rows"}
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_measurement_school(self) -> Any:
         """Sit the retrodiction exam: eight measurements from this package's own history.
 

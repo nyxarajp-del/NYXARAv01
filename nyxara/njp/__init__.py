@@ -494,6 +494,16 @@ from nyxara.njp.shapes import (
 # a critique of a *measurement* — so the newcomer is qualified at the door rather than taking a
 # name something else already answers to. `Benchmark` and `Finding` are free but qualified with it,
 # because a half-qualified pair reads as though one of them were the general case.
+# V.77. `Verdict` is `njp.truth`'s already — a verdict on a *claim*, not on a hypothesis about why
+# something failed — so the newcomers are qualified together rather than half of them taking bare
+# names while the other half does not.
+from nyxara.njp.attribution import (
+    Attribution as FailureAttribution,
+    Failure as ObservedFailure,
+    Verdict as CauseVerdict,
+    attribute as attribute_failure,
+    chain as failure_chain,
+)
 from nyxara.njp.measurement import (
     Benchmark as MeasuredBenchmark,
     Critique as MeasurementCritique,
@@ -730,6 +740,9 @@ __all__ = [
     # V.74 -- asking whether a number measures what it appears to. `Critique` was taken by the
     # planner's critique of a strategy, which is a different object entirely.
     "MeasuredBenchmark", "MeasurementCritique", "MeasurementFinding", "critique_measurement",
+    # V.77 -- why it failed, tested rather than guessed. `Verdict` was the truth gauntlet's.
+    "ObservedFailure", "FailureAttribution", "CauseVerdict", "attribute_failure",
+    "failure_chain",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
