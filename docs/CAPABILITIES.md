@@ -6346,6 +6346,22 @@ supplies both, with the **passage** as identity — two questions about one para
 independent items however differently they are worded. A check that could have run and did not is
 worth exactly as little as one that cannot.
 
+Both corrections confirmed on the organ itself. The same run now reads:
+
+```
+x  leakage   none of 250 examined items were learned from
+x  data      0.0320 → 0.0400 (+0.0080) — it moved, but by less than the 0.03 that counts
+x  algorithm 0.0320 → 0.0000 (-0.0320) — changing it made it worse, so it is not
+x  reading   0.0320 → 0.0320 (+0.0000) — changing it changed nothing at all, so it is not
+~  budget    0.0320 → 0.0160 (-0.0160), but reachability moved 0.7000 → 0.1600 — this tests nothing
+→ nothing tested here explains it, and budget was never actually tried
+```
+
+Three refutations, three different reasons, each true of what it saw. And the two runs — before and
+after the fixes, executed independently — agree on all five arm scores to the digit, which is the
+`measurement` check's own claim (`5 identical runs span 0.0000`) holding across processes as well as
+within one.
+
 ### What is still owed
 
 The organ tests *is the answer producible* and does not test *is it producible among so many
