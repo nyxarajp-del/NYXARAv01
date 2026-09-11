@@ -503,6 +503,17 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.87. `Measurement` is already taken — `njp.metrology` has one, which is a reading with a unit,
+# not a recipe for producing one — so the newcomer is qualified, and `Register` and `Trace` are
+# qualified with it so the trio reads as one thing rather than one general case and two specifics.
+from nyxara.njp.genesis import (
+    Measurement as InventedMeasurement,
+    Register as MeasurementRegister,
+    Trace as RawTrace,
+    admit,
+    criticise,
+    mine,
+)
 # V.86. `Candidate` is `njp.evolution`'s — a candidate *rewrite* — and `Standing` is
 # `njp.discourse`'s, where it is how one speaker stands to another. Both are qualified. `Trait`,
 # `sift` and `uncontrolled` are free, and `sift` is kept bare because nothing else in this
@@ -813,6 +824,7 @@ __all__ = [
     "search_interactions", "compose_interventions",
     "Trait", "CausalCandidate", "CausalEvidence", "LADDER",
     "sift", "uncontrolled", "put_to_the_test",
+    "RawTrace", "InventedMeasurement", "MeasurementRegister", "mine", "criticise", "admit",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

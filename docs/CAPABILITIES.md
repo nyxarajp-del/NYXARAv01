@@ -6766,3 +6766,100 @@ knowledge, like every other input here — not a cleverer statistic.
 
 Matching traits to interventions is by name, too: two names for one knob will be missed, and there
 is a test pinning that as well.
+
+---
+
+## V.87 — inventing a quantity nobody named
+
+V.86 found variables among `Trait` objects somebody wrote down, each with a `read` already
+attached. So *what can be measured* was still a supplied list, and a cause outside it was as
+invisible as ever. **Finding a new variable and building a new measurable dimension are different
+capabilities**, and only the first had been done.
+
+Here nothing is given a trait. What arrives is a `Trace`: probes at **numbered** coordinates and
+what was observed at each.
+
+```
+probe  reading          probe  reading
+ -1     0.11             -1     0.41
+  0     0.42              0     0.42
+ +1     0.10             +1     0.41
+```
+
+Both items read 0.42 at the centre. Every quantity anyone has thought to compute about *the item*
+is identical. What differs is the shape of the neighbourhood, and no supplied vocabulary has a word
+for it until something invents one.
+
+### The first draft was the old game in new clothes
+
+It listed nine operators by hand — level, slope, curvature, **width** — and `width` happened to be
+the fixture's generating variable. That is `Trait.read` one level up: the quantity was supplied and
+the search picked it out of a lineup.
+
+So the arithmetic is **composed**, not listed: four steps (`d`, `abs`, `norm`, `centred`) stacked up
+to three deep, ending in one of six (`mean`, `max`, `min`, `spread`, `range`, `sum`). **414 recipes**,
+enumerated exhaustively rather than sampled — an incomplete search whose incompleteness is
+undeclared is how a null result becomes a lie.
+
+### What came out: 406 refused, 8 kept
+
+| recipe | steady | separates | third world |
+|---|---|---|---|
+| **`mean(norm(x))`** | 0.997 | **1.987** | 1.953 |
+| `mean(d(d(norm(x))))` | 0.967 | 1.869 | 1.729 |
+| `max(d(d(x)))` | 0.995 | 1.858 | 1.835 |
+| `spread(abs(norm(d(x))))` | 0.817 | 1.849 | 1.441 |
+| `mean(d(d(x)))` | 0.980 | 1.706 | 1.619 |
+
+`mean(norm(x))` — the average reading divided by the item's own top. Dividing through throws away
+*how high* and leaves *how broad*. Nobody wrote that quantity down; it fell out of one step composed
+with one ending, and it arrives called **`measurement 19`**.
+
+And the refusals do the real work:
+
+| refused | why |
+|---|---|
+| `mean(x)` | it is the supplied *average reading* in different arithmetic |
+| `max(x)` | separates by **0.2091** — under the bar |
+| `mean(d(x))` | jiggling the reading moves it; agrees with itself only **0.338** |
+| `max(norm(x))` | reads the same on every item |
+| `min(abs(centred(x)))` | did not survive a third world (0.1603 there) |
+
+`max(x)` is the fixture's honesty check. **The centre height genuinely does not separate the
+groups**, so the discovery is not available by looking at the obvious thing.
+
+### Three worlds, three jobs — and three orderings where the answer is nothing
+
+Mined in one arithmetic (spans), gated in a second (control gains), transferred to a third (doses).
+Collapsing any two of those is how a search comes to believe its own noise.
+
+| ordering | want | kept |
+|---|---|---|
+| spans → gains → doses | something | 8 |
+| doses → spans → gains | something | 16 |
+| gains → doses → spans | something | 16 |
+| **fog → fog → fog** | **nothing** | **0** |
+| **spans → fog → doses** | **nothing** | **0** |
+| **spans → gains → fog** | **nothing** | **0** |
+
+**right 6/6, invented 0, missed 0**, and **5 measurements survive every ordering that worked** —
+three unrelated arithmetics yielding the *same* quantities is the only evidence that what was found
+is a regularity and not a fact about one world.
+
+### The name comes last
+
+`Measurement.christen` exists and **nothing in the discovery path calls it**. It refuses outright
+while the measurement holds nothing: a quantity named before it is validated is a hypothesis wearing
+a conclusion's clothes, and the name then does the arguing the evidence has not done. A test asserts
+the exam's worlds contain no semantic trait name anywhere in their source.
+
+And V.86's ladder is intact: every survivor holds **observational** evidence only. No item was
+changed, so nothing here can speak about what would happen if one were.
+
+### What is still supplied, said plainly
+
+The four steps and six endings. That is a weaker thing to be handed than nine answers — the
+composition and the selection among 414 of them is not supplied, and the winner needed a
+normalisation step that no single listed operator contained. But it is not nothing, and calling this
+Level 7 outright would be the promotion V.86 was built to refuse. **Inventing the primitives
+themselves is the next debt**, not a thing already paid.

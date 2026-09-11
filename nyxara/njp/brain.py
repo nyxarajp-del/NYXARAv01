@@ -2831,6 +2831,21 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_measurement_genesis_school(self) -> Any:
+        """Sit the invented-measurement audit: can it build a quantity nobody named?
+
+        Three unrelated worlds — spans, control gains, doses — with the centre reading matched
+        between the items that failed and the ones that did not, so every quantity computed from
+        the middle alone is useless and only the *shape* of the neighbourhood differs. ``invented``
+        is the number: three of the six orderings are ones where nothing may survive.
+        """
+        try:
+            from nyxara.njp.genesisschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_latent_school(self) -> Any:
         """Sit the latent-variable audit: does it tell a cause from a thing that travels with one?
 
