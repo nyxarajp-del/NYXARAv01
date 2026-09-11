@@ -51,7 +51,30 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from nyxara.njp.truth import PredictiveSource, TruthGauntlet, Verdict
 
-__all__ = ["ModuleCost", "Profiler", "EvolutionStep", "SelfEvolver"]
+__all__ = ["ModuleCost", "Profiler", "EvolutionStep", "SelfEvolver", "PASS_RATIO"]
+
+#: What share of held-out samples must show the gain before the edit is kept.
+#:
+#: **0.90, and it was 0.75 until it was measured.** `njp/gateschool.py` shows the gate five kinds
+#: of proposed edit whose worth is known by construction — one genuinely better, and four that are
+#: overfit, noisy, harmful or no different — and counts what it lets through. As configured at
+#: 0.75, with the `min_gain` margin already in place:
+#:
+#:     pass ratio   bad edits let through   real edits turned away
+#:        0.75              0.0208                  0.0000
+#:        0.80              0.0025                  0.0000
+#:        0.90              0.0008                  0.0000
+#:        1.00              0.0008                  0.0000
+#:
+#: Twenty-six times fewer false promotions and **not one real edit lost**, on the same eight
+#: samples. There was no trade to make: the bar was simply loose, and for a loop that edits its own
+#: source a false promotion is permanent unless a later regression check happens to catch it.
+#:
+#: What the same exam says about the rest of the gate is that it works. The central claim in this
+#: module's own docstring — that an edit which improves only on the samples that motivated it is
+#: refused — holds exactly: overfit candidates pass **0.000** of the time on held-out samples and
+#: **1.000** of the time when judged on the samples that suggested them.
+PASS_RATIO = 0.90
 
 # Mirrored from growth/self_optimize.PROTECTED_RELPATHS. Fail-closed: a path that cannot be
 # resolved is treated as protected.
@@ -190,6 +213,7 @@ class SelfEvolver:
 
     def __init__(self, brain: Any = None, *, ledger: Any = None,
                  settings: Any = None, min_gain: float = 0.05,
+                 pass_ratio: float = PASS_RATIO,
                  holdout_samples: int = 8, every_s: float = 300.0,
                  quality_tolerance: float = 0.02,
                  enabled: bool = True) -> None:
@@ -197,6 +221,7 @@ class SelfEvolver:
         self.ledger = ledger
         self.settings = settings
         self.min_gain = float(min_gain)
+        self.pass_ratio = min(1.0, max(0.5, float(pass_ratio)))
         # How much self-modelling accuracy an edit may cost while still counting as an improvement.
         # Small and non-zero: exactly zero would reject edits over measurement noise, and anything
         # generous turns "no worse" into a formality.
@@ -363,7 +388,7 @@ class SelfEvolver:
             holdout = self._holdout(cost)
             gauntlet = TruthGauntlet(
                 sources=[PredictiveSource(predictor=self._predict_gain, holdout=holdout,
-                                          min_samples=2, pass_ratio=0.75)],
+                                          min_samples=2, pass_ratio=self.pass_ratio)],
                 min_sources=1, require_hard=True, ledger=self.ledger)
             return gauntlet.judge(claim)
         except Exception:  # noqa: BLE001

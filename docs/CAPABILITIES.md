@@ -6109,3 +6109,66 @@ ablation runs both ways — a guard has to be shown to matter by being taken awa
 And the bar that was argued is now measured: swept from one to six, `MIN_EDGES = 3` is where recall
 is still 1.000 and false alarms are 0.000. The reasoning behind it was right, and now there is a
 table under it instead of a sentence.
+
+---
+
+## V.81 — the gate that lets her rewrite herself, measured for the first time
+
+Phase 3 is Capability Compiler → Self-Programming → Experimental Brain, and like Phase 2 it turned
+out to be mostly built. `njp/evolve.py` already has the whole loop: a profiler that nominates the
+target so nobody hand-picks it, whole-file edits with byte-exact rollback, a protected core that is
+refused, a ledger consulted before the next edit so a regression stops the one after it, and at the
+centre a Truth Gauntlet over **held-out** samples.
+
+Its docstring makes one claim above the others:
+
+> An edit whose improvement is only visible on the samples that motivated it is fitting noise, and
+> it is refused here rather than discovered later.
+
+**That claim had never been tested.** The existing tests are good and every one is a single case
+with the answer built into the fixture — a protected path refused, a failed gauntlet rolled back, a
+claim with *no* evidence refused. None hands the gate an edit that has evidence which happens to be
+worthless.
+
+For a system that rewrites itself the value of a gate is entirely in what it refuses, and a
+permissive one does not fail loudly. It degrades the thing it guards, one accepted edit at a time.
+
+### Five kinds of candidate, worth known by construction
+
+| kind | on held-out (the real gate) | judged on the samples that motivated it |
+|---|---|---|
+| real | 1.000 ✓ | 1.000 |
+| **overfit** | **0.000** ✓ | **1.000** |
+| noisy | 0.083 | 0.090 |
+| harmful | 0.000 ✓ | 0.000 |
+| null | 0.000 ✓ | 0.000 |
+| **let through** | **0.021** | 0.273 |
+| turned away | 0.000 | 0.000 |
+
+**The claim is true.** Overfit candidates pass 0.000 of the time on held-out samples and 1.000 of
+the time when judged on the samples that suggested them — so the held-out draw is worth +0.252 of
+let-through rate, and that is the mechanism doing the work rather than the arithmetic.
+
+### And my own fixture was wrong first, in the direction that flatters the finding
+
+The first version left out the `min_gain` margin the real predicate already requires, and measured
+a gate looser than the one that exists: **0.112 let through against 0.021**. Modelling a mechanism
+as weaker overstates its faults exactly as reliably as modelling it as stronger hides them, and it
+is the same error as the fusion control being easier to reject than the finding was to accept.
+
+### One bar was loose, and closing it was free
+
+| pass ratio | bad edits let through | real edits turned away |
+|---|---|---|
+| 0.75 (as configured) | 0.0208 | 0.0000 |
+| 0.80 | 0.0025 | 0.0000 |
+| **0.90** | **0.0008** | 0.0000 |
+| 1.00 | 0.0008 | 0.0000 |
+
+Every setting turns away zero real edits. There was no trade to make — the bar was simply loose, so
+`PASS_RATIO` is now **0.90**: twenty-six times fewer false promotions on the same eight samples,
+and not one genuine improvement lost. For a loop that edits its own source, a false promotion is
+permanent unless a later regression check happens to catch it, which makes this the one place in
+the package where the asymmetry is worth paying for.
+
+The remaining leak is noise, at 0.0033 — reported as a number rather than claimed to be zero.

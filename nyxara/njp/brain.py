@@ -2787,6 +2787,20 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_gate_school(self, each: int = 150) -> Any:
+        """Sit the self-rewrite audit: what the gate lets through, by kind of candidate.
+
+        ``let_through`` is the number. A gate is judged on refusals, and a permissive one does not
+        fail loudly — it degrades what it guards, one accepted edit at a time.
+        """
+        try:
+            from nyxara.njp.gateschool import examine
+
+            return {"held_out": examine(each).to_dict(),
+                    "on_motivating": examine(each, on_holdout=False).to_dict()}
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_fusion_school(self, pairs: int = 60) -> Any:
         """Sit the analogy audit: shapes that are there, and shapes that are not.
 
