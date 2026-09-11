@@ -6257,13 +6257,20 @@ It did not. What it did instead is this version.
 
 ### 1. It declined to name a cause, and that was correct
 
-The stage scores **0.0320**. Another ranker and richer readings each moved it by **0.0000**, and
-the shelf ran out. *These levers do not reach this* is true, useful, and exactly what a
-diagnostician that produced a word anyway would have hidden.
+250 held-out readings, the gold sentence handed to the stage so that only the span choice is being
+measured, 125.9 candidates offered per item.
 
-The fourth arm, `more data`, is **re-running as this is written** and its first result is withdrawn
-— see the fifth defect below, which is why. The other three arms are untouched by that: they are
-taught from the same 1,500 rows and examined on the same 250, before and after the fix.
+| arm | taught from | candidates | gold reachable | scored | moved |
+|---|---|---|---|---|---|
+| **as found** | 1,500 | 125.9 | 0.700 | **0.0320** | — |
+| more data | **6,000** | 125.9 | 0.700 | 0.0400 | +0.0080 |
+| other algorithm | 1,500 | 125.9 | 0.700 | 0.0000 | −0.0320 |
+| richer readings | 1,500 | 125.9 | 0.700 | 0.0320 | +0.0000 |
+| a smaller pool | 1,500 | **12.0** | **0.160** | 0.0160 | −0.0160 |
+
+Four times the data moves it **+0.0080**, against a bar of 0.03. A different ranker makes it worse.
+Richer readings do nothing at all. The shelf ran out. *These levers do not reach this* is true,
+useful, and exactly what a diagnostician that produced a word anyway would have hidden.
 
 ### 2. `reachability` came back refuted, and that was also correct
 
@@ -6323,6 +6330,21 @@ Same defect, same class, same afternoon, one level down from where it had just b
 says something about how quietly it happens. Caught by reading the call rather than by reading the
 number, which is the wrong way round, so `diagnose` now **refuses to run** when the two training
 sets are the same size instead of trusting that they differ.
+
+### Two smaller things the run said about the organ rather than the stage
+
+**A refutation was misdescribing its own evidence.** Every not-a-cause verdict read *changing it
+changed nothing*, which on the `more data` arm — four times the rows, +0.0080 — is simply false. It
+changed something, by less than the bar. Three outcomes now get three sentences: changed nothing at
+all, moved but under the bar, or made it worse. A refutation that misstates what it saw invites the
+next reader to re-run the experiment that was already run.
+
+**A check that could have run did not.** The first field run came back `? leakage — no key and
+train supplied`. That is the right thing for the critic to say and the wrong thing for the caller to
+have caused: the cut is by passage, so the answer was available the whole time. `span_stage` now
+supplies both, with the **passage** as identity — two questions about one paragraph are not two
+independent items however differently they are worded. A check that could have run and did not is
+worth exactly as little as one that cannot.
 
 ### What is still owed
 

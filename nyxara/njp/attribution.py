@@ -290,10 +290,21 @@ def _experiment(failure: Failure, make: Optional[Callable[[], Benchmark]], cause
                              f"answer's reachability moved {was:.4f} → {now:.4f} — the experiment "
                              f"changed the problem as well as the method, so this tests nothing"))
     stands = "supported" if moved >= MOVED else "refuted"
+    # Three ways of not being the cause, and they are not the same sentence. The first version said
+    # "changing it changed nothing" to all of them, which on the real organ's `more data` arm — four
+    # times the rows, +0.0080 — was simply false: it changed something, by less than the bar. A
+    # refutation that misdescribes its own evidence invites the next reader to re-run the experiment
+    # that was already run.
+    if stands == "supported":
+        why = "this is a cause"
+    elif abs(moved) < 5e-5:
+        why = "changing it changed nothing at all, so it is not"
+    elif moved > 0:
+        why = f"it moved, but by less than the {MOVED:.2f} that counts as moving, so it is not"
+    else:
+        why = "changing it made it worse, so it is not"
     return Verdict(cause=cause, stands=stands, moved=moved, refuted_by=refuted_by,
-                   says=(f"{says}: {base:.4f} → {after:.4f} ({moved:+.4f}) — "
-                         + ("this is a cause" if stands == "supported"
-                            else "changing it changed nothing, so it is not")))
+                   says=f"{says}: {base:.4f} → {after:.4f} ({moved:+.4f}) — {why}")
 
 
 def _measurement(failure: Failure, got: Critique) -> Verdict:

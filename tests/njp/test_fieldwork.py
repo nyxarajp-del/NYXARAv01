@@ -122,3 +122,28 @@ def test_diagnose_refuses_rather_than_running_an_experiment_that_changes_nothing
         from nyxara.njp.fieldwork import diagnose
 
         diagnose(little)
+
+
+def test_a_stage_supplies_what_the_leakage_check_needs(engine, little):
+    """The check that went unrun in the first field run, and should not have.
+
+    ``? leakage — no key and train supplied`` is the right answer for a critic handed nothing and
+    the wrong thing for a caller to have caused: the cut is by passage, so the answer was available
+    the whole time. Identity is the **passage**, since two questions about one paragraph are not
+    two independent items.
+    """
+    from nyxara.njp.measurement import critique
+
+    got = span_stage(engine, little, taught=little[:2])
+    found = next(f for f in critique(got.bench).findings if f.check == "leakage")
+    assert found.informative, "the check must actually run"
+    assert found.verdict == "broken", "the first two passages really were learned from"
+    assert found.got == pytest.approx(0.5, abs=1e-4)
+
+
+def test_a_clean_cut_reports_leakage_clear_rather_than_unchecked(engine, little):
+    from nyxara.njp.measurement import critique
+
+    got = span_stage(engine, little[2:], taught=little[:2])
+    found = next(f for f in critique(got.bench).findings if f.check == "leakage")
+    assert found.informative and found.verdict == "clear"

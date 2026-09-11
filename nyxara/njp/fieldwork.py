@@ -150,7 +150,7 @@ def _cut(readings: Sequence[Reading]) -> List[List[Reading]]:
 
 
 def span_stage(engine: Finder, held: Sequence[Reading], *, name: str = "as found",
-               learned_from: int = 0,
+               learned_from: int = 0, taught: Sequence[Reading] = (),
                pool: Optional[Callable[[Sequence[Span], Reading], Sequence[Span]]] = None
                ) -> Stage:
     """Score the span stage with the gold sentence handed to it, so only the span choice is tested.
@@ -165,6 +165,7 @@ def span_stage(engine: Finder, held: Sequence[Reading], *, name: str = "as found
     said: List[str] = []
     reach: List[bool] = []
     sizes: List[int] = []
+    kept: List[Reading] = []
     for reading in held:
         at = gold_sentence(reading)
         fixed = Setting.of(reading)
@@ -190,16 +191,23 @@ def span_stage(engine: Finder, held: Sequence[Reading], *, name: str = "as found
             if score > best:
                 best, chosen = score, span
         items.append(len(items))
+        kept.append(reading)
         gold.append(want)
         said.append(chosen.key if chosen is not None else "")
         reach.append(any(s.key == want for s in use))
     answers = dict(zip(items, said))
+    # Identity here is the **passage**, not the row, for the reason `_cut` splits on it: SQuAD asks
+    # a dozen questions of one paragraph, and two rows sharing a paragraph are not two independent
+    # items however differently they are worded.
+    where = {i: r.passage for i, r in zip(items, kept)}
     return Stage(name=name, rows=len(items), learned_from=learned_from,
                  pool=round(sum(sizes) / max(1, len(sizes)), 4),
                  reachable=round(sum(reach) / max(1, len(reach)), 4),
                  bench=Benchmark(name=name, items=items, gold=gold,
                                  predict=lambda i: answers.get(i, ""),
-                                 reachable=lambda i, _w: reach[i]))
+                                 reachable=lambda i, _w: reach[i],
+                                 train=[r.passage for r in taught],
+                                 key=lambda x: where.get(x, x)))
 
 
 @dataclass
@@ -242,7 +250,7 @@ def diagnose(readings: Optional[Sequence[Reading]] = None) -> Fieldwork:
         raise ValueError(f"only {len(learn)} rows to learn from, so `more data` is the same data")
     more = min(MORE, len(learn))
     base = taught_finder(learn[:LEARN_FROM])
-    found = span_stage(base, held, learned_from=LEARN_FROM)
+    found = span_stage(base, held, learned_from=LEARN_FROM, taught=learn[:LEARN_FROM])
     seen: List[Stage] = [found]
 
     def _run(build: Callable[[], Stage]) -> Benchmark:
@@ -254,15 +262,17 @@ def diagnose(readings: Optional[Sequence[Reading]] = None) -> Fieldwork:
         name="span stage, inside the gold sentence",
         bench=found.bench,
         more_data=lambda: _run(lambda: span_stage(
-            taught_finder(learn[:more]), held, name="more data", learned_from=more)),
+            taught_finder(learn[:more]), held, name="more data", learned_from=more,
+            taught=learn[:more])),
         other_algorithm=lambda: _run(lambda: span_stage(
             taught_finder(learn[:LEARN_FROM], purity=0.5), held,
-            name="other algorithm", learned_from=LEARN_FROM)),
+            name="other algorithm", learned_from=LEARN_FROM, taught=learn[:LEARN_FROM])),
         richer_reading=lambda: _run(lambda: span_stage(
             taught_finder(learn[:LEARN_FROM], use_shape=True), held,
-            name="richer readings", learned_from=LEARN_FROM)),
+            name="richer readings", learned_from=LEARN_FROM, taught=learn[:LEARN_FROM])),
         more_budget=lambda: _run(lambda: span_stage(
-            base, held, name="a smaller pool", learned_from=LEARN_FROM, pool=_shortest)))
+            base, held, name="a smaller pool", learned_from=LEARN_FROM,
+            taught=learn[:LEARN_FROM], pool=_shortest)))
     got = attribute(failure)
     return Fieldwork(stages=seen, attribution=got, critique=got.critique)
 
