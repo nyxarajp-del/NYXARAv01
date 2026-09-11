@@ -503,6 +503,16 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.91. `Shape` is `njp.shapes`' already — a task's template — so the move substrate's is
+# qualified. `reach` and `earns` are far too general to take bare.
+from nyxara.njp.substrate import (
+    Earned,
+    Shape as MoveShape,
+    earns as move_earns,
+    every_move,
+    reach as readable_pairs,
+    separations,
+)
 # V.90. `Rule` is `njp.finding`'s — a learned rule for scoring a span — and `Move` is
 # `njp.procedure`'s. Both qualified. `Split` is free and `discover` is not: `njp.discover` is a
 # whole module about finding regularities in episodes.
@@ -863,6 +873,7 @@ __all__ = [
     "obeys_superposition", "response",
     "StructuralLaw", "LawFinding", "ProbeReading", "Family", "probe", "partition",
     "CandidateLaw", "RowMove", "Split", "rules", "holds", "differ", "discover_laws",
+    "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

@@ -2831,6 +2831,21 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_substrate_school(self) -> Any:
+        """Sit the earned-vocabulary audit: does a generated move buy anything?
+
+        A move is four numbers — ``out[i] = scale · row[(stride·i + offset) mod n] + lift`` — and
+        all seven of V.90's are special cases. ``flattered`` is the number: a move credited for a
+        separation the supplied seven could already make is the supplied seven wearing different
+        arithmetic.
+        """
+        try:
+            from nyxara.njp.substrateschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_law_school(self) -> Any:
         """Sit the law-discovery audit: did a generated law separate what the supplied ones merged?
 

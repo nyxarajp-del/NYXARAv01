@@ -7119,3 +7119,79 @@ nothing exercises has not been shown to work.
 
 The seven moves, four reductions and two relations. Smaller than nine laws, and not nothing.
 **Level 7 stays unclaimed.**
+
+---
+
+## V.91 — earning the moves a law is made of
+
+V.90 generated laws from seven supplied **moves**. Smaller than nine laws, still a human-designed
+vocabulary. So: can the moves themselves be earned?
+
+### The substrate is four numbers
+
+```
+out[i] = scale · row[(stride·i + offset) mod n] + lift
+```
+
+All seven of V.90's moves are special cases — `reversed` is `stride −1, offset 6`; `negated` is
+`scale −1`; `lifted` is `lift 1` — checked against V.90's **own implementations**, not against the
+arithmetic here. At width seven: **252 behaviourally distinct moves, 7 supplied and 245 not.**
+
+**The overfitting guard is structural, not statistical.** Given a programming language a search
+finds `O(x) = lookup_table[x]` and manufactures perfect separation out of nothing. Four numbers
+cannot express a lookup table **at all**. The bound is on what is expressible, which is the only
+kind that cannot be argued around.
+
+### What a vocabulary can see, computed rather than felt
+
+Moves apply to **each side independently**, so a `first` law reads `f(x)[t₁]` against `x[t₂]` — the
+reachable set is a *product*.
+
+| | |
+|---|---|
+| supplied offsets | `{0, 1, 2, 6}` |
+| **pairs the supplied seven can read** | **16 of 49** |
+
+Two fixtures died producing that number. An even/odd pattern: 54 supplied laws separated it. A
+stride pair: 8, and stable across five seeds — so not a fluke, and the mechanism was the lesson
+(`first: slid-by-one(f(x)) == slid-by-two(x)` reads `f[1]` against `x[2]`). Each failure narrowed
+where a generated move could possibly be worth anything: **the other 33 pairs.**
+
+### The result
+
+`swap 3 and 4` against `swap 3 and 5` lives exactly there — identity everywhere the supplied
+offsets can look, both permutations so every total is preserved.
+
+| pair | want | supplied laws | bought by |
+|---|---|---|---|
+| **swap 3,4 / swap 3,5** | **a new move** | **0** | **`(-6, 3, -1, 0)`** |
+| stride two / stride three | no new move | 8 | — |
+| swap 0,1 / swap 0,2 | no new move | 48 | — |
+| leave alone / leave alone again | no new move | 0 | — |
+
+**right 4/4, flattered 0, missed 0.** Three of the four pairs had a real chance at `flattered`, and
+the last is the same operation written twice — no move may be paid there.
+
+### The test was wrong and the reason is worth keeping
+
+I asserted *a move reaching position 3 makes the difference statable*. It does not. A `first` law
+reads a **pair** of offsets, so one new offset only yields pairs with the four already present, and
+`(3,4)` is not among them. Plain slide-by-three buys nothing.
+
+Slide-by-three **negated** does — and 144 of the 252 moves buy it. The negation is what works:
+V.90 dropped `<=` as "`>=` with the sides swapped", which holds only when sides swap freely, and
+they do not — a law may not put `x` on both sides. `scale = −1` puts the missing direction back.
+
+### Where generation buys nothing, worked out rather than asserted
+
+A version that only showed its own successes would be advertising. For **stride permutations** the
+supplied seven always suffice: a law `first: slid-by-t₁(f) == slid-by-t₂(x)` holds for stride `s`
+exactly when `s·t₁ ≡ t₂`, and enumerating which strides could hide from all four supplied offsets
+at once gives **the empty set** — so two distinct strides can never both hide.
+
+### Where the ledger stands
+
+A generated move was load-bearing, and the region where generation is worth anything is now a
+number (33 of 49) rather than a feeling. But the substrate's *shape* — an index affine and a value
+affine, three scales, two lifts — is still chosen by hand. It is a far weaker thing to be given
+than seven named moves, and it is not nothing. **Level 7 stays unclaimed.**
