@@ -2787,6 +2787,20 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_ascent_school(self, capabilities: int = 60) -> Any:
+        """Sit the loop audit: is diagnosing worth more than guessing?
+
+        The number is ``moved_over_blind``. A loop that diagnoses carefully and then repairs no
+        better than chance has learned nothing about itself — it has only spent longer — and
+        without this comparison the six organs underneath it are bookkeeping.
+        """
+        try:
+            from nyxara.njp.ascentschool import examine
+
+            return examine(capabilities)
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_gate_school(self, each: int = 150) -> Any:
         """Sit the self-rewrite audit: what the gate lets through, by kind of candidate.
 

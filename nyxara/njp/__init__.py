@@ -494,6 +494,15 @@ from nyxara.njp.shapes import (
 # a critique of a *measurement* — so the newcomer is qualified at the door rather than taking a
 # name something else already answers to. `Benchmark` and `Finding` are free but qualified with it,
 # because a half-qualified pair reads as though one of them were the general case.
+# V.82. Both plain names are taken by `njp.programming` — a `Repair` there is a fix to a *program*
+# and a `Situation` is aliased to `Attempt` — so the loop's are qualified at the door. `Ascent` and
+# `ascend` are free and stay bare.
+from nyxara.njp.ascent import (
+    Ascent,
+    Attempt as LoopTurn,
+    Repair as CandidateRepair,
+    ascend,
+)
 # V.78. All three names are free, and kept bare for once — nothing else in this namespace answers
 # to a rung of a difficulty ladder.
 from nyxara.njp.reach import Ladder, Rung, climb, the_gap
@@ -748,6 +757,9 @@ __all__ = [
     "failure_chain",
     # V.78 -- how far a capability reaches, and the four ways it has no edge to report.
     "Ladder", "Rung", "climb", "the_gap",
+    # V.82 -- the loop, and whether diagnosing beats guessing. `Repair` and `Attempt` were
+    # `njp.programming`'s, so the loop's carry qualified names.
+    "Ascent", "LoopTurn", "CandidateRepair", "ascend",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

@@ -6172,3 +6172,66 @@ permanent unless a later regression check happens to catch it, which makes this 
 the package where the asymmetry is worth paying for.
 
 The remaining leak is noise, at 0.0033 — reported as a number rather than claimed to be zero.
+
+---
+
+## V.82 — the whole loop, and whether diagnosing is worth anything
+
+Six organs now each carry their own floor: `measurement`, `attribution`, `reach`, the experiment
+designer, `fusion`, and the self-rewrite gate. Separately they are six measured mechanisms.
+Together they are supposed to be a loop that acquires a capability it did not have:
+
+> find the edge → take the rung past it → ask why it fails → repair **that** → judge on hidden
+> problems → keep it only if the edge moved
+
+`njp/ascent.py` runs that loop, and it exists to answer one question, because without an answer
+everything above is elaborate bookkeeping:
+
+**Does diagnosing the cause help you choose a better repair than picking one at random?**
+
+That is not rhetorical. A loop that diagnoses carefully and then repairs no better than chance has
+learned nothing about itself; it has only spent longer.
+
+### The comparison
+
+Each capability is broken in exactly one of four ways, not disclosed. Four repairs sit on the
+shelf, one per way, and a repair applied to the wrong break changes **nothing at all** — not
+slightly less, exactly nothing — so a strategy cannot stumble into a gain by trying things. Three
+strategies pick from that same shelf and differ in one line of code:
+
+| | moved the edge | chose the repair that fits | kept | kept-but-no-gain |
+|---|---|---|---|---|
+| **diagnosed** | **1.000** | **1.000** | 1.000 | 0.000 |
+| blind | 0.275 | 0.275 | 0.275 | 0.000 |
+| greedy (a pet theory) | 0.225 | 0.225 | 0.225 | 0.000 |
+
+**Diagnosing is worth +0.725 against guessing and +0.775 against a favourite.** Blind lands on the
+right repair 0.275 of the time, which is the quarter you would expect from four repairs and one
+right answer — so the shelf is even and the advantage is not hidden in it.
+
+`kept-but-no-gain` is 0.000 for all three: nothing was kept that did not move the edge. That is the
+second number, and it is the one that could have embarrassed the first — a gate generous enough to
+keep anything would have made all three strategies look successful.
+
+### Two defects of my own on the way, both already named elsewhere in this package
+
+**A total repair read as no change.** When the post-repair ladder holds at *every* setting it is
+`exhausted`, and `Ladder.edge` is `None` by design — there is no boundary within what was tried.
+That is the right answer to *where does it stop* and the wrong one to *how far does it reach*, and
+the first version conflated them, falling back to the old edge and reporting the best possible
+outcome as no movement.
+
+**The before and after were drawn from different hidden samples.** So noise alone raised the second
+figure about half the time, and wrong repairs were "kept" at 0.683 while only 0.233 of them were
+right. That is precisely the defect `measurement.stability` exists to catch, reintroduced one level
+up by the module that imports it.
+
+### What this does not show
+
+Nothing here writes source code. The repairs are supplied, which is what makes the comparison clean
+— both twins choose from the same shelf, so what differs is *how they choose*, not what is on it.
+The capabilities are synthetic and each is broken exactly one way.
+
+Whether a system can also **invent** the repair is a different question and a harder one. Answering
+this one first is what makes that one askable: if choosing well among known repairs were worth
+nothing, inventing new ones would be worth less.
