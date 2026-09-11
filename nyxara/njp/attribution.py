@@ -1,4 +1,4 @@
-"""NYXARA · njp/attribution.py — why did it fail, tested rather than guessed (🩺, NJP V.77).
+"""NYXARA · njp/attribution.py — why did it fail, tested rather than guessed (🩺, NJP V.77→V.83).
 
 :mod:`nyxara.njp.measurement` asks whether a number means what it looks like. This asks the next
 question, and it is the one that decides what gets worked on: **an observed failure is not its own
@@ -32,6 +32,15 @@ failure to the failure behind it, so *the reader picked the wrong sentence* can 
 candidate generator never proposed the answer* and then to *the clip was taken from the wrong end*
 — and the chain reports where it stops rather than implying it reached bottom.
 
+**An experiment is checked for being one experiment.** V.83 ran this organ on a real one for the
+first time, and the repair it was handed — *keep twelve candidates instead of a hundred and
+twenty-six* — had also thrown the right answer out of the pool for most items on its way past. The
+score fell, and the verdict written down was ``budget: refuted``: *more search would not have
+helped*, concluded from a run that tested nothing of the kind. So :func:`_experiment` re-reads the
+ceiling after every repair, and one that moved it is ``spoiled`` rather than refuted. This module's
+first rule was always that an experiment changes exactly one thing; it was checking its callers for
+everything except that.
+
 Pure standard library, and built on :mod:`nyxara.njp.measurement` rather than beside it: two of the
 eight hypotheses here are answered by running a critique, because *the benchmark is wrong* and *the
 measurement is noisy* are failure causes like any other.
@@ -50,6 +59,14 @@ __all__ = ["Failure", "Verdict", "Attribution", "CAUSES", "REPAIRS", "attribute"
 #: How much an experiment has to move the score before it counts as having moved it. Below this
 #: the experiment ran and found nothing, which refutes its hypothesis rather than leaving it open.
 MOVED = 0.03
+
+#: How far a repair may move the **ceiling** before it stops being the experiment it claims to be.
+#: Found by running this organ on a real one for the first time (V.83): a *smaller pool* repair,
+#: meant to test whether the ranker had too much to choose from, also dropped the share of items
+#: whose right answer was in the pool at all from 0.700 to 0.160. It scored worse, and was written
+#: down as `budget: refuted`. That verdict is not merely wrong, it is unearned — the experiment
+#: changed two things, so its number cannot speak about either. See :func:`_experiment`.
+SPOILED = 0.05
 
 
 @dataclass
@@ -82,7 +99,7 @@ class Verdict:
     """One hypothesis, the experiment that tested it, and what the experiment found."""
 
     cause: str = ""
-    stands: str = "untested"       # supported | refuted | untested
+    stands: str = "untested"       # supported | refuted | spoiled | untested
     moved: float = 0.0             # how far the experiment moved the score
     says: str = ""
     #: What would have shown this is *not* the cause. Written down whether or not it was looked
@@ -91,14 +108,20 @@ class Verdict:
 
     @property
     def tested(self) -> bool:
-        return self.stands != "untested"
+        """Did an experiment actually bear on this hypothesis?
+
+        ``spoiled`` is not tested. An experiment that changed two things ran, cost the time, and
+        produced a number — and that number is evidence about nothing, which is a different state
+        from *refuted* and must not be allowed to pass for it.
+        """
+        return self.stands in ("supported", "refuted")
 
     def to_dict(self) -> Dict[str, Any]:
         return {"cause": self.cause, "stands": self.stands, "moved": self.moved,
                 "says": self.says, "refuted_by": self.refuted_by}
 
     def render(self) -> str:
-        mark = {"supported": " ! ", "refuted": " x ", "untested": " ? "}
+        mark = {"supported": " ! ", "refuted": " x ", "spoiled": " ~ ", "untested": " ? "}
         return f"  {mark.get(self.stands, '   ')} {self.cause:<13} {self.says}"
 
 
@@ -121,8 +144,13 @@ class Attribution:
         return [v.cause for v in self.verdicts if v.stands == "refuted"]
 
     @property
+    def spoiled(self) -> List[str]:
+        """Hypotheses whose experiment ran and tested nothing, because it changed two things."""
+        return [v.cause for v in self.verdicts if v.stands == "spoiled"]
+
+    @property
     def untested(self) -> List[str]:
-        return [v.cause for v in self.verdicts if not v.tested]
+        return [v.cause for v in self.verdicts if v.stands == "untested"]
 
     def _stands(self, cause: str) -> bool:
         return any(v.cause == cause and v.stands == "supported" for v in self.verdicts)
@@ -147,7 +175,10 @@ class Attribution:
         3. the **repairs**, which do compete, because they are all measured in the same units: how
            far the number moved when that one thing was changed.
         4. **floor** — only once every repair available has been tried and none moved anything.
-           Then *these levers do not reach this* is the honest finding.
+           Then *these levers do not reach this* is the honest finding. A **spoiled** experiment
+           was not a try: it changed the problem as well as the method, so *nothing reached this*
+           has not been shown and the fallback is withheld. Added in V.83, when a real organ
+           produced exactly that arrangement and the old code would have concluded `floor`.
 
         Empty when two repairs moved it by within :data:`MOVED` of each other, because that is a
         real state of knowledge and :attr:`rivals` names them.
@@ -161,6 +192,8 @@ class Attribution:
             if len(best) > 1 and best[0].moved - best[1].moved < MOVED:
                 return ""
             return best[0].cause
+        if self.spoiled:
+            return ""
         return "floor" if self._stands("floor") else ""
 
     @property
@@ -179,7 +212,7 @@ class Attribution:
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "score": self.score, "root": self.root,
                 "rivals": self.rivals, "settled": self.settled,
-                "refuted": self.refuted, "untested": self.untested,
+                "refuted": self.refuted, "spoiled": self.spoiled, "untested": self.untested,
                 "verdicts": [v.to_dict() for v in self.verdicts]}
 
     def render(self) -> str:
@@ -190,6 +223,10 @@ class Attribution:
         elif self.rivals:
             tail = ("  → the evidence does not separate "
                     + " and ".join(self.rivals) + "; an experiment that does is what is missing")
+        elif self.spoiled:
+            tail = ("  → nothing tested here explains it, and "
+                    + " and ".join(self.spoiled)
+                    + " was never actually tried — its experiment moved the ceiling too")
         else:
             tail = "  → nothing tested here explains it"
         return f"{head}\n{body}\n{tail}"
@@ -198,24 +235,60 @@ class Attribution:
 # --------------------------------------------------------------------------------------------- #
 #  the hypotheses
 # --------------------------------------------------------------------------------------------- #
+def _ceiling_of(bench: Optional[Benchmark]) -> Optional[float]:
+    """What share of items have their right answer reachable at all, or ``None`` if unsaid.
+
+    Deliberately ``None`` rather than ``1.0`` when no ``reachable`` was supplied: a ceiling nobody
+    measured is not a ceiling of one, and :func:`_experiment` must be able to tell *the repair kept
+    the ceiling* from *nobody looked*.
+    """
+    if bench is None or bench.reachable is None or not bench.items:
+        return None
+    return round(sum(1 for item, want in zip(bench.items, bench.gold)
+                     if bench.reachable(item, want)) / len(bench.items), 4)
+
+
 def _experiment(failure: Failure, make: Optional[Callable[[], Benchmark]], cause: str,
                 says: str, refuted_by: str) -> Verdict:
-    """Run one change, and let the number decide.
+    """Run one change, and let the number decide — once the change is shown to be one change.
 
     The asymmetry here is the whole discipline. An experiment that moves the score **supports** its
     hypothesis; one that runs and does not move it **refutes** it. Not "leaves it open" — a cause
     whose repair changes nothing is not the cause, and leaving it open is how a favourite
     explanation survives evidence against it.
+
+    That asymmetry only means anything while the experiment changed **exactly one thing**, and the
+    first version simply trusted the caller on that. It should not have. Run on a real organ for
+    the first time in V.83, a repair labelled *a smaller pool* — twelve candidates instead of a
+    hundred and twenty-six, to ask whether the ranker was drowning — also threw away the right
+    answer for most items on its way past: reachable fell 0.700 → 0.160. The score went down, and
+    the old code recorded ``budget: refuted``, which reads as *more search would not have helped*
+    and is not what happened.
+
+    So the ceiling is re-read on the repaired benchmark and compared to the original. Moved by
+    :data:`SPOILED` or more, in **either** direction, and the verdict is ``spoiled``: the number is
+    evidence about nothing. A drop means the repair took the answer away; a rise means it was a
+    reachability repair wearing another label, and crediting its gain to *budget* or *data* would
+    send the next version to work on the wrong thing — which is the mistake this whole module was
+    written to stop, arriving one level up from where it was being watched for.
     """
     if make is None:
         return Verdict(cause=cause, says=f"no experiment supplied: {says}", refuted_by=refuted_by)
     base = failure.bench.score() if failure.bench else 0.0
+    was = _ceiling_of(failure.bench)
     try:
-        after = make().score()
+        repaired = make()
+        after = repaired.score()
     except Exception as error:  # noqa: BLE001 — an experiment that cannot run says so
         return Verdict(cause=cause, says=f"the experiment raised {type(error).__name__}: {error}",
                        refuted_by=refuted_by)
     moved = round(after - base, 4)
+    now = _ceiling_of(repaired)
+    if was is not None and now is not None and abs(now - was) >= SPOILED:
+        return Verdict(cause=cause, stands="spoiled", moved=moved, refuted_by=refuted_by,
+                       says=(f"{says}: {base:.4f} → {after:.4f} ({moved:+.4f}), but the right "
+                             f"answer's reachability moved {was:.4f} → {now:.4f} — the experiment "
+                             f"changed the problem as well as the method, so this tests nothing"))
     stands = "supported" if moved >= MOVED else "refuted"
     return Verdict(cause=cause, stands=stands, moved=moved, refuted_by=refuted_by,
                    says=(f"{says}: {base:.4f} → {after:.4f} ({moved:+.4f}) — "

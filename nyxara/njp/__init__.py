@@ -503,6 +503,14 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.83. `Stage` is already a stage of a *curriculum*, which is not a run of an organ under
+# examination, so the fieldwork one is qualified. `Fieldwork`, `diagnose` and `span_stage` are free.
+from nyxara.njp.fieldwork import (
+    Fieldwork,
+    Stage as MeasuredStage,
+    diagnose,
+    span_stage,
+)
 # V.78. All three names are free, and kept bare for once — nothing else in this namespace answers
 # to a rung of a difficulty ladder.
 from nyxara.njp.reach import Ladder, Rung, climb, the_gap
@@ -760,6 +768,7 @@ __all__ = [
     # V.82 -- the loop, and whether diagnosing beats guessing. `Repair` and `Attempt` were
     # `njp.programming`'s, so the loop's carry qualified names.
     "Ascent", "LoopTurn", "CandidateRepair", "ascend",
+    "Fieldwork", "MeasuredStage", "diagnose", "span_stage",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

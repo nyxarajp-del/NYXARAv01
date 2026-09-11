@@ -1,6 +1,6 @@
-"""NYXARA · njp/attributionschool.py — does it find the cause, or just name one (🩺).
+"""NYXARA · njp/attributionschool.py — does it find the cause, or just name one (🩺, V.77→V.83).
 
-An attributor has three failure modes and only the first is obvious.
+An attributor has four failure modes and only the first is obvious.
 
 * It can name the wrong cause. Obvious, and the least dangerous, because the repair then visibly
   fails.
@@ -9,15 +9,26 @@ An attributor has three failure modes and only the first is obvious.
 * It can name a cause it never tested. This is the one that matters here, because it is how a
   favourite explanation survives: the hypothesis that was never put at risk comes out looking as
   good as the one that was.
+* And — found in V.83, by running the organ on a real one rather than on any of these — it can
+  **refute** a cause it never tested, which is the same fault wearing the opposite sign. An
+  experiment that changed two things produces a number, and a number is easy to record as evidence.
+  The ninth fixture is built around that, and it is the only one here whose shape was discovered
+  outside this file.
 
-So eight failures are built whose cause is known by construction — one for each hypothesis the
+So nine failures are built whose cause is known by construction — one for each hypothesis the
 organ holds, plus one that nothing tested can explain. Every fixture supplies **every** experiment,
 so a cause is not credited for being the only one anybody looked at, and the discriminating repair
 is the only thing that separates them.
 
 Scored three ways. **Correct** is naming the cause the fixture was built around. **Wrong** is naming
 a different one, which is worse than naming none. **Unsettled** is declining to name one, which is
-the right answer for the eighth fixture and a miss for the other seven.
+the right answer for the last two fixtures and a miss for the other seven.
+
+And then two more, which go together: **caught** counts the experiments that really did change two
+things and were called ``spoiled``, **false alarms** the ones that changed exactly one and were
+called it anyway. Only one fixture of the nine has a spoiled experiment in it, so an organ that
+flagged everything would score nine catches and eight false alarms — which is why neither number is
+reported without the other.
 """
 
 from __future__ import annotations
@@ -140,18 +151,31 @@ def _bench(name: str, rows, gold, readings, *, n_train: int, rules: int = 6,
 def _all_experiments(rows, gold, *, n_train: int, readings, rules: int,
                      data_rows: Optional[int] = None, better_readings=None,
                      better_rules: Optional[int] = None,
-                     better_budget: Optional[int] = None) -> Dict[str, Any]:
-    """Every experiment, so no hypothesis is credited merely for being the only one tried."""
+                     better_budget: Optional[int] = None,
+                     reachable: Optional[Callable[[int, str], bool]] = None,
+                     budget_reachable: Optional[Callable[[int, str], bool]] = None
+                     ) -> Dict[str, Any]:
+    """Every experiment, so no hypothesis is credited merely for being the only one tried.
+
+    ``reachable`` is carried into every experiment so that *the ceiling did not move* is a thing
+    each one can be checked for. ``budget_reachable`` is the deliberate exception: it gives the
+    budget experiment a **different** ceiling from the one it is being compared against, which is
+    the defect :func:`_spoiled_experiment` is built to catch.
+    """
     return {
         "more_data": lambda: _bench("more data", rows, gold, readings,
-                                    n_train=data_rows or n_train, rules=rules),
+                                    n_train=data_rows or n_train, rules=rules,
+                                    reachable=reachable),
         "other_algorithm": lambda: _bench("other algorithm", rows, gold, readings,
-                                          n_train=n_train, rules=better_rules or rules),
+                                          n_train=n_train, rules=better_rules or rules,
+                                          reachable=reachable),
         "richer_reading": lambda: _bench("richer readings", rows, gold,
                                          better_readings if better_readings is not None
-                                         else readings, n_train=n_train, rules=rules),
+                                         else readings, n_train=n_train, rules=rules,
+                                         reachable=reachable),
         "more_budget": lambda: _bench("more budget", rows, gold, readings,
-                                      n_train=n_train, rules=better_budget or rules),
+                                      n_train=n_train, rules=better_budget or rules,
+                                      reachable=budget_reachable or reachable),
     }
 
 
@@ -262,6 +286,37 @@ def _irreducible() -> Failure:
                                       data_rows=800, better_rules=20))
 
 
+def _spoiled_experiment() -> Failure:
+    """One lever was never actually pulled, and the old organ concluded that none of them reached.
+
+    A ninth case, and it does not come from imagination. V.74–V.82 were all validated on fixtures
+    like the eight above; V.83 ran the whole stack on a **real** organ — the span stage of
+    :mod:`nyxara.njp.finding` — and the budget experiment there was *keep the twelve shortest
+    candidates instead of a hundred and twenty-six*. It scored worse, and the attributor wrote down
+    ``budget: refuted``. But capping the pool had also thrown the right answer out of it for most
+    items: reachable fell 0.700 → 0.160. Whatever that score was evidence about, it was not
+    whether more search would have helped.
+
+    This fixture is that arrangement with the stakes made visible. The task sits on its own floor,
+    every honest repair is refuted, and the budget experiment is handed a ceiling of 0.20 against
+    the base's 1.00. The old code called that a refutation, found every repair refuted, and fell
+    through to ``floor`` — *these levers do not reach this* — on the strength of a lever nobody
+    pulled. The right answer is to name no cause **and say which experiment needs rebuilding**.
+    """
+    rng = random.Random(SEED + 9)
+    rows = [[rng.randrange(VALUES) for _ in range(FEATURES)] for _ in range(700)]
+    gold = ["A" if rng.random() < 0.88 else "B" for _ in range(700)]
+    readings = list(range(FEATURES))
+    whole = {i: True for i in range(700)}
+    gutted = {i: (i % 10 < 2) for i in range(700)}
+    return Failure(name="a lever that was never pulled",
+                   bench=_bench("as found", rows, gold, readings, n_train=500, rules=12,
+                                reachable=lambda i, _w: whole[i]),
+                   **_all_experiments(rows, gold, n_train=500, readings=readings, rules=12,
+                                      data_rows=600, reachable=lambda i, _w: whole[i],
+                                      budget_reachable=lambda i, _w: gutted[i]))
+
+
 @dataclass
 class Case:
     name: str = ""
@@ -270,6 +325,10 @@ class Case:
     cause: str = ""
     build: Optional[Callable[[], Failure]] = None
     note: str = ""
+    #: Hypotheses whose experiment should come back ``spoiled`` — it ran, and tested nothing.
+    #: Empty for every case where each experiment changes exactly one thing, which is how the
+    #: exam scores false alarms as well as catches.
+    spoiled: Tuple[str, ...] = ()
 
 
 KNOWN: Tuple[Case, ...] = (
@@ -287,6 +346,9 @@ KNOWN: Tuple[Case, ...] = (
          "identical runs disagree, so nothing downstream can be concluded"),
     Case("already at what the task allows", "", _irreducible,
          "clear of its floor, and no lever reaches higher; naming no cause is correct"),
+    Case("a lever that was never pulled", "", _spoiled_experiment,
+         "the budget experiment moved the ceiling too, so `floor` is not earned",
+         spoiled=("budget",)),
 )
 
 
@@ -312,9 +374,17 @@ def walk_the_chain() -> List[Attribution]:
 
 
 def retrodict(cases: Sequence[Case] = KNOWN) -> Dict[str, Any]:
-    """Eight failures with known causes, and what the attributor made of them."""
+    """Nine failures with known causes, and what the attributor made of them.
+
+    Two numbers beyond the cause, and they go together. ``caught`` counts the experiments that
+    really did change two things and were called ``spoiled``; ``false_alarms`` counts the ones that
+    changed exactly one and were called it anyway. Only one of the nine fixtures has a spoiled
+    experiment in it, so an organ that flagged everything would score nine catches and eight false
+    alarms — which is why both are reported and the exam refuses either on its own.
+    """
     rows: List[Dict[str, Any]] = []
     correct = wrong = unsettled = 0
+    caught = missed = false_alarms = 0
     roots: List[str] = []
     for case in cases:
         got: Attribution = attribute(case.build())
@@ -326,26 +396,40 @@ def retrodict(cases: Sequence[Case] = KNOWN) -> Dict[str, Any]:
             wrong += 1
         else:
             unsettled += 1
+        flagged = set(got.spoiled)
+        want = set(case.spoiled)
+        caught += len(flagged & want)
+        missed += len(want - flagged)
+        false_alarms += len(flagged - want)
         rows.append({"case": case.name, "want": case.cause, "got": root,
-                     "rivals": got.rivals, "refuted": got.refuted,
+                     "rivals": got.rivals, "refuted": got.refuted, "spoiled": got.spoiled,
+                     "want_spoiled": list(case.spoiled),
                      "untested": got.untested, "note": case.note, "attribution": got})
     named = {r for r in roots if r}
     return {"rows": rows, "correct": correct, "wrong": wrong, "unsettled": unsettled,
             "of": len(cases), "accuracy": round(correct / max(1, len(cases)), 4),
-            "distinct_roots": len(named), "roots": sorted(named)}
+            "distinct_roots": len(named), "roots": sorted(named),
+            "caught": caught, "missed": missed, "false_alarms": false_alarms,
+            "spoilable": sum(len(c.spoiled) for c in cases)}
 
 
 def examine(cases: Sequence[Case] = KNOWN) -> Dict[str, Any]:
     """The exam, with its pass condition written down rather than implied.
 
-    Three conditions. Most of them right; **no** confident wrong answers, since a wrong cause sends
+    Five conditions. Most of them right; **no** confident wrong answers, since a wrong cause sends
     the repair somewhere real and costs more than an honest shrug; and more than one distinct cause
-    named across the eight, because an attributor that says `data` to everything would otherwise
+    named across the nine, because an attributor that says `data` to everything would otherwise
     score well on any set of fixtures that happened to be about data.
+
+    The last two are the V.83 pair, and they are a pair on purpose: every experiment that changed
+    two things must be caught, and **no** experiment that changed one may be called spoiled. Either
+    alone is trivially satisfiable — flag nothing, or flag everything — and an organ that meets one
+    by failing the other has learned to make a noise rather than to look.
     """
     got = retrodict(cases)
     got["passes"] = bool(got["accuracy"] >= 0.75 and got["wrong"] == 0
-                         and got["distinct_roots"] >= 4)
+                         and got["distinct_roots"] >= 4
+                         and got["missed"] == 0 and got["false_alarms"] == 0)
     return got
 
 

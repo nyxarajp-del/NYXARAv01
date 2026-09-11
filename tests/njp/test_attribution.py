@@ -13,7 +13,8 @@ from __future__ import annotations
 import random
 
 from nyxara.njp.attribution import (
-    CAUSES, MOVED, REPAIRS, Attribution, Failure, Verdict, attribute, chain, render_chain,
+    CAUSES, MOVED, REPAIRS, SPOILED, Attribution, Failure, Verdict, attribute, chain,
+    render_chain,
 )
 from nyxara.njp.attributionschool import KNOWN, examine, retrodict, walk_the_chain
 from nyxara.njp.measurement import Benchmark
@@ -214,3 +215,95 @@ def test_a_bare_attribution_is_honest_about_knowing_nothing():
     assert Attribution().root == "" and not Attribution().settled
     assert Verdict().tested is False
     assert 0.0 < MOVED < 0.5
+
+
+# --------------------------------------------------------------------------------------------- #
+#  V.83 — an experiment that changed two things tested neither
+# --------------------------------------------------------------------------------------------- #
+def _ceiling_bench(name, *, right, reach, n=100):
+    """A benchmark scoring ``right`` with the answer reachable for ``reach`` of its items."""
+    items = list(range(n))
+    gold = ["A"] * n
+    said = ["A" if i < round(right * n) else "B" for i in range(n)]
+    can = [i < round(reach * n) for i in range(n)]
+    return Benchmark(name=name, items=items, gold=gold, predict=lambda i: said[i],
+                     reachable=lambda i, _w: can[i])
+
+
+def test_a_repair_that_lowers_the_ceiling_is_not_a_refutation():
+    """The real case, in miniature: the score fell because the answer was thrown away.
+
+    ``budget: refuted`` reads as *more search would not have helped*. That claim was never tested
+    by an experiment that also stopped offering the right answer, and the organ must not make it.
+    """
+    failure = Failure(name="capped", bench=_ceiling_bench("as found", right=0.30, reach=0.90),
+                      more_budget=lambda: _ceiling_bench("capped", right=0.10, reach=0.20))
+    budget = next(v for v in attribute(failure).verdicts if v.cause == "budget")
+    assert budget.stands == "spoiled"
+    assert not budget.tested
+    assert "0.9000 → 0.2000" in budget.says
+
+
+def test_a_repair_that_raises_the_ceiling_is_not_a_supported_cause():
+    """The dangerous direction. The score went up, and not for the reason on the label.
+
+    Crediting this to `budget` sends the next version to tune a search when what actually moved was
+    what the search was allowed to find — which is the exact mistake this module exists to stop,
+    arriving one level above where it was being watched for.
+    """
+    failure = Failure(name="widened", bench=_ceiling_bench("as found", right=0.20, reach=0.30),
+                      more_budget=lambda: _ceiling_bench("widened", right=0.60, reach=0.95))
+    budget = next(v for v in attribute(failure).verdicts if v.cause == "budget")
+    assert budget.stands == "spoiled"
+    assert budget.moved >= MOVED, "it did move the score — that is what makes it dangerous"
+
+
+def test_a_repair_that_keeps_the_ceiling_is_judged_on_the_score_alone():
+    """The false-alarm side. A ceiling that wobbles under :data:`SPOILED` is the same ceiling."""
+    for after, want in ((0.30, "refuted"), (0.60, "supported")):
+        failure = Failure(name="honest",
+                          bench=_ceiling_bench("as found", right=0.30, reach=0.90),
+                          more_budget=lambda a=after: _ceiling_bench("more", right=a, reach=0.88))
+        got = next(v for v in attribute(failure).verdicts if v.cause == "budget")
+        assert got.stands == want, (after, got.stands)
+        assert got.tested
+
+
+def test_an_unmeasured_ceiling_is_not_read_as_an_unchanged_one():
+    """No ``reachable`` anywhere means the guard cannot run, and it says nothing rather than pass."""
+    failure = Failure(name="blind",
+                      bench=Benchmark(name="as found", items=[0, 1], gold=["A", "A"],
+                                      predict=lambda i: "B"),
+                      more_budget=lambda: Benchmark(name="more", items=[0, 1], gold=["A", "A"],
+                                                    predict=lambda i: "A"))
+    assert next(v for v in attribute(failure).verdicts if v.cause == "budget").stands == "supported"
+
+
+def test_floor_is_withheld_while_a_lever_was_never_pulled():
+    """`these levers do not reach this` is not shown by a lever nobody pulled.
+
+    The ninth fixture is a task sitting on its own floor with every honest repair refuted and one
+    repair spoiled. Before V.83 the attributor read that as `floor` — a confident, wrong, and
+    expensive conclusion, since it closes the question.
+    """
+    got = attribute(next(c for c in KNOWN if c.name == "a lever that was never pulled").build())
+    assert got.spoiled == ["budget"]
+    assert got.root == "", "floor was concluded from an experiment that tested nothing"
+    assert any(v.cause == "floor" and v.stands == "supported" for v in got.verdicts)
+    assert "never actually tried" in got.render()
+
+
+def test_the_exam_scores_catches_and_false_alarms_together():
+    """Flagging nothing and flagging everything both fail, which is the point of scoring both."""
+    got = examine()
+    assert got["spoilable"] >= 1
+    assert got["missed"] == 0 and got["false_alarms"] == 0
+    assert got["caught"] == got["spoilable"]
+    assert got["passes"]
+
+
+def test_spoiled_is_neither_tested_nor_untested():
+    assert Verdict(stands="spoiled").tested is False
+    got = attribute(next(c for c in KNOWN if c.name == "a lever that was never pulled").build())
+    assert "budget" not in got.untested and "budget" not in got.refuted
+    assert 0.0 < SPOILED < 0.5

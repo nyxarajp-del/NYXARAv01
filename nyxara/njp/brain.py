@@ -2801,6 +2801,21 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def diagnose_a_real_organ(self) -> Any:
+        """Point the whole diagnostic stack at the span stage, not at a fixture built for it.
+
+        Returns ``root`` and ``spoiled``. The interesting outcome is the one that actually
+        happened: ``root`` empty, because every repair on the shelf was genuinely refuted — and one
+        of them refuted **nothing**, having moved the ceiling as well as the method. Needs the
+        reading corpus, so ``None`` where it is not present.
+        """
+        try:
+            from nyxara.njp.fieldwork import diagnose
+
+            return diagnose().to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_gate_school(self, each: int = 150) -> Any:
         """Sit the self-rewrite audit: what the gate lets through, by kind of candidate.
 

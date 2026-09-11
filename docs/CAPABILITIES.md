@@ -6235,3 +6235,98 @@ The capabilities are synthetic and each is broken exactly one way.
 Whether a system can also **invent** the repair is a different question and a harder one. Answering
 this one first is what makes that one askable: if choosing well among known repairs were worth
 nothing, inventing new ones would be worth less.
+
+---
+
+## V.83 — the loop taken out of its fixtures
+
+Everything from V.74 to V.82 was validated the same way: a fixture whose answer was known because
+it had been built that way, retrodicted, scored on catches and false alarms together. That is the
+right way to build such a thing and it is not sufficient, for one reason. **A fixture is written by
+the same hand that writes the organ**, so it inherits that hand's idea of what can go wrong — and
+the failure modes it cannot contain are exactly the ones nobody had thought of.
+
+So `njp/fieldwork.py` points the finished stack at a **real** organ: the span stage of
+`njp/finding.py` — given the sentence containing the answer, pick the span inside it. The target
+was chosen because its cause is already known **by hand**. Two versions of work went into the
+ranker before a decomposition found that the generator proposes about 126 spans per sentence and
+the ranker was never what held the number down. If the loop is worth anything it should find that
+by itself.
+
+It did not. What it did instead is this version.
+
+### 1. It declined to name a cause, and that was correct
+
+The stage scores **0.0320**. Another ranker and richer readings each moved it by **0.0000**, and
+the shelf ran out. *These levers do not reach this* is true, useful, and exactly what a
+diagnostician that produced a word anyway would have hidden.
+
+The fourth arm, `more data`, is **re-running as this is written** and its first result is withdrawn
+— see the fifth defect below, which is why. The other three arms are untouched by that: they are
+taught from the same 1,500 rows and examined on the same 250, before and after the fix.
+
+### 2. `reachability` came back refuted, and that was also correct
+
+The right answer is in the pool for 0.700 of items and the stage scores 0.032, so the ceiling is
+nowhere near binding. **"The pool is too big" and "the answer is not in the pool" are different
+claims and only the second is a ceiling.** My hand-diagnosis was the first. The organ has no
+hypothesis for it. That gap is real and is written down below rather than papered over.
+
+### 3. Knowing the cause did not hand me the repair
+
+The one repair built from my own hand-diagnosis — keep the twelve shortest candidates instead of a
+hundred and twenty-six — made the score **worse**, 0.0320 → 0.0160. A correct diagnosis is not a
+design.
+
+### 4. And that repair is why the organ changed
+
+Capping the pool also threw the right answer out of it: reachable fell **0.700 → 0.160**. The
+attributor recorded `budget: refuted` — *more search would not have helped* — on the strength of an
+experiment that had changed two things at once.
+
+`njp/attribution.py`'s own first rule is that an experiment changes exactly one thing, and it was
+checking its callers for everything except that. V.83 adds `SPOILED = 0.05`: the ceiling is re-read
+after every repair and compared with the original. Moved by that much in **either** direction and
+the verdict is `spoiled` — *ran, tested nothing* — instead of a refutation.
+
+| direction | what it looks like | what the old organ said | why it is dangerous |
+|---|---|---|---|
+| ceiling **falls** | the repair scored worse | `refuted` | an unearned claim: the lever was never pulled |
+| ceiling **rises** | the repair scored better | `supported` | names the **wrong cause**, and the next version goes to work on it |
+
+`spoiled` is neither tested nor untested, and it withholds the `floor` fallback: *no lever reaches
+this* is not shown by a lever nobody pulled.
+
+### The exam, extended
+
+A ninth fixture joins `attributionschool`: a task sitting on its own floor, every honest repair
+refuted, and the budget experiment handed a ceiling of 0.20 against the base's 1.00. Before V.83
+the attributor read that as `floor` — a confident, wrong, and expensive conclusion, because it
+closes the question.
+
+| | cause named | spoiled caught | false alarms |
+|---|---|---|---|
+| **9 fixtures** | **9 / 9**, 0 wrong, 7 distinct | **1 / 1** | **0 / 8** |
+
+Both spoiled numbers are reported because either alone is trivially satisfiable — flag nothing, or
+flag everything. An organ that meets one by failing the other has learned to make a noise rather
+than to look.
+
+### A fifth defect, in the file that found the fourth
+
+The first draft's `more data` experiment read `learn[:LEARN_FROM * 2]` against
+`findingschool.split`, whose learn side is already capped at 1,500 rows. It showed the reader
+**exactly the same rows**, came back flat, and would have been recorded as `data: refuted`: *more
+examples would not have helped*, concluded from an experiment that showed no more examples.
+
+Same defect, same class, same afternoon, one level down from where it had just been fixed — which
+says something about how quietly it happens. Caught by reading the call rather than by reading the
+number, which is the wrong way round, so `diagnose` now **refuses to run** when the two training
+sets are the same size instead of trusting that they differ.
+
+### What is still owed
+
+The organ tests *is the answer producible* and does not test *is it producible among so many
+alternatives that nothing could pick it out*. That is a distractor-count hypothesis, and it needs
+an experiment that thins the pool **without dropping what it is thinning toward**. It is not
+written here, because the obvious way to write it is the one that just failed.
