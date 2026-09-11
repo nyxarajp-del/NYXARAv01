@@ -1388,12 +1388,23 @@ class ExperimentDesigner:
                          predictions={_norm(k): _norm(v)
                                       for k, v in (predictions or {}).items()})
         self.hypotheses[name] = hyp
-        self._renormalise()
         return hyp
 
     def _renormalise(self) -> None:
+        """Make the probabilities sum to one — **once**, where they are used.
+
+        This used to run at the end of every :meth:`propose`, which quietly made the prior depend
+        on the order hypotheses were offered in: each insert divided everything already present by
+        a growing total, so the first one proposed kept the largest share. Asking for five uniform
+        priors of 0.2 returned **0.482, 0.096, 0.116, 0.139, 0.167** — the first hypothesis five
+        times likelier than the second, from nothing but the order of the loop that added them.
+
+        Nobody saw it because nothing read the priors back. Normalising at the point of use instead
+        leaves ``propose`` storing the weight it was handed, and the distribution correct however
+        the hypotheses arrived.
+        """
         total = sum(h.probability for h in self.hypotheses.values())
-        if total <= 0:
+        if total <= 0 or abs(total - 1.0) < 1e-12:
             return
         for hyp in self.hypotheses.values():
             hyp.probability /= total
@@ -1408,6 +1419,7 @@ class ExperimentDesigner:
         return total
 
     def prior_entropy(self) -> float:
+        self._renormalise()
         return self._entropy(h.probability for h in self.hypotheses.values())
 
     def evaluate(self, experiment: str) -> Experiment:
@@ -1418,6 +1430,7 @@ class ExperimentDesigner:
         hypothesis variable and this experiment's outcome, which is the quantity "how much would
         this teach me" actually names.
         """
+        self._renormalise()
         name = _norm(experiment)
         out = Experiment(name=name)
         live = [h for h in self.hypotheses.values() if h.probability > 0]

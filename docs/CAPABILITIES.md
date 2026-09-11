@@ -5976,3 +5976,74 @@ cannot be used without it.
 
 Three organs, each validated by retrodiction against cases whose answer is known, and each scored in
 **both** directions — finding what is there, and refusing to find what is not.
+
+---
+
+## V.79 — Phase 2 opens by asking the designer the question nobody had
+
+`ExperimentDesigner` has been in `njp/universe.py` since V.04 and is careful work. It computes
+expected information gain exactly, refuses an experiment every live hypothesis predicts identically,
+and kills a hypothesis that made a commitment and was contradicted rather than softening it into a
+decrement.
+
+**It had never been compared to anything.** One test hands it three named experiments and checks it
+picks the one a person would. That is the defect shape found four times this week, so Phase 2 starts
+by giving it a floor rather than by building a second one beside it.
+
+    Does choosing the most informative experiment find the truth in fewer experiments
+    than choosing one at random?
+
+Four strategies over the same worlds — the organ, a uniform pick, working down the list, and
+deliberately the *least* informative. That last is not a competitor: it checks the ranking points
+somewhere, since a designer whose best and worst pick alike would be sorting noise. Worlds where no
+sequence of available experiments separates the hypotheses are set aside, because a strategy that
+cannot finish an impossible world is not failing.
+
+    designed   1.800 experiments   settled 1.000   right when settled 1.000
+    random     2.496 experiments   settled 1.000   right when settled 1.000
+    in order   2.387 experiments   settled 1.000   right when settled 1.000
+    worst      2.668 experiments   settled 1.000   right when settled 1.000
+
+**It works.** A third fewer experiments than picking at random, not bought by giving up on hard
+worlds (all settled) and not by answering fast and wrong (all correct).
+
+### And here is where it stops
+
+One number would have been the same mistake one level up, so it is swept across how many
+experiments are available per hypothesis:
+
+| hypotheses | experiments | designed | random | worst | saved | ranking holds |
+|---|---|---|---|---|---|---|
+| 4 | 12 | 1.164 | 1.808 | 2.204 | +0.644 | yes |
+| 5 | 8 | 1.800 | 2.496 | 2.668 | +0.696 | yes |
+| 8 | 5 | 2.185 | 2.815 | 2.831 | +0.630 | yes |
+| 6 | 3 | 2.375 | 2.562 | **2.305** | +0.187 | **no** |
+| 10 | 4 | 3.154 | 3.454 | **3.092** | +0.300 | **no** |
+| 12 | 3 | 2.945 | **2.782** | **2.600** | **−0.163** | **no** |
+
+The advantage fades as experiments become scarce and then **reverses**: in the last three rows the
+*least* informative choice finishes sooner than the most informative one. The ranking has inverted,
+not merely flattened.
+
+The reason is a mismatch nobody had noticed because nobody had measured it. The organ maximises
+**expected bits per experiment**; what is wanted is **experiments until settled**. Those agree while
+there is room to halve the hypothesis set repeatedly, and come apart when there is not — an
+experiment with a lopsided outcome distribution has low *expected* gain and may, on the outcome that
+actually occurs, rule out almost everything at once. Averaging over outcomes is right for bits and
+wrong for steps.
+
+`njp.field` uses this organ in the plentiful regime, where the claim is true. The boundary is
+written down rather than left for a later version to rediscover.
+
+### And a silent bug in the V.04 code, found on the way
+
+`propose` renormalised after **every** insert, so each addition divided everything already present
+by a growing total and the first hypothesis proposed kept the largest share. Asking for five uniform
+priors of 0.2 returned:
+
+    h0 0.4823   h1 0.0965   h2 0.1157   h3 0.1389   h4 0.1667
+
+The first hypothesis five times likelier than the second, from nothing but the order of the loop
+that added them — in a module whose whole business is Bayesian updating. Nobody saw it because
+nothing ever read the priors back. Normalising once at the point of use leaves `propose` storing
+the weight it was handed and the distribution correct however the hypotheses arrived.
