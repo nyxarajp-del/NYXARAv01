@@ -503,6 +503,17 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.89. `Law` is `njp.discover`'s already — a regularity found in episodes, not a structural
+# property of an operation — and `Finding` is `njp.measurement`'s. Both qualified. `Reading` is
+# `njp.finding`'s too, so the trio goes together rather than one of them taking a bare name.
+from nyxara.njp.probing import (
+    Family,
+    Finding as LawFinding,
+    Law as StructuralLaw,
+    Reading as ProbeReading,
+    partition,
+    probe,
+)
 # V.88. `Stencil` and `response` are free; `Verdict` is `njp.truth`'s and `njp.attribution`'s
 # already, so this one is qualified. `judge` is far too general to take bare.
 from nyxara.njp.closure import (
@@ -838,6 +849,7 @@ __all__ = [
     "RawTrace", "InventedMeasurement", "MeasurementRegister", "mine", "criticise", "admit",
     "Stencil", "ClosureVerdict", "difference", "in_span", "judge_primitive",
     "obeys_superposition", "response",
+    "StructuralLaw", "LawFinding", "ProbeReading", "Family", "probe", "partition",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

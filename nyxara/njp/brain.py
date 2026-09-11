@@ -2831,6 +2831,35 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def what_is_this_operation(self, operation: Any) -> Any:
+        """Find out what a black box is by trying to break it, never by reading its name.
+
+        Returns the laws it **broke**, with the counterexample for each. Nothing is ever returned
+        as holding: a law that survives reports how many attempts it survived, because that number
+        is the whole content of *not refuted*.
+        """
+        try:
+            from nyxara.njp.probing import probe
+
+            return probe(operation).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_probing_school(self) -> Any:
+        """Sit the behavioural-taxonomy audit on fourteen operations with their names taken off.
+
+        Three numbers, and the third is the one that grows as the proofs get stronger:
+        ``flattered`` is two operations that behave identically called different, ``buried`` is two
+        that genuinely differ called the same — *we could not express the difference, therefore
+        there is none*.
+        """
+        try:
+            from nyxara.njp.probingschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def is_this_primitive_new(self, taps: Any) -> Any:
         """Decide whether a candidate primitive could be a discovery — before looking at any data.
 

@@ -6947,3 +6947,82 @@ It does not claim primitives cannot be invented. It claims the **linear** ones c
 and narrows where to look: anything that sorts or compares is outside the algebra entirely.
 Building a search over *that* family — and a world it can be tested on, which the two failures
 above show is harder than it sounds — is still owed. **Level 7 stays unclaimed.**
+
+---
+
+## V.89 — finding out what an operation is, by trying to break it
+
+V.88 proved the linear primitives contain nothing to discover and pointed at where novelty could
+still live: operations that sort, compare, rank, threshold. The obvious next move is to write those
+down and search them — **and that is the same mistake one level out.** A hand-written list of
+nonlinear operations is the supplied vocabulary again, just longer.
+
+So the question changes. Given an operation as a **black box** — inputs in, outputs out, no name, no
+source, no declared type — what can be established about it?
+
+### Only refutations
+
+No number of probes shows an operation is linear; each one only fails to show that it is not. So a
+finding reads `refuted`, with the counterexample that did it, or **`not refuted in 200 tries`** —
+and there is no third value.
+
+```
+op 5:
+   x  adds up                broken by f(a+b) against f(a)+f(b)
+   ~  scales                 not broken in 200 tries — which is not the same as true
+   ~  follows the level      not broken in 200 tries — which is not the same as true
+   x  settles                broken by applied twice
+   x  ignores order          broken by the input shuffled
+   x  stays local            broken by one input at 5 moved
+```
+
+The attempt count *is* the content of "not refuted": three tries and three hundred are not the same
+state of knowledge, and the number is carried rather than dropped.
+
+### The families are counted, not named
+
+Fourteen operations go in as `op 1` … `op 14`. What comes out is a partition built from which laws
+each one breaks — `family 1`, `family 2`. Two operations land together because nothing separated
+them, not because somebody called them both filters. `Family.christen` refuses a family that has not
+been separated from anything: a partition of one is not a discovery about operations, it is a
+statement that the probes are too blunt.
+
+| | |
+|---|---|
+| 14 operations → | **12 families**, 12 by construction |
+| 91 pairs, 88 genuinely differ | **invented 88** |
+| **flattered** (behave alike, called different) | **0** |
+| **buried** (genuinely differ, called alike) | **0** |
+
+### Behaviour beats names and source
+
+`op 6` is the identity written as `max(x, x)`. It **looks** nonlinear; a prober that reads source or
+names is fooled, and one that probes lands it with the identity. That is behavioural identification
+rather than metadata, and it is the reason the whole module exists.
+
+### The exam corrected me, not itself
+
+My truth table put `op 2` — a scaling by 2.5 — in with the identity, on the reasoning that a scaling
+is "the identity up to a constant". The prober separated them and was **right**: add a constant to a
+scaling's input and you get 2.5 times it back, and applying it twice gives 6.25×. It breaks *follows
+the level* and *settles*; the identity breaks neither. **The table was corrected. The probes were not
+weakened to agree with it.**
+
+### The battery's resolution, as a number
+
+`op 13` is linear plus a **thousandth** of a square — caught, its own family. `op 14` is linear plus
+a **quadrillionth** — lands with the identity, and always will. That is not the battery failing; it
+is its tolerance, stated as a measurement instead of as a worry.
+
+### The accounting that must outlive this version
+
+V.88 named the failure that grows as the proofs get stronger: *we could not express the difference,
+therefore there is none*. Over-eager closure. So `buried` is permanent, and there is a test that
+hands the prober **one law instead of nine** and asserts that almost everything collapses into under
+four families — a blunt battery looks decisive, and only this number tells the difference.
+
+### What is supplied, said plainly
+
+The nine laws. They are *properties*, not operations, and the partition they induce is not handed
+over — but they are a vocabulary, and pretending otherwise would be the promotion this package keeps
+refusing. **Discovering the laws themselves is the next debt.** Level 7 stays unclaimed.
