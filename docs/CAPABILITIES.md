@@ -7335,3 +7335,66 @@ contested ones it explains **none**. The easy pairs were carrying it entirely.
 
 That is the argument for adversarial selection in one line: **an average over easy cases rewards a
 vocabulary that has never distinguished anything hard.**
+
+---
+
+## V.94 — finding the few things everything else is made of
+
+Every version from V.89 to V.92 was handed the thing it was supposed to be clever about. V.89 got
+nine laws. V.90 got seven moves. V.91 got a substrate of four numbers. V.92 got a list of
+vocabularies to weigh. Each search was real, and each time **the origin of the candidates was me.**
+
+So here nothing is given a parameterisation. The input is transformations observed **only as
+behaviour** — rows in, rows out — and one question: *can these be written down together more
+cheaply than one at a time?*
+
+When the answer is yes, it is a handful of the observations themselves: if some of them compose to
+give all the others, the set is described by naming those few and writing each remaining one as a
+short recipe. **Finding which few is the discovery**, and it is not a parameterisation anybody
+supplied.
+
+| family | needs | found | cost | longhand |
+|---|---|---|---|---|
+| turns | 1 | **1** | 53 bits | 192 |
+| turns and a flip | 2 | **2** | 142 bits | 384 |
+| swaps of neighbours | — | 0 | 168 | 168 |
+| **unrelated** | **—** | **0** | 192 | 192 |
+| **not rearrangements** | **n/a** | **0** | — | — |
+
+**right 5/5, flattered 0, buried 0.** Nothing anywhere says *stride* or *offset* or *rotation*. What
+comes back is `generator 1: (1, 2, 3, 4, 5, 6, 7, 0)`.
+
+### Declining is the harder half
+
+Three of the five families have nothing to find, and **a search that always produces generators
+would produce them for noise.** The first cost model did exactly that: three "generators" in eight
+unrelated permutations, at 184 bits against 192.
+
+The saving was an artefact, and the reason is worth keeping: **generators are drawn from the
+observed transformations**, so choosing any three writes three out in full and leaves five to be
+reached — which looks like compression whatever the five turn out to be. A description must now
+explain **everything** and save more than one member is worth. That margin is not a tuned constant:
+a description saving less than one transformation written longhand has found a rounding, not a
+structure.
+
+### The probe's basis was where the thing it looked for did not show
+
+The exam's last family is built of transformations that are *not* rearrangements — they add,
+average, square. All four should be undescribable this way. One was not: **`x²` read as the
+identity**, because the probe marked positions with a one, and `0² = 0`, `1² = 1`.
+
+The mark is now 3.0, and a test reconstructs the old probe to assert it really did read squaring as
+doing nothing. That is the V.89 lesson at a new level: a probe's resolution is a property of the
+probe, and this one's blind spot was sitting exactly on the fixture.
+
+### What this is and is not
+
+It is candidate generation whose origin is the data. It is **not** representation invention: the
+things it composes are the observations, and the composition operator — apply one, then the other —
+is supplied. A family with structure that needs more than composition to see would come back empty
+here, and `swaps of neighbours` is that case sitting in the exam, reported as found-nothing rather
+than explained away.
+
+The three pieces now stand together: V.92 says what a representation costs, V.93 says the
+laboratory did not edit itself while measuring, and V.94 says where a candidate came from.
+**Level 7 stays unclaimed.**

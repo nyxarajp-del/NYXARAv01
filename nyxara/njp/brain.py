@@ -2846,6 +2846,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_generator_school(self) -> Any:
+        """Sit the audit that asks where the candidates come from at all.
+
+        Every version from V.89 to V.92 was handed the thing it was meant to be clever about — nine
+        laws, seven moves, a substrate, a list of vocabularies. Here the input is behaviour only,
+        and what comes back is a subset of the observations themselves: the few things everything
+        else is a composition of. ``flattered`` is the number, and three of the five families have
+        nothing to find.
+        """
+        try:
+            from nyxara.njp.generatorschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def are_the_instruments_untouched(self, touching: Any = ()) -> Any:
         """Fingerprint the organs, so an experiment cannot quietly edit what measures it.
 

@@ -503,6 +503,15 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.94. `Description` is free, `Recipe` is free; `describe` is far too general to take bare and
+# `Observed` is a type alias rather than a class, so it stays inside its module.
+from nyxara.njp.generators import (
+    Description,
+    Recipe,
+    describe as describe_transformations,
+    longhand,
+    watch_behaviour,
+)
 # V.93. `Fingerprint` is free; `claim`, `watch` and `compare` are all far too general to take bare,
 # and `compare` is `njp.worth`'s already under a qualified name.
 from nyxara.njp.integrity import (
@@ -893,6 +902,7 @@ __all__ = [
     "CandidateLaw", "RowMove", "Split", "rules", "holds", "differ", "discover_laws",
     "Vocabulary", "Weighed", "compare_vocabularies", "weigh_vocabulary",
     "Fingerprint", "Occupied", "Disturbed", "fingerprint", "claim_path", "watch_instruments",
+    "Description", "Recipe", "describe_transformations", "watch_behaviour", "longhand",
     "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
