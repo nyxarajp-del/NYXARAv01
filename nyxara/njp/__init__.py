@@ -503,6 +503,17 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.88. `Stencil` and `response` are free; `Verdict` is `njp.truth`'s and `njp.attribution`'s
+# already, so this one is qualified. `judge` is far too general to take bare.
+from nyxara.njp.closure import (
+    Stencil,
+    Verdict as ClosureVerdict,
+    difference,
+    in_span,
+    judge as judge_primitive,
+    obeys_superposition,
+    response,
+)
 # V.87. `Measurement` is already taken — `njp.metrology` has one, which is a reading with a unit,
 # not a recipe for producing one — so the newcomer is qualified, and `Register` and `Trace` are
 # qualified with it so the trio reads as one thing rather than one general case and two specifics.
@@ -825,6 +836,8 @@ __all__ = [
     "Trait", "CausalCandidate", "CausalEvidence", "LADDER",
     "sift", "uncontrolled", "put_to_the_test",
     "RawTrace", "InventedMeasurement", "MeasurementRegister", "mine", "criticise", "admit",
+    "Stencil", "ClosureVerdict", "difference", "in_span", "judge_primitive",
+    "obeys_superposition", "response",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

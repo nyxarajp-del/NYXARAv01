@@ -2831,6 +2831,31 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def is_this_primitive_new(self, taps: Any) -> Any:
+        """Decide whether a candidate primitive could be a discovery — before looking at any data.
+
+        Returns the identity when it could not. Every linear stencil's energy response is a
+        combination of iterated differences, so ``(1, 0, -1)`` — the stride-two difference, which
+        looks like something new — is ``4·d − d∘d`` exactly. A search with no algebra rediscovers
+        that under a fresh name and reports it as an invention.
+        """
+        try:
+            from nyxara.njp.closure import judge
+
+            return judge(taps).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_closure_school(self) -> Any:
+        """Sit the not-new audit. ``flattered`` is the number: things the algebra already owns,
+        reported as discoveries."""
+        try:
+            from nyxara.njp.closureschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_measurement_genesis_school(self) -> Any:
         """Sit the invented-measurement audit: can it build a quantity nobody named?
 

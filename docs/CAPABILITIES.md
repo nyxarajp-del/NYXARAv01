@@ -6863,3 +6863,87 @@ composition and the selection among 414 of them is not supplied, and the winner 
 normalisation step that no single listed operator contained. But it is not nothing, and calling this
 Level 7 outright would be the promotion V.86 was built to refuse. **Inventing the primitives
 themselves is the next debt**, not a thing already paid.
+
+---
+
+## V.88 — proving a new primitive is not new
+
+V.87 ended owing one thing: it composed measurements from four **supplied** primitives, so
+inventing the primitives themselves was next. This version went to build that and came back with a
+proof that most of it is impossible — which is a better outcome than the organ would have been.
+
+### The obstruction
+
+A linear primitive over a row of readings is a **stencil**, a short vector of coefficients slid
+along. `d` is `(-1, 1)`. Curvature is `(1, -2, 1)`. The stride-two difference — which skips a
+neighbour and looks like something genuinely outside anything V.87 held — is `(1, 0, -1)`.
+
+It is not outside anything:
+
+> **|H₍₁,₀,₋₁₎(f)|² = 4·|H_d(f)|² − |H_{d∘d}(f)|²**, identically, at every frequency.
+
+And that is not a fact about one stencil. The energy response of a length-*m* stencil is a
+polynomial of degree *m−1* in cos 2πf; the iterated differences *dᵏ* give (2 − 2cos 2πf)ᵏ, which
+span that space **exactly**. So:
+
+**Every linear primitive, measured by how much energy it passes, is a linear combination of
+iterated differences. There is nothing to discover there.**
+
+Verified at 1e-11 or better on random stencils of length two to five.
+
+| primitive | what it actually is |
+|---|---|
+| the difference | `+1·d` |
+| the difference twice | `+1·d∘d` |
+| a two-tap average | `+4·1 −1·d` |
+| **a three-tap average** | **`+9·1 −6·d +1·d∘d`** |
+| **the stride-two difference** | **`+4·d −1·d∘d`** |
+
+Smoothing felt like it had to be outside the closure. It is `9 − 6d + d∘d`.
+
+### Two fixtures died before the proof arrived, and both taught it
+
+**The first** tried to build a world whose groups matched on variance, `d` and `d∘d` while
+differing in stride-two energy. The linear algebra returned a direction that moved **nothing at
+all** — because the identity above makes that world impossible, and I had not yet worked out why.
+
+**The second** matched the two groups' power spectra exactly, so no linear filter could see a
+difference, then rescaled each item to a common range to match the order statistics too. The
+rescaling divides each item by its own peak-to-trough — a per-item number that differs
+systematically between the groups — undoing the spectral match it was there to protect.
+`spread(d(d(x)))` read **1.93** on it.
+
+Both point the same way. V.87's composed vocabulary is far more complete than *four primitives*
+sounds: iterated differences span the whole linear-energy family, and `max`, `min`, `range` cover
+the whole-sequence order statistics.
+
+### What ships
+
+`njp/closure.py` turns the proof into a **gate that runs before any world is consulted**. V.87's
+`SAME` check catches duplicates one world at a time, empirically, after the search. This decides a
+whole family at once and returns the identity rather than a correlation.
+
+And it says where a real primitive would have to live. `obeys_superposition` tests linearity **by
+counterexample, not by name** — and `closureschool` recovers a primitive's taps by feeding it
+impulses, because a primitive does not get to say what it is.
+
+| candidate | want | got |
+|---|---|---|
+| the stride-two difference | redundant | redundant |
+| a three-tap average | redundant | redundant |
+| a weighted window (a callable) | redundant | redundant |
+| a sliding median | nonlinear | nonlinear |
+| a sliding largest | nonlinear | nonlinear |
+| a sliding gap | nonlinear | nonlinear |
+
+**right 6/6, flattered 0, buried 0.** `flattered` is the number that matters: a candidate the
+algebra already contains, reported as a discovery. That is what a search with no algebra does
+silently, every time it rediscovers `4d − d∘d` under a fresh name. A test makes `new` return `True`
+for everything and asserts the exam catches it.
+
+### What this does not claim
+
+It does not claim primitives cannot be invented. It claims the **linear** ones cannot, proves it,
+and narrows where to look: anything that sorts or compares is outside the algebra entirely.
+Building a search over *that* family — and a world it can be tested on, which the two failures
+above show is harder than it sounds — is still owed. **Level 7 stays unclaimed.**
