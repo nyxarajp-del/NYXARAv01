@@ -2831,6 +2831,20 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_latent_school(self) -> Any:
+        """Sit the latent-variable audit: does it tell a cause from a thing that travels with one?
+
+        ``invented`` is the number. The world is built so the *consequence* of the failure
+        separates the groups **better** than the cause does — 2.087 against 1.740 — so a module
+        that reports the strongest correlation scores four of four and is wrong three times.
+        """
+        try:
+            from nyxara.njp.latentschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_interaction_school(self) -> Any:
         """Sit the interaction audit: does it find the pair, or find a pair in everything?
 

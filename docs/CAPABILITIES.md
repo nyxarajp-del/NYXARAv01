@@ -6693,3 +6693,76 @@ And `search` is exhaustive, not guided — stated in the module rather than hidd
 interventions the pairs are ten and exhaustive is simply correct. An ordering heuristic validated on
 nothing is the fake signal V.84's exam caught in its first minute; the honest place for one is a
 version that can test whether it beats exhaustive where exhaustive is still affordable.
+
+---
+
+## V.86 — what varies that nobody is varying
+
+V.85 can answer *do two known interventions interact*. Neither it nor anything above it can answer
+the question underneath: **what should count as a possible intervention in the first place?**
+
+Every version from V.83 to V.85 carried one assumption without once testing it — that the right
+causal variables are already in the vocabulary. Nine single-variable experiments and a pairwise
+search all drew from a list somebody wrote down. If the cause is not on that list, the whole
+apparatus is a very careful way of not finding it.
+
+So `njp/latent.py` looks in the gap between **what varies naturally** and **what the experimenter
+manipulates**. Items differ in many ways nobody chose; a trait that varies there and that no
+intervention touches is where an unlisted cause has to be if it is anywhere.
+
+### And finding one there proves almost nothing
+
+That is the other half, and the larger half. A trait that separates failures from successes is
+**observational** evidence and nothing more:
+
+| what it might be | what settles it |
+|---|---|
+| a confound | something else moves both; `do(Z)` alone changes nothing |
+| a consequence | the failure produced *it*; `do(Z)` changes nothing either |
+| a coincidence | a permutation null it does not clear |
+
+So `Evidence` is a **type on a ladder** — observational → interventional → interaction →
+mechanistic → engineering → transfer — and `Candidate.claims(kind)` refuses any rung nothing
+licensed. `causal` is never true on observational evidence, however large the separation.
+
+Quietly promoting *Z predicts failure* into *Z causes failure* is the cheapest way a system that
+improves itself comes to believe something false — cheaper than a bad experiment, because it costs
+nothing and leaves no trace.
+
+### The exam: one cause and three impostors that predict it just as well
+
+| trait | truth | got | separates | survives `do()` |
+|---|---|---|---|---|
+| `weight` | the cause | **causes** | 1.7401 | ✅ −0.3567 |
+| `shadow` | a confound | predicts | 1.7394 | ❌ +0.0000 |
+| **`scar`** | **a consequence** | predicts | **2.0870** | ❌ +0.0000 |
+| `twin` | drags the cause | **refused** | 1.7380 | — identifies nothing |
+| `dust` | noise | nothing | 0.0571 | refused by the null |
+| `paint` | constant | nothing | 0.0000 | refused before any test |
+
+**right 6/6, predicted 3, causes 1, invented 0, missed 0.**
+
+The consequence separates the groups **better than the cause does**. That is the fixture's reason
+for existing: a module that reports the strongest correlation scores four of four and is wrong
+three times, and there is a test that makes `causal` mean `observational` and asserts the exam
+catches it.
+
+Two gates fire before any of that. **A constant cannot be a cause** — refused before it is tested,
+not after, because putting it through a null invites a coincidence to speak for it. And **a trait
+already on the shelf is not a discovery** — `size` is real and varying and manipulated by something
+already there, so `uncontrolled` leaves it out. Otherwise the module scores well by listing its own
+inputs back.
+
+### A limitation, stated rather than discovered later
+
+`put_to_the_test` refuses an intervention that disturbs another trait — and it **cannot tell
+*moved something downstream of this trait* from *moved something that moves this trait back***. The
+first is a causal chain behaving exactly as a cause does. So on a world where lightening an item
+also recomputes the shadow it casts, **this refuses the real cause**.
+
+That is a wrong answer of a known shape, and it is pinned by a test that asserts the wrong answer
+rather than left to be found later. The honest fix is a supplied ordering over the traits — domain
+knowledge, like every other input here — not a cleverer statistic.
+
+Matching traits to interventions is by name, too: two names for one knob will be missed, and there
+is a test pinning that as well.

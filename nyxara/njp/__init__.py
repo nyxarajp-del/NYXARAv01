@@ -503,6 +503,19 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.86. `Candidate` is `njp.evolution`'s — a candidate *rewrite* — and `Standing` is
+# `njp.discourse`'s, where it is how one speaker stands to another. Both are qualified. `Trait`,
+# `sift` and `uncontrolled` are free, and `sift` is kept bare because nothing else in this
+# namespace sifts anything.
+from nyxara.njp.latent import (
+    LADDER,
+    Candidate as CausalCandidate,
+    Standing as CausalEvidence,
+    Trait,
+    put_to_the_test,
+    sift,
+    uncontrolled,
+)
 # V.85. `Interaction` is free and `Reading` is not — `njp.finding` has a Reading, which is a
 # passage and a question, and nothing like one run's per-item scores. `search` and `compose` are
 # both far too general to take bare.
@@ -798,6 +811,8 @@ __all__ = [
     "survey", "gaps", "propose",
     "Interaction", "PerItemReading", "interaction", "mechanisms",
     "search_interactions", "compose_interventions",
+    "Trait", "CausalCandidate", "CausalEvidence", "LADDER",
+    "sift", "uncontrolled", "put_to_the_test",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
