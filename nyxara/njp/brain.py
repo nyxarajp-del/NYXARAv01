@@ -2787,6 +2787,19 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_fusion_school(self, pairs: int = 60) -> Any:
+        """Sit the analogy audit: shapes that are there, and shapes that are not.
+
+        Two figures and neither means much alone. A finder that claims an analogy between every
+        pair of domains has told nobody anything, and one that claims none has only refused.
+        """
+        try:
+            from nyxara.njp.fusionschool import examine
+
+            return examine(pairs).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
     def how_far_it_reaches(self, make: Any, dial: Any, *, called: str = "") -> Any:
         """Measure a capability across a difficulty dial and say where it stops.
 

@@ -6047,3 +6047,65 @@ The first hypothesis five times likelier than the second, from nothing but the o
 that added them — in a module whose whole business is Bayesian updating. Nobody saw it because
 nothing ever read the priors back. Normalising once at the point of use leaves `propose` storing
 the weight it was handed and the distribution correct however the hypotheses arrived.
+
+---
+
+## V.80 — the analogy finder had never been shown two domains with nothing in common
+
+Phase 2's remaining piece was Invariant Discovery, and it turned out to be built already:
+`njp/fusion.py` finds the same structure in two subjects that never met — V.40, exact isomorphism,
+a minimum edge count, a bounded radius. Algorithm Discovery is built too, in `njp/coding.py`, and
+`school.py` already decides it on held-out pairs: *"passing the shown examples is not passing."*
+
+So the work was not to build a third one. `fusion.py` names its own danger exactly — *"matching on
+four of five edges is exactly the false analogy that makes this kind of system"* worthless — and
+guards against it with three mechanisms, **every one of which is an argument**. `MIN_EDGES = 3` is
+justified by "below this an isomorphism is arithmetic rather than a finding", which is true and is
+not a measurement. Nothing had ever shown it two domains with no relationship.
+
+### The negative control was nearly softer than the finding
+
+The first version drew unrelated domains from all nine structural relations at random, which makes
+a labelled isomorphism between two random graphs almost impossible — and reported a false-alarm
+rate of **0.000 at every bar**. A flawless number produced by a control strictly easier to reject
+than the positive was to accept. The control now uses one relation, the same size and the same
+density as the planted pairs; the only thing it lacks is the shared structure being tested for.
+
+### What that found
+
+| nodes | edges | claims an analogy between unrelated domains |
+|---|---|---|
+| 8 | 10 | 0.000 |
+| 5 | 8 | 0.000 |
+| 4 | 6 | 0.013 |
+| 4 | 10 | **0.212** |
+| 3 | 4 | **0.212** |
+
+**On small dense domains it invents an analogy a fifth of the time.** The isomorphism is genuine —
+there are very few distinct graphs on three nodes, so two unrelated ones often really are the same
+shape. What is false is calling that an analogy: nothing has been discovered about either subject,
+only about how few ways three nodes can be joined.
+
+`MIN_EDGES` cannot close it. Raising it past four rejects the four-edge feedback loop the module
+exists to find — measured: at a bar of six, recall is **0.000**. The problem is not that the shape
+is small, it is that a shape that size is **unsurprising**.
+
+### The guard: compare the shape against chance, like everything else here
+
+`Fusion.surprise` draws graphs of the same order and density, matches them, and reports how often
+they agree. Above `LUCK = 0.10` the match carries no information and the analogy is refused. It is
+the shuffled null of V.74 applied to structure instead of to labels.
+
+| nodes | edges | guard off | guard on | recall |
+|---|---|---|---|---|
+| 8 | 10 | 0.000 | 0.000 | 1.000 |
+| 4 | 6 | 0.013 | 0.000 | 1.000 |
+| 4 | 10 | 0.212 | **0.000** | 1.000 |
+| 3 | 4 | 0.212 | **0.000** | 1.000 |
+
+**Recall untouched at 1.000, the invented end cut away.** The guard is off at `luck=0.0`, so the
+ablation runs both ways — a guard has to be shown to matter by being taken away.
+
+And the bar that was argued is now measured: swept from one to six, `MIN_EDGES = 3` is where recall
+is still 1.000 and false alarms are 0.000. The reasoning behind it was right, and now there is a
+table under it instead of a sentence.

@@ -61,12 +61,13 @@ Pure standard library, deterministic.
 from __future__ import annotations
 
 import itertools
+import random
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["Pattern", "Analogy", "Abstraction", "Fusion", "MIN_EDGES", "MAX_RADIUS",
-           "STRUCTURAL"]
+           "STRUCTURAL", "DRAWS", "LUCK"]
 
 #: Below this an isomorphism is arithmetic rather than a finding: every one-edge subgraph matches
 #: every other.
@@ -81,11 +82,38 @@ MIN_EDGES = 3
 #: its longest cycle, and the cycles worth finding here are three and four long.
 MAX_RADIUS = 3
 
+#: How many random pairs :meth:`Fusion.surprise` draws. Enough that a chance-match rate near the
+#: `LUCK` bar is distinguishable from one well under it.
+DRAWS = 40
+
+#: How often two random graphs of a shape may match before a match of that shape stops counting as
+#: a finding. At zero the guard is off, which is how the ablation is run.
+LUCK = 0.10
+
+
 #: The relations a shape is built from. Deliberately the *functional* ones — what acts on what —
 #: rather than ``is_a``, which would match every taxonomy to every other taxonomy and report the
 #: fact that both files have hierarchies as an insight.
 STRUCTURAL: Tuple[str, ...] = ("causes", "requires", "purpose", "produces", "has_part",
                                "consists_of", "increases", "decreases", "occurs_when")
+
+
+def _scribble(rng: random.Random, order: int, size: int, tag: str) -> "Pattern":
+    """A random graph of a given order and size, as a :class:`Pattern`.
+
+    One relation throughout, because the shapes being guarded against are the ones that match, and
+    a control drawn from nine relations at random can barely match anything — which is exactly the
+    softer floor this guard was almost measured against.
+    """
+    names = tuple(f"{tag}{i}" for i in range(order))
+    edges: Set[Tuple[str, str, str]] = set()
+    guard = 0
+    while len(edges) < size and guard < size * 40:
+        guard += 1
+        a, b = rng.choice(names), rng.choice(names)
+        if a != b:
+            edges.add((a, STRUCTURAL[0], b))
+    return Pattern(seed=names[0], nodes=names, edges=frozenset(edges), domain=tag)
 
 
 # --------------------------------------------------------------------------- #
@@ -276,7 +304,53 @@ class Fusion:
         got = Analogy(left=left, right=right, mapping=mapping)
         return got if got.exact else None
 
-    def analogies(self, seeds: Dict[str, Sequence[str]]) -> List[Analogy]:
+    def surprise(self, left: Pattern, right: Pattern, *, draws: int = DRAWS,
+                 seed: int = 0) -> float:
+        """How often two *random* graphs of these shapes match. The share that means nothing.
+
+        Exact isomorphism is a strong guard and it is not enough on its own, because on a small
+        dense graph there are very few distinct shapes and two unrelated ones are often genuinely
+        isomorphic. The match is then real and the *analogy* is not: nothing has been discovered
+        about either subject, only about how few ways three nodes can be joined.
+
+        Measured, before this existed — pairs of independently generated domains, and how often an
+        analogy was claimed between them:
+
+            8 nodes, 10 edges    0.007
+            5 nodes,  8 edges    0.000
+            4 nodes,  6 edges    0.027
+            3 nodes,  4 edges    **0.213**
+            4 nodes, 10 edges    **0.227**
+
+        A fifth of the time on the small dense end. :data:`MIN_EDGES` cannot close that — raising it
+        past four would reject the four-edge feedback loop this module exists to find — because the
+        problem is not that the shape is small, it is that a shape that size is **unsurprising**.
+
+        So the shape is compared against chance the way a score is compared against a floor
+        everywhere else in this package: draw graphs of the same order and density, match them, and
+        report how often they agree. With this in front of it, on the same pairs:
+
+            planted analogies       1.000 claimed → 1.000 kept
+            3 nodes, 4 edges        0.213 claimed → 0.027 kept
+            4 nodes, 10 edges       0.227 claimed → 0.000 kept
+            8 nodes, 10 edges       0.007 claimed → 0.007 kept
+
+        Recall untouched, and the invented end cut away.
+        """
+        order = max(len(left.nodes), len(right.nodes))
+        size = max(len(left.edges), len(right.edges))
+        if order < 2 or size < 1:
+            return 0.0
+        rng = random.Random(seed or (order * 31 + size))
+        hits = 0
+        for _ in range(max(1, draws)):
+            if self.match(_scribble(rng, order, size, "p"),
+                          _scribble(rng, order, size, "q")) is not None:
+                hits += 1
+        return round(hits / max(1, draws), 4)
+
+    def analogies(self, seeds: Dict[str, Sequence[str]],
+                  *, luck: float = LUCK) -> List[Analogy]:
         """Every exact cross-domain analogy among these seeds. ``{domain: [seed]}``."""
         patterns: List[Pattern] = []
         for domain, names in seeds.items():
@@ -293,8 +367,13 @@ class Fusion:
                 if left.domain and left.domain == right.domain:
                     continue        # a duplicate, not an analogy
                 got = self.match(left, right)
-                if got is not None:
-                    found.append(got)
+                if got is None:
+                    continue
+                # A match two random graphs of this shape would also make is not a finding. See
+                # :meth:`surprise` — the same discipline as comparing a score to its floor.
+                if luck > 0.0 and self.surprise(left, right) > luck:
+                    continue
+                found.append(got)
         return sorted(found, key=lambda a: (-a.size, a.left.seed, a.right.seed))
 
     def abstract(self, seeds: Dict[str, Sequence[str]]) -> List[Abstraction]:
