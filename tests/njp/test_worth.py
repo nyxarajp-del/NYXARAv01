@@ -124,3 +124,60 @@ def test_the_scale_passes_its_retrodiction():
     assert got["winner"] not in (got["biggest"], got["smallest"])
     assert got["rows"][0]["complete"]
     assert got["passes"]
+
+
+# --------------------------------------------------------------------------------------------- #
+#  V.93 — narrowing to the pairs the vocabularies disagree about
+# --------------------------------------------------------------------------------------------- #
+def test_contested_pairs_are_where_the_vocabularies_disagree():
+    """Every other pair is wasted measurement: one nothing explains distinguishes nothing, and
+    one everything explains distinguishes nothing either."""
+    from nyxara.njp.worth import contested
+
+    seen, held = hard_pairs()
+    sharp = contested(held, VOCABULARIES)
+    assert 0 < len(sharp) < len(held)
+    for one, two in sharp:
+        verdicts = {separates(one, two, v) for v in VOCABULARIES}
+        assert verdicts == {True, False}
+
+
+def test_the_adversarial_set_strips_the_flattery_from_the_useless_vocabulary():
+    """`one move` looked like it explained 41 of 105. On the contested pairs it explains none.
+
+    That is the whole reason for narrowing: the easy pairs were carrying it, and an average over
+    them rewards a vocabulary that has never distinguished anything hard.
+    """
+    plain = {w.vocabulary.name: w for w in compare()}
+    sharp = {w.vocabulary.name: w for w in compare(adversarial=True)}
+    assert plain["one move"].worth > 0
+    assert sharp["one move"].worth == 0
+    assert sharp["one move"].value == 0.0
+
+
+def test_narrowing_does_not_change_who_wins():
+    """Reported because it is what happened, not because it was the hoped-for result."""
+    assert compare()[0].vocabulary.name == compare(adversarial=True)[0].vocabulary.name
+    assert compare(adversarial=True)[0].vocabulary.name == "slides only"
+
+
+def test_the_boundary_is_found_on_one_half_and_measured_on_the_other():
+    """Or the narrowing could be tuned into the answer."""
+    from nyxara.njp.worth import contested
+
+    seen, held = hard_pairs()
+    assert not (set(seen) & set(held))
+    assert contested(seen, VOCABULARIES), "the half that is looked at has a boundary in it"
+    sharp = compare(adversarial=True)
+    assert all(w.of < len(held) for w in sharp), "and the measurement was taken on fewer"
+
+
+def test_every_vocabulary_that_was_complete_stays_complete_on_the_hard_set():
+    """Narrowing must not manufacture a failure for something that really does explain everything."""
+    for before, after in zip(compare(), compare(adversarial=True)):
+        pass
+    plain = {w.vocabulary.name: w.complete for w in compare()}
+    sharp = {w.vocabulary.name: w.complete for w in compare(adversarial=True)}
+    for name, was in plain.items():
+        if was:
+            assert sharp[name], f"{name} explained everything and now does not"

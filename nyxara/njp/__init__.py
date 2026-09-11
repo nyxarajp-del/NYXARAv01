@@ -503,6 +503,16 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.93. `Fingerprint` is free; `claim`, `watch` and `compare` are all far too general to take bare,
+# and `compare` is `njp.worth`'s already under a qualified name.
+from nyxara.njp.integrity import (
+    Disturbed,
+    Fingerprint,
+    Occupied,
+    claim as claim_path,
+    fingerprint,
+    watch as watch_instruments,
+)
 # V.92. `Vocabulary` is free and `Weighed` is free; `compare` and `weigh` are far too general to
 # take bare, and `separates` would read as the general case of something specific.
 from nyxara.njp.worth import (
@@ -882,6 +892,7 @@ __all__ = [
     "StructuralLaw", "LawFinding", "ProbeReading", "Family", "probe", "partition",
     "CandidateLaw", "RowMove", "Split", "rules", "holds", "differ", "discover_laws",
     "Vocabulary", "Weighed", "compare_vocabularies", "weigh_vocabulary",
+    "Fingerprint", "Occupied", "Disturbed", "fingerprint", "claim_path", "watch_instruments",
     "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",

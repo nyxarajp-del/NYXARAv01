@@ -2846,6 +2846,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def are_the_instruments_untouched(self, touching: Any = ()) -> Any:
+        """Fingerprint the organs, so an experiment cannot quietly edit what measures it.
+
+        Twice this package destroyed a working module by writing a new one over it, and neither
+        was caught by a test — the tests that would have caught them belonged to the module that
+        had just been deleted. Returns the fingerprint; :func:`nyxara.njp.integrity.watch` is the
+        guard that uses it, and :func:`nyxara.njp.integrity.claim` is the one-second check that
+        would have prevented both.
+        """
+        try:
+            from nyxara.njp.integrity import fingerprint
+
+            return fingerprint().to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
     def which_vocabulary_is_worth_it(self) -> Any:
         """Weigh vocabularies by what they cost and what they buy, on pairs they never saw.
 

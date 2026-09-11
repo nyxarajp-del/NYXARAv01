@@ -7271,3 +7271,67 @@ V.58's `tasks.py`, four months of versions later. Restored from git, verified by
 No substrate is invented here. What is built is the scale a claim to have invented a better one
 would have to be weighed on. **Level 7 stays unclaimed** — but "a better substrate" is now a
 number, and the first number it produced was against me.
+
+---
+
+## V.93 — an experiment may not quietly edit the instruments
+
+### The one-second check, made automatic
+
+Twice this package destroyed a working module by writing a new one over it. V.58 took
+`njp/tasks.py`, a coding-task bank eight call sites depended on. V.92 took `njp/economy.py`, a
+cognitive budget organ — **while building the module that measures whether a vocabulary is honest.**
+
+Neither was caught by a test, and the reason is worth stating: *the tests that would have caught
+them belonged to the module that had just been deleted.* A green suite proves nothing about a file
+that no longer exists to be tested.
+
+`njp/integrity.py` stops it being something to remember:
+
+| | |
+|---|---|
+| `claim(path)` | refuses a path something already answers to — the **pre**-condition, and the one that matters, because by the time a fingerprint notices, only version control knows what was there |
+| `claim(path, rewriting=True)` | how a caller says replacing it is what it means — the dangerous case becomes something somebody typed |
+| `watch(roots, touching=[...])` | fingerprints the organs, runs the experiment, fingerprints again, and raises on any **undeclared** edit |
+
+```
+>>> claim("nyxara/njp/economy.py")
+Occupied: nyxara/njp/economy.py already exists (12023 bytes). Pass rewriting=True if
+replacing it is what you mean, or pick a name nothing answers to.
+```
+
+Both historical paths are pinned by tests. **155 instrument files fingerprint in well under a
+second.**
+
+It does not forbid change — every version here changes files and must. It forbids **undeclared**
+change, and the asymmetry is deliberate: a new file harms nothing, an edited or removed one is an
+instrument that moved while it was being used. A run that mutates the thing measuring it can
+produce any result at all and look calm doing it.
+
+That is the same sentence this package has now written at five levels: a spoiled experiment (V.83),
+a leaky apparatus (V.85), a control shaped like its target (V.85), a ratio that rewards uselessness
+(V.92), and now a scientist editing the laboratory.
+
+### And the benchmark saturation, narrowed
+
+V.92 found five of six vocabularies explaining every randomly drawn pair — the measure saturates
+and would certify anything. `contested()` keeps only the pairs the vocabularies **disagree** about:
+one that nothing explains distinguishes nothing, and one that everything explains distinguishes
+nothing either.
+
+The boundary is found on the half that is looked at and the measurement is taken on the half that
+is not, or the narrowing could be tuned into the answer.
+
+| | all 105 hard pairs | 64 contested |
+|---|---|---|
+| **slides only** | 105/105, **3.8 bits** | 64/64, **3.8 bits** |
+| V.91's substrate | 105/105, 9.0 bits | 64/64, 9.0 bits |
+| the supplied seven | 96/105, 64.0 bits | 55/64, 57.6 bits |
+| **one move** | **41/105** | **0/64** |
+
+**The winner does not change — and that is reported because it is what happened, not because it was
+hoped for.** What changes is the loser: `one move` looked like it explained 39% of pairs, and on the
+contested ones it explains **none**. The easy pairs were carrying it entirely.
+
+That is the argument for adversarial selection in one line: **an average over easy cases rewards a
+vocabulary that has never distinguished anything hard.**

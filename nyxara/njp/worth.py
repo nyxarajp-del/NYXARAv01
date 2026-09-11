@@ -51,8 +51,8 @@ import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-__all__ = ["Move", "Vocabulary", "Weighed", "VOCABULARIES", "hard_pairs", "separates", "weigh",
-           "compare", "by_hand", "WIDTH", "SEED"]
+__all__ = ["Move", "Vocabulary", "Weighed", "VOCABULARIES", "hard_pairs", "contested",
+           "separates", "weigh", "compare", "by_hand", "WIDTH", "SEED"]
 
 WIDTH = 7
 SEED = 92
@@ -145,6 +145,26 @@ def hard_pairs(rng: Optional[random.Random] = None) -> Tuple[List[Any], List[Any
     return every[:at], every[at:]
 
 
+def contested(pairs: Sequence[Any], vocabularies: Sequence["Vocabulary"] = ()) -> List[Any]:
+    """The pairs the vocabularies **disagree** about — some explain them and some do not.
+
+    Every other pair is wasted measurement. One nothing explains distinguishes nothing; one
+    everything explains distinguishes nothing either, and V.92 found five of six vocabularies
+    explaining every randomly drawn pair. What is left is the boundary, and a vocabulary's real
+    discriminating power only shows there.
+
+    Selecting on the vocabularies means these pairs are **seen**, so a held-out measurement has to
+    contest a *different* half — which is what :func:`hard_pairs` splits for.
+    """
+    pool = list(vocabularies) or list(VOCABULARIES)
+    out = []
+    for one, two in pairs:
+        verdicts = {separates(one, two, v) for v in pool}
+        if len(verdicts) > 1:
+            out.append((one, two))
+    return out
+
+
 def separates(one: Sequence[int], two: Sequence[int], vocabulary: Vocabulary) -> bool:
     """Can any law this vocabulary builds hold for one operation and not the other?
 
@@ -228,8 +248,19 @@ def weigh(vocabulary: Vocabulary, held: Sequence[Any], seen: Sequence[Any] = ())
 
 
 def compare(vocabularies: Sequence[Vocabulary] = VOCABULARIES,
-            rng: Optional[random.Random] = None) -> List[Weighed]:
-    """Weigh every vocabulary on the same held-out pairs, shortest whole description first."""
+            rng: Optional[random.Random] = None, *, adversarial: bool = False) -> List[Weighed]:
+    """Weigh every vocabulary on the same held-out pairs, shortest whole description first.
+
+    ``adversarial`` narrows the held-out set to the pairs the vocabularies **disagree** about,
+    chosen on the half that is looked at and then applied to the half that is not. That is the
+    honest version of "make the benchmark harder": the boundary is found on one sample and the
+    measurement is taken on another, so the narrowing cannot be tuned into the answer.
+    """
     seen, held = hard_pairs(rng)
+    if adversarial:
+        wanted = {frozenset((a, b)) for a, b in contested(seen, vocabularies)}
+        sharper = [(a, b) for a, b in held if frozenset((a, b)) in wanted] or contested(
+            held, vocabularies)
+        held = sharper or held
     return sorted((weigh(v, held, seen) for v in vocabularies),
                   key=lambda w: (w.total, w.cost))
