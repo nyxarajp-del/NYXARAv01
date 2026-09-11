@@ -278,3 +278,31 @@ def test_the_fallbacks_include_a_null(engine):
     assert _fallback("shortest", spans, rng).text == "x"
     assert _fallback("random", spans, rng) in spans
     assert all(_fallback(kind, [], rng) is None for kind in FALLBACKS)
+
+
+def test_the_boundary_share_is_read_off_the_breakdown_not_a_separate_run():
+    """`contains` and `inside` are both the span ending in the wrong place.
+
+    Pinned because the figure is *derived*: it comes from the same breakdown as the exact score, so
+    the two cannot drift apart the way two separate runs can. That drift is the defect V.82 found
+    in `ascent`, where a before and an after were drawn from different samples.
+    """
+    from nyxara.njp.fieldwork import MISSES, how_it_misses, overlapping
+
+    class _Fake:
+        pass
+
+    # exact, contains, inside, overlaps, elsewhere, silent
+    said = ["a", "x a y", "a", "a c", "zz", ""]
+    gold = ["a", "a", "a b", "a d", "qq", "a"]
+    from nyxara.njp.measurement import Benchmark
+
+    stage = Stage(name="t", bench=Benchmark(name="t", items=list(range(len(said))), gold=gold,
+                                            predict=lambda i: said[i]))
+    got = how_it_misses(stage)
+    assert [got[k] for k in MISSES] == [1, 1, 1, 1, 1, 1], got
+    exact = got["exact"] / got["of"]
+    loose = (got["exact"] + got["contains"] + got["inside"]) / got["of"]
+    assert loose > exact
+    # and the loose figure is exactly what the containment comparison would score
+    assert sum(1 for a, b in zip(said, gold) if overlapping(a, b)) / len(said) == loose

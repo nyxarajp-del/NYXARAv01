@@ -6560,3 +6560,53 @@ as passed* protects the reader. It does not protect the **caller**, who is the o
 supply what the check needed — and in both cases the caller was me.
 
 `spoke` is now supplied and the check runs.
+
+### V.84d — the silence is real, filling it is not the repair, and one thing finally moved
+
+On the 137 silent items the right answer **is** in the pool 0.8321 of the time. The headroom is
++0.456. Four fallbacks were tried, with `random` among them as the null:
+
+| fallback | scores | gains |
+|---|---|---|
+| silent (as it is) | 0.0320 | — |
+| first | 0.0400 | +0.0080 |
+| longest | 0.0400 | +0.0080 |
+| shortest | 0.0320 | +0.0000 |
+| **random** (the null) | 0.0360 | +0.0040 |
+
+The answer is there and nothing cheap finds it. Best gain **+0.0080**, under the bar. **Abstention
+is real and filling it is not the repair** — a third hypothesis of mine, refuted with a number.
+
+But the breakdown holds one thing that clears the bar, in the region the map named:
+
+| comparison | scores | moved |
+|---|---|---|
+| exact match (as shipped) | 0.0320 | — |
+| **containment** (`exact`+`contains`+`inside`) | **0.1040** | **+0.0720** |
+| any word shared | 0.1960 | +0.1640 |
+
+**+0.0720 against a bar of 0.03 — the first intervention in two versions to clear it in the right
+direction.** `contains` and `inside` are both the span ending in the wrong place, so roughly a
+tenth of the whole failure is about **where the span stops**, not which span was chosen.
+
+It is an instrument, not a repair: a reader that returns the enclosing clause has not answered the
+question, and `finding` should keep its exact match. What the instrument buys is a *specific*
+repair to go and build — span boundaries — instead of another sweep.
+
+### Where this leaves the organ, stated without rounding up
+
+| | |
+|---|---|
+| ceiling (gold in the pool) | 0.7000 |
+| scores | 0.0320 |
+| explained by boundaries | +0.0720 |
+| silent | 0.5480, with 0.8321 headroom nothing cheap reaches |
+| of the 113 it does answer, lands elsewhere | 0.5664 |
+
+**Most of a 0.668 gap is still unattributed.** Three of my own hypotheses are now individually
+refuted with numbers — pool size (+0.0120), abstention-fill (+0.0080), and V.83's data / algorithm
+/ readings — and the one region nobody had entered yielded the only positive finding in two
+versions, worth about a tenth of the gap.
+
+That is the honest ledger. The map was the right instrument and it did the thing it was built for;
+it did not produce an explanation, because there is not one here yet.
