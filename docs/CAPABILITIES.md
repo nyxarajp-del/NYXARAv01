@@ -5895,3 +5895,84 @@ Only the last is worth repairing and only the first was visible — which is exa
 went into the span stage's ranker. The walk reports where it stops rather than implying it reached
 bottom: a chain that ends because nobody recorded what was behind it looks identical to one that
 ends because nothing is.
+
+---
+
+## V.78 — how far does it reach, and where exactly does it stop
+
+A capability reported as one number is a capability nobody can act on. *Causal reasoning: 0.73* does
+not say whether the third it misses are the hard cases or scattered at random, and those need
+different work. What is wanted is where it **stops**:
+
+    one hop     0.99
+    two hops    0.96
+    three hops  0.89
+    four hops   0.64
+    five hops   0.31      <- it stops here
+
+That edge is the next thing to build, and it is a far more useful output than a percentage. But an
+edge is easy to invent, so most of `njp/reach.py` is the **four ways a ladder has no edge** and the
+refusal to report one anyway:
+
+| | what it means | why naming the top rung is wrong |
+|---|---|---|
+| **exhausted** | every rung held | no boundary *within what was tried* is not "no boundary" |
+| **barren** | no rung held | there is no capability here to bound |
+| **patchy** | holds at 3, fails at 2 | not a boundary at all; the dial or the measurement is wrong first |
+| **graceful** | fades with no single step falling away | there is an edge, but no *place* to attack |
+
+Every rung is measured against **its own floor**, because difficulty usually moves the floor too and
+0.88 on a rung whose majority answer is right 90% of the time is not competence. A rung whose score
+will not repeat does not count as held, for the same reason the forge's timing gate was not a gate.
+A rung measured on what it was taught does not count either.
+
+### Stopping and fading are different facts, and the first version lost one
+
+`graceful` was reported *instead of* the edge, which threw away the more useful of the two. A ladder
+that fades past its floor has a last rung that held like any other — what it lacks is a single
+setting where something breaks. So both are reported: the edge says how far it reaches, the cliff
+says whether there is anywhere in particular to attack.
+
+### The exam: five ladders, two edges
+
+    right 5 of 5   invented edges 0   missed 0
+
+**No invented edges** is a separate pass condition and the stricter one — a boundary reported where
+there is none becomes the next thing somebody builds. Three of the five fixtures are refusals, so
+an organ that always answers scores two in five.
+
+Two fixture bugs found on the way, both the same mistake as the organ's own: the fade was too gentle
+and still held at the last rung (so it was genuinely `exhausted`, the right answer for the wrong
+fixture); and the per-rung floors were redrawn each time, so they wandered by three points and
+turned one step of a gentle fade into 0.163 — a fade reported as a cliff because the *fixture* let
+two things vary at once.
+
+### What the edge is for
+
+    the_gap(ladder, make) → the first setting past the edge
+
+A failure picked at random is hard to diagnose because everything about it is a candidate. A failure
+**one rung past a setting that demonstrably works** has almost everything held constant by
+construction, and what differs is the dial. Composed with V.77, end to end:
+
+    capability across depth:
+      [ok] 1..4     ~0.92   floor 0.525   above +0.39
+      [  ] 5, 6     ~0.51   floor 0.525   at its floor
+      → it reaches 4 and falls away at 5 by 0.395
+
+    depth 5: scored 0.5225
+       !  algorithm   a different way of choosing: 0.5225 → 0.9400 (+0.4175) — this is a cause
+       → algorithm
+
+`reach` deliberately does **not** import `attribution`. It measures where a capability stops; what
+to do about that is the next organ's question, and one that reaches into the organ downstream of it
+cannot be used without it.
+
+### Phase 1 is complete
+
+    measurement   caught 4 of 4, false alarms 0 of 4
+    attribution   correct 8 of 8, wrong 0, distinct causes 7
+    reach         right 5 of 5, invented edges 0
+
+Three organs, each validated by retrodiction against cases whose answer is known, and each scored in
+**both** directions — finding what is there, and refusing to find what is not.

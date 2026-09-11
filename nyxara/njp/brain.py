@@ -2787,6 +2787,36 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def how_far_it_reaches(self, make: Any, dial: Any, *, called: str = "") -> Any:
+        """Measure a capability across a difficulty dial and say where it stops.
+
+        Returns the ladder, and the ladder is careful about the word *edge*: it reports one only
+        when competence runs unbroken up to it. Where it held nowhere, held everywhere, or held
+        above a setting it failed at, ``edge`` is ``None`` and the flag says which — because
+        "no boundary within what was tried" and "no boundary" are different claims, and one of them
+        is a capability nobody tested.
+        """
+        try:
+            from nyxara.njp.reach import climb
+
+            return climb(make, list(dial), called=called).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_reach_school(self) -> Any:
+        """Sit the reach exam: five ladders, only two of which have an edge to find.
+
+        The condition that matters is **no invented edges**, since a boundary reported where there
+        is none becomes the next thing somebody builds.
+        """
+        try:
+            from nyxara.njp.reachschool import examine
+
+            got = examine()
+            return {k: v for k, v in got.items() if k != "rows"}
+        except Exception:  # noqa: BLE001
+            return None
+
     def why_it_failed(self, failure: Any) -> Any:
         """Test every hypothesis this failure supplies the means to test, and name the rest.
 

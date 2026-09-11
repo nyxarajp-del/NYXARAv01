@@ -494,6 +494,9 @@ from nyxara.njp.shapes import (
 # a critique of a *measurement* — so the newcomer is qualified at the door rather than taking a
 # name something else already answers to. `Benchmark` and `Finding` are free but qualified with it,
 # because a half-qualified pair reads as though one of them were the general case.
+# V.78. All three names are free, and kept bare for once — nothing else in this namespace answers
+# to a rung of a difficulty ladder.
+from nyxara.njp.reach import Ladder, Rung, climb, the_gap
 # V.77. `Verdict` is `njp.truth`'s already — a verdict on a *claim*, not on a hypothesis about why
 # something failed — so the newcomers are qualified together rather than half of them taking bare
 # names while the other half does not.
@@ -743,6 +746,8 @@ __all__ = [
     # V.77 -- why it failed, tested rather than guessed. `Verdict` was the truth gauntlet's.
     "ObservedFailure", "FailureAttribution", "CauseVerdict", "attribute_failure",
     "failure_chain",
+    # V.78 -- how far a capability reaches, and the four ways it has no edge to report.
+    "Ladder", "Rung", "climb", "the_gap",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
