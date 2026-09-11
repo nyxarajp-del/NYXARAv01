@@ -503,6 +503,14 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.92. `Vocabulary` is free and `Weighed` is free; `compare` and `weigh` are far too general to
+# take bare, and `separates` would read as the general case of something specific.
+from nyxara.njp.worth import (
+    Vocabulary,
+    Weighed,
+    compare as compare_vocabularies,
+    weigh as weigh_vocabulary,
+)
 # V.91. `Shape` is `njp.shapes`' already — a task's template — so the move substrate's is
 # qualified. `reach` and `earns` are far too general to take bare.
 from nyxara.njp.substrate import (
@@ -873,6 +881,7 @@ __all__ = [
     "obeys_superposition", "response",
     "StructuralLaw", "LawFinding", "ProbeReading", "Family", "probe", "partition",
     "CandidateLaw", "RowMove", "Split", "rules", "holds", "differ", "discover_laws",
+    "Vocabulary", "Weighed", "compare_vocabularies", "weigh_vocabulary",
     "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",

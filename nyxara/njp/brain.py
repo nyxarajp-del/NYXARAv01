@@ -2846,6 +2846,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def which_vocabulary_is_worth_it(self) -> Any:
+        """Weigh vocabularies by what they cost and what they buy, on pairs they never saw.
+
+        The scale a claim to have invented a better representation would have to be weighed on —
+        and the first thing it weighed was this repository's own V.91 substrate, which lost to
+        seven plain slides by more than half the bits. Ranked on the **whole** description: the
+        vocabulary plus everything it fails to explain, because worth-per-bit alone prefers a
+        vocabulary that explains almost nothing and costs almost nothing.
+        """
+        try:
+            from nyxara.njp.worthschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_law_school(self) -> Any:
         """Sit the law-discovery audit: did a generated law separate what the supplied ones merged?
 

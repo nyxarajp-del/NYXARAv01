@@ -7195,3 +7195,79 @@ A generated move was load-bearing, and the region where generation is worth anyt
 number (33 of 49) rather than a feeling. But the substrate's *shape* — an index affine and a value
 affine, three scales, two lifts — is still chosen by hand. It is a far weaker thing to be given
 than seven named moves, and it is not nothing. **Level 7 stays unclaimed.**
+
+---
+
+## V.92 — what a vocabulary costs and what it buys
+
+V.91 ended owing the substrate itself. The obvious next version invents one — and it cannot
+honestly be written yet, because **"a better substrate" was not a claim anything could check.**
+
+There is also a specific danger, which is why this comes first: a search told to invent a
+representation will invent an enormous one. Everything becomes expressible, coverage looks perfect,
+and nothing has been learned. Guarding against that needs a number, and the number is not coverage:
+
+> **the whole thing, in bits** — what the vocabulary costs to write down, *plus* what is left
+> over, because every pair it cannot explain has to be described some other way, and that costs too.
+
+### The scale's first use demotes this repository's own work
+
+| | moves | bits | worth | **whole** | per bit |
+|---|---|---|---|---|---|
+| **slides only** | **7** | 3.81 | 105/105 | **3.8** | 27.6 |
+| slides and signs | 14 | 4.81 | 105/105 | 4.8 | 21.8 |
+| every regrouping | 84 | 7.39 | 105/105 | 7.4 | 14.2 |
+| **V.91's substrate** | **252** | 8.98 | 105/105 | **9.0** | 11.7 |
+| the supplied seven | 6 | 3.58 | 96/105 | 64.0 | 26.8 |
+| one move | 1 | 1.00 | 41/105 | 430.7 | 41.0 |
+
+**Seven plain slides describe the whole held-out set in 3.8 bits where V.91's 252-move substrate
+needs 9.0.** The stride and scale dimensions cost five extra bits and buy nothing here.
+
+That refines V.91 rather than contradicting it. V.91 concluded `scale = −1` was load-bearing, and
+it was — *given the supplied seven*, whose offsets are `{0,1,2,6}` and which spend three of their
+slots on moves all sitting at offset zero. **The cheap repair was never a new dimension. It was
+spending those slots on offsets three, four and five.**
+
+### My first measure committed the opposite failure
+
+`worth ÷ cost` put **`one move` first** — 41 of 105 pairs for one bit. A measure built to stop a
+search preferring enormous vocabularies was rewarding uselessness instead.
+
+Charging for the leftovers fixes it with no thumb on the scale: a vocabulary that explains nothing
+pays for all 105 pairs by hand; one that explains everything pays only for itself. That is
+description length, which is older than this repository. The ratio is kept as a **diagnostic only**,
+and a test asserts that `one move` still wins on it — because that is the evidence the ratio alone
+is hollow.
+
+Three metric defects now, all in this session's own instruments: a ranking by region size (V.84), a
+control shaped like the thing it guarded (V.85), and a ratio that prefers uselessness (V.92).
+
+### The measure only bites where the work is
+
+On **randomly drawn** pairs, five of six vocabularies explain every one. The measure saturates and
+would certify anything. It bites only on operations that are nearly identical — V.91's swap fixture
+generalised to every transposition — which is worth writing down on its own: **a vocabulary's
+quality is invisible on easy cases.**
+
+The exam guards both failures and checks that third fact:
+
+| condition | |
+|---|---|
+| order steady across three draws | ✅ |
+| the largest vocabulary does not win | ✅ |
+| the smallest does not win | ✅ |
+| the winner is **complete** | ✅ |
+| random pairs saturate, so the hard ones are doing the work | 5 of 6 |
+
+### And I destroyed a module doing it
+
+`njp/economy.py` already existed — a cognitive budget organ — and I wrote over it. Same failure as
+V.58's `tasks.py`, four months of versions later. Restored from git, verified byte-clean, rebuilt as
+`njp/worth.py`. **The check that would have caught it takes one second and I did not run it.**
+
+### What this is not
+
+No substrate is invented here. What is built is the scale a claim to have invented a better one
+would have to be weighed on. **Level 7 stays unclaimed** — but "a better substrate" is now a
+number, and the first number it produced was against me.
