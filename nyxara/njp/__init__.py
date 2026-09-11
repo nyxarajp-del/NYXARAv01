@@ -503,6 +503,18 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.90. `Rule` is `njp.finding`'s — a learned rule for scoring a span — and `Move` is
+# `njp.procedure`'s. Both qualified. `Split` is free and `discover` is not: `njp.discover` is a
+# whole module about finding regularities in episodes.
+from nyxara.njp.regularity import (
+    Move as RowMove,
+    Rule as CandidateLaw,
+    Split,
+    discover as discover_laws,
+    differ,
+    holds,
+    rules,
+)
 # V.89. `Law` is `njp.discover`'s already — a regularity found in episodes, not a structural
 # property of an operation — and `Finding` is `njp.measurement`'s. Both qualified. `Reading` is
 # `njp.finding`'s too, so the trio goes together rather than one of them taking a bare name.
@@ -850,6 +862,7 @@ __all__ = [
     "Stencil", "ClosureVerdict", "difference", "in_span", "judge_primitive",
     "obeys_superposition", "response",
     "StructuralLaw", "LawFinding", "ProbeReading", "Family", "probe", "partition",
+    "CandidateLaw", "RowMove", "Split", "rules", "holds", "differ", "discover_laws",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

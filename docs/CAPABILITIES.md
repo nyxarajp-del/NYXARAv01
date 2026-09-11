@@ -7026,3 +7026,96 @@ four families — a blunt battery looks decisive, and only this number tells the
 The nine laws. They are *properties*, not operations, and the partition they induce is not handed
 over — but they are a vocabulary, and pretending otherwise would be the promotion this package keeps
 refusing. **Discovering the laws themselves is the next debt.** Level 7 stays unclaimed.
+
+---
+
+## V.90 — generating a law nobody wrote down
+
+First, a correction to how V.89 was read back to me: **it did not claim Level 7.** The commit and
+the docs both say *Level 7 stays unclaimed*, because its nine laws were supplied. That is the gap
+this version attacks.
+
+V.89 could say what an operation *is* by trying to break nine laws. The laws were the vocabulary.
+Handing it those nine and asking it to rediscover them would be the same promotion one level out —
+so nothing here is given a law.
+
+What is given is a handful of **moves** — reverse, negate, slide, double, lift — each content-free.
+`reverse` is not *the operation is symmetric*; it is a thing one can do to seven numbers. A law is
+then a schema:
+
+> ⟨ one side ⟩ reduced somehow ⟨ related somehow ⟩ ⟨ the other side ⟩
+
+where a side is a move applied to the input **or** to the output. Neither half is a law. The
+**pairing** is, and the pairing is searched: **1,120 candidates**, enumerated exhaustively.
+
+### What fell out
+
+| | |
+|---|---|
+| searched | 1,120 |
+| say nothing about anything | 712 |
+| **draw distinct lines** | **42** |
+
+```
+! law 4    first: x >= f(x)              (and 9 others say the same)
+    obeyed by sort up, window min, hold first, leave alone
+    broken by sort down, window max, window middle, hold last
+! law 7    total: x == f(x)              (and 37 others say the same)
+    obeyed by sort up, sort down, leave alone
+    broken by window min, window max, hold first, hold last
+```
+
+`law 4` says *the first output is a lower bound on the first input*. `law 7` says *the total is
+conserved*. Nobody wrote either down; each is a side, a reduction and a relation, composed.
+
+### The milestone, which is not "laws were found"
+
+A schema of 1,120 candidates always yields true sentences. The test is whether a generated law
+draws a distinction the **supplied** vocabulary could not — and V.89's nine leave exactly three
+pairs merged, recomputed here rather than asserted:
+
+| merged by the nine supplied laws | rescued by a generated one |
+|---|---|
+| sort upward / sort downward | ✅ |
+| smallest window / largest window | ✅ |
+| hold first / hold last | ✅ |
+
+**All three.** `invented 35, flattered 0, buried 0, rightly merged 1` — and that last number is
+what makes `flattered 0` mean anything: `also leave alone` is the identity written through a
+comparison, and no law may separate it from `leave alone`.
+
+### Two defects, and the test found the worse one
+
+**Operations were compared on different rows.** A fresh seed was drawn per *operation* rather than
+per *rule*, so two operations were judged on two different draws — V.82's "before and after from
+different samples", arriving a third time. It manufactured a distinction between an operation and
+**an identical copy of itself**, which is how it was caught. One seed per rule now, shared.
+
+**Rules that never mention the operation were candidates.** `first: lifted(x) >= negated(x)` is a
+claim about seven random numbers, not about `f`. 336 such candidates are gone.
+
+### The fourth number, and the honest thing about it
+
+V.89 counted `invented`, `flattered`, `buried`. This adds **`resolution-limited`**: two operations
+that differ, merged, and **no rule in the whole schema** would have split them. It is distinct from
+`buried` — a search that failed — and telling them apart is possible *only because the search is
+exhaustive*.
+
+**Nothing in this exam exercises it, and the exam says so out loud.** Two fixtures were built for
+it and both failed:
+
+- A **sort** scaled by a part in ten million was caught instantly. A sort preserves the total
+  *exactly*, so `total: x >= f(x)` holds with **equality** — and a tight relation is an infinitely
+  sensitive detector of any scaling whatever.
+- A **median** scaled the same way looked out of reach on one draw of rows and was caught by
+  `last: f(x) >= slid by two(x)` on another. **Borderline, not beyond** — and one draw treated as
+  definitive is the exact error this whole line of work began by fixing. I made it again, in a
+  scratch probe, and the exam overruled me.
+
+So the category ships computed, labelled `unexercised`, with a test asserting that label. A gate
+nothing exercises has not been shown to work.
+
+### What is still supplied
+
+The seven moves, four reductions and two relations. Smaller than nine laws, and not nothing.
+**Level 7 stays unclaimed.**

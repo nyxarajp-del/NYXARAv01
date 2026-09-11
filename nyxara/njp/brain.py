@@ -2831,6 +2831,21 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_law_school(self) -> Any:
+        """Sit the law-discovery audit: did a generated law separate what the supplied ones merged?
+
+        The milestone, and nothing else substitutes for it. V.89's nine supplied laws put *sort
+        upward* with *sort downward*, *smallest window* with *largest*, and *hold first* with *hold
+        last* — three pairs they cannot tell apart at any number of tries, because the distinction
+        is not in them. ``rescued`` counts how many a generated law split.
+        """
+        try:
+            from nyxara.njp.regularityschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def what_is_this_operation(self, operation: Any) -> Any:
         """Find out what a black box is by trying to break it, never by reading its name.
 
