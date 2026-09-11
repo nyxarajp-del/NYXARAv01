@@ -6460,3 +6460,62 @@ It does not invent the axes. `Knob` is supplied, the way `Benchmark.key` and `Be
 are supplied, because *what could be varied* is domain knowledge. The claim is narrower and
 testable: **given the axes, does it notice that every experiment landed in one corner, and does it
 stay quiet when they did not?**
+
+### V.84b — the map on the real organ, and the hypothesis it killed
+
+The map was pointed at the span stage of `njp/finding.py`, carrying the experiment V.83 ended
+owing: `remove(how many candidates compete) hold(the right answer stays producible)`.
+
+```
+~  remove(how many candidates compete) hold(ceiling) hold(items)
+   0.0320 → 0.0160 (-0.0160), but the right answer stays producible moved -0.5400
+   — it changed more than it meant to, so this tests nothing
+x  remove(how many candidates compete) hold(ceiling) hold(items)   [oracle]
+   0.0320 → 0.0440 (+0.0120) — this knob does not reach it
+```
+
+**126 distractors cut to 12, the gold span guaranteed present, the ceiling held at 0.700 — and the
+score moves +0.0120 against a bar of 0.03.**
+
+I have claimed the opposite across three versions: *142 candidates per gold sentence, not the
+ranker*. It is **refuted**. And the reason it survived that long is the reason this module exists —
+every version of the experiment built by hand also dropped the ceiling, so the claim was never
+tested, only re-asserted under a number that looked like a test.
+
+| | region | what happened |
+|---|---|---|
+| `given` | 1/1 entered | more data: +0.0080, flat |
+| `method` | 1/1 entered | another ranker: **−0.0320**, downward leverage |
+| `shown` | 1/1 entered | richer readings: +0.0000 |
+| `built` | 1/3 entered | the pool: **+0.0120, refuted** |
+| **`scored`** | **0/2 entered** | **nothing ever varied it** |
+
+`scored` is *how answers are compared* and *what counts as answering*. Four versions of work on
+this organ never once entered it. The map proposed 24 experiments there, and the first is
+`replace(how answers are compared) hold(ceiling) hold(items)`.
+
+**The division of labour is worth being exact about.** The map produced the *specification* — a
+verb, a knob in an unentered region, and the promises any honest version must keep. It did not
+write the experiment; I did. That boundary is the one `njp/space.py` declares in its own docstring,
+and this is it holding in practice rather than in principle.
+
+So `how_it_misses` was built to enter that region: the misses split by **kind** —
+
+| kind | meaning | what it would imply |
+|---|---|---|
+| `exact` | the gold span | — |
+| `contains` | holds the answer and more besides | the span **ends** in the wrong place |
+| `inside` | a fragment of the answer | same, the other way |
+| `overlaps` | shares words, neither contains | boundary noise |
+| `elsewhere` | a different part of the sentence | the **choice** is wrong |
+| `silent` | chose nothing | abstention, not error |
+
+`contains` and `elsewhere` call for opposite repairs, and no single accuracy figure can tell them
+apart — which is exactly why four versions of measuring one number found nothing.
+
+### A third wording defect, same class as the other two
+
+`replace(which rule family)` took the score to 0.0000 and the organ said *"this knob reaches it"*.
+True, and it reads as progress. Downward leverage now says so: *"this knob reaches it, downward —
+it has leverage and this is the wrong way"*. Third time this version that a verdict was accurate
+about its number and misleading about its meaning.

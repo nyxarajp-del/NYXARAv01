@@ -242,9 +242,15 @@ def carry_out(what: Intervention, before: Any, *, score: Callable[[Any], float])
                     + f"{', '.join(unread)} could not be read, so {'they are' if len(unread) > 1 else 'it is'} "
                     "not known to have held")
     else:
-        out.says = (f"{score(before):.4f} → {score(after):.4f} ({moved:+.4f}) — "
-                    + ("this knob reaches it" if abs(moved) >= MOVED
-                       else "this knob does not reach it"))
+        # Direction is part of the finding. The first version said "this knob reaches it" to a
+        # change that took a real organ's score to 0.0000, which is true and reads as progress.
+        if moved >= MOVED:
+            why = "this knob reaches it"
+        elif moved <= -MOVED:
+            why = "this knob reaches it, downward — it has leverage and this is the wrong way"
+        else:
+            why = "this knob does not reach it"
+        out.says = f"{score(before):.4f} → {score(after):.4f} ({moved:+.4f}) — {why}"
     return out
 
 

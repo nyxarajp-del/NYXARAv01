@@ -66,8 +66,14 @@ from nyxara.njp.findingschool import SEED, TRAIN, gold_sentence, taught_finder
 from nyxara.njp.measurement import Benchmark, Critique
 from nyxara.njp.space import Held, Intervention, Knob, Map, gaps, propose, survey
 
-__all__ = ["Stage", "Fieldwork", "span_stage", "diagnose", "explore", "run", "HELD",
-           "SMALL_POOL", "LEARN_FROM", "MORE", "SPAN_KNOBS"]
+__all__ = ["Stage", "Fieldwork", "span_stage", "diagnose", "explore", "how_it_misses", "run",
+           "HELD", "SMALL_POOL", "LEARN_FROM", "MORE", "SPAN_KNOBS", "MISSES", "overlapping"]
+
+#: The ways a chosen span can fail to be the gold span. Not a scoring scheme — a **breakdown**, and
+#: the distinction matters: `contains` and `elsewhere` call for opposite repairs, and a single
+#: accuracy figure cannot tell them apart. This is the measurement the map asked for in V.84,
+#: in the region (`scored`) that four versions of work never entered.
+MISSES: Tuple[str, ...] = ("exact", "contains", "inside", "overlaps", "elsewhere", "silent")
 
 #: How many readings the stage is taught from as found, and how many the `more data` experiment
 #: gets. They must differ, and :func:`diagnose` refuses to run if they do not — see :func:`_cut`.
@@ -148,6 +154,60 @@ def _cut(readings: Sequence[Reading]) -> List[List[Reading]]:
     at = int(len(passages) * TRAIN)
     return [[r for passage in passages[:at] for r in by_passage[passage]],
             [r for passage in passages[at:] for r in by_passage[passage]]]
+
+
+def _run_of(part: Sequence[str], whole: Sequence[str]) -> bool:
+    """Is ``part`` a contiguous run of ``whole``? Contiguity matters — a span is a stretch of text."""
+    if not part or len(part) > len(whole):
+        return False
+    return any(list(whole[i:i + len(part)]) == list(part)
+               for i in range(len(whole) - len(part) + 1))
+
+
+def overlapping(said: str, want: str) -> bool:
+    """A comparison that accepts a span containing the answer, or contained by it.
+
+    Not proposed as a scoring rule — `finding` should keep its exact match, because a reader that
+    returns the whole sentence has not answered the question. It is an **instrument**: the gap
+    between this and exact match is how much of the failure is about *where the span ends* rather
+    than *which span was chosen*, and those need opposite repairs.
+    """
+    a, b = said.split(), want.split()
+    return bool(a) and bool(b) and (a == b or _run_of(b, a) or _run_of(a, b))
+
+
+def how_it_misses(stage: "Stage") -> Dict[str, Any]:
+    """Break the misses down by **kind**, which a single accuracy figure cannot do.
+
+    ``contains`` — the chosen span holds the right answer and more of the sentence besides.
+    ``inside`` — it is a fragment of the right answer. ``overlaps`` — they share words but neither
+    contains the other. ``elsewhere`` — a different part of the sentence entirely. ``silent`` — it
+    chose nothing.
+
+    The four repairs `attribution` holds cannot distinguish these, because all four change what the
+    ranker is given or how it ranks, and every one of these is a statement about the **comparison**
+    at the end.
+    """
+    bench = stage.bench
+    if bench is None or not bench.items:
+        return {kind: 0 for kind in MISSES}
+    out = {kind: 0 for kind in MISSES}
+    for item, want in zip(bench.items, bench.gold):
+        said = bench.predict(item) if bench.predict else ""
+        if not said:
+            out["silent"] += 1
+        elif said == want:
+            out["exact"] += 1
+        elif _run_of(want.split(), said.split()):
+            out["contains"] += 1
+        elif _run_of(said.split(), want.split()):
+            out["inside"] += 1
+        elif set(said.split()) & set(want.split()):
+            out["overlaps"] += 1
+        else:
+            out["elsewhere"] += 1
+    n = len(bench.items)
+    return {**out, "of": n, **{f"{k}_rate": round(v / n, 4) for k, v in out.items()}}
 
 
 def _thinned(spans: Sequence[Span], reading: Reading) -> List[Span]:
@@ -373,9 +433,27 @@ def explore(readings: Optional[Sequence[Reading]] = None) -> Map:
                      run=lambda: span_stage(base, held, name="a smaller pool, answer kept",
                                             learned_from=LEARN_FROM, taught=learn[:LEARN_FROM],
                                             pool=_thinned)),
+        # The experiment the map asked for. `scored` was the region four versions of work never
+        # entered, and this enters it: the same ranker on the same items, with the **comparison**
+        # loosened to accept a span that contains the answer or is contained by it. It is an
+        # instrument rather than a repair — a reader that returns the whole sentence has not
+        # answered — so it is marked oracle-ish by `deployable=False`.
+        Intervention(verb="replace", on="how answers are compared", holds=both,
+                     deployable=False,
+                     says="the comparison loosened to containment, the ranker untouched",
+                     run=lambda: _compared(span_stage(base, held, name="loose comparison",
+                                                      learned_from=LEARN_FROM,
+                                                      taught=learn[:LEARN_FROM]))),
     ]
     return survey("the span stage, as a map", SPAN_KNOBS, what, found,
                   score=lambda st: st.bench.score() if st.bench else 0.0)
+
+
+def _compared(stage: Stage) -> Stage:
+    """The same stage with a different ``same``. Nothing else about it moves — that is the point."""
+    if stage.bench is not None:
+        stage.bench.same = overlapping
+    return stage
 
 
 def chart() -> Dict[str, Any]:  # pragma: no cover — a report over the corpus, not a test
@@ -388,3 +466,16 @@ def chart() -> Dict[str, Any]:  # pragma: no cover — a report over the corpus,
     for one in asked[:4]:
         print(f"    {one.name}")
     return drawn.to_dict()
+
+
+def misses() -> Dict[str, Any]:  # pragma: no cover — a report over the corpus, not a test
+    """The breakdown the map's region implies, measured directly rather than through a score."""
+    learn, held = _cut(read_passages())
+    held = list(held[:HELD])
+    stage = span_stage(taught_finder(learn[:LEARN_FROM]), held, learned_from=LEARN_FROM,
+                       taught=learn[:LEARN_FROM])
+    got = how_it_misses(stage)
+    print(f"  the span stage scores {stage.bench.score():.4f} on {got['of']} items. It misses:")
+    for kind in MISSES:
+        print(f"    {kind:<11} {got[kind]:>4}  {got[f'{kind}_rate']:.4f}")
+    return got

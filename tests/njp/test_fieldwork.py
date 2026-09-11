@@ -200,3 +200,41 @@ def test_the_span_map_spans_more_regions_than_the_experiments_do():
     regions = {k.region for k in SPAN_KNOBS}
     assert {"built", "scored"} <= regions
     assert len([k for k in SPAN_KNOBS if k.region == "built"]) >= 2
+
+
+# --------------------------------------------------------------------------------------------- #
+#  V.84b — the instrument the map asked for, in the region nothing had entered
+# --------------------------------------------------------------------------------------------- #
+def test_containment_accepts_a_span_that_holds_the_answer():
+    from nyxara.njp.fieldwork import overlapping
+
+    assert overlapping("paris", "paris")
+    assert overlapping("the capital paris", "paris"), "the span contains the answer"
+    assert overlapping("paris", "the capital paris"), "the span is inside the answer"
+    assert not overlapping("vienna", "paris")
+    assert not overlapping("", "paris") and not overlapping("paris", "")
+
+
+def test_containment_requires_a_contiguous_run_not_a_bag_of_words():
+    """A span is a stretch of text. Sharing words in a different order is not containing it."""
+    from nyxara.njp.fieldwork import overlapping
+
+    assert not overlapping("paris capital the", "the capital")
+    assert overlapping("in the capital paris", "the capital")
+
+
+def test_the_breakdown_separates_repairs_that_point_opposite_ways(engine, little):
+    """`contains` and `elsewhere` need opposite fixes, and one accuracy figure cannot tell them apart."""
+    from nyxara.njp.fieldwork import MISSES, how_it_misses
+
+    got = how_it_misses(span_stage(engine, little))
+    assert set(MISSES) <= set(got)
+    assert sum(got[k] for k in MISSES) == got["of"] == len(little)
+    assert all(0.0 <= got[f"{k}_rate"] <= 1.0 for k in MISSES)
+
+
+def test_the_breakdown_of_nothing_is_zeros_not_an_error():
+    from nyxara.njp.fieldwork import MISSES, how_it_misses
+
+    got = how_it_misses(Stage())
+    assert all(got[k] == 0 for k in MISSES)
