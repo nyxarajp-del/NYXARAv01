@@ -6368,3 +6368,95 @@ The organ tests *is the answer producible* and does not test *is it producible a
 alternatives that nothing could pick it out*. That is a distractor-count hypothesis, and it needs
 an experiment that thins the pool **without dropping what it is thinning toward**. It is not
 written here, because the obvious way to write it is the one that just failed.
+
+---
+
+## V.84 — when the hypotheses run out, which corner was never looked in
+
+V.83 ended with the loop saying *nothing tested here explains it* on a real organ. That was honest
+and it was a **terminal state**, which is the defect this version removes. Two claims sit next to
+each other and only one of them was ever true:
+
+| | |
+|---|---|
+| *every hypothesis I hold failed* | ✅ what the evidence showed |
+| *therefore the cause is unknowable* | ❌ never shown, and never true |
+| **my model of what could be causing this is incomplete** | the one in between |
+
+`njp/space.py` builds the step between them. Two mechanisms, useless apart.
+
+### A map, so that emptiness is visible
+
+A `Knob` is one thing about a system that could be varied, in a **region** — what the system is
+*given*, what it *does* (`method`), what it is *shown*, what it is *scored* against, how the world
+it runs on was *built*. The four repairs `attribution` holds all land in `given` and `method`.
+
+That was invisible as a flat list and is the first thing you see on a map:
+
+```
+ !  built      0/3 knobs actually examined  ← nothing here was ever varied
+ok  given      1/2 knobs actually examined
+ok  method     2/2 knobs actually examined
+ !  scored     0/2 knobs actually examined  ← nothing here was ever varied
+ok  shown      1/2 knobs actually examined
+→ the hypotheses are exhausted and the map is not: built, scored
+```
+
+### An intervention that says what it holds still
+
+V.83 caught a repair that shrank a candidate pool and threw the right answer out of it, by
+re-reading the ceiling afterwards. That check was **hardcoded**, because the ceiling was the only
+invariant anyone had thought of. Here an `Intervention` *declares* its invariants and they are
+measured after it runs:
+
+| verdict | meaning |
+|---|---|
+| `moved` / `flat` | it kept every promise; the number is evidence |
+| `spoiled` | a promise broke; the number is evidence about **nothing** |
+| `unvouched` | a promise could **not be read**; not known kept, not known broken |
+| `not run` | the experiment raised, and says so |
+
+`unvouched` is the one worth spelling out. Folding it in with the clean results treats an unrun
+check as passed; calling it `spoiled` treats an unrun check as failed. It is its own state, and it
+does **not** cover the region it was aimed at.
+
+And `Intervention.deployable` separates an experiment from a repair. *Keep twelve candidates, but
+make sure the right one is among them* consults the gold answer — it can never ship. It is marked
+`[oracle]`, because losing that distinction is how a measurement gets announced as a fix.
+
+### The exam — and it is scored on silence
+
+A blind-spot detector has one failure mode that matters, and it is not missing things. It is
+**firing on everything**, which looks like diligence and is worth nothing. So half the fixtures are
+maps where the correct answer is *no gap*.
+
+| | found | missed | quiet when covered | false alarms |
+|---|---|---|---|---|
+| **6 maps** | **3 / 3** | 0 | **3 / 3** | **0** |
+
+The first fixture's cause is not invented: it is a bug this repository actually had — the reader
+produced the right answer and scored zero, because gold answers carry the sentence's full stop
+(`Czech Republic.`) and candidates end at the last token. Every lever in `given`, `method` and
+`shown` is flat, because nothing is wrong with any of them.
+
+There is also a test that **breaks** the detector on purpose (`Map.touched` forced empty) and
+asserts the exam catches it. An exam nothing can fail is not an exam.
+
+### The defect the exam found in its first minute
+
+I had ranked empty regions by **how many knobs they hold**, and the exam immediately put a
+three-knob innocent region above the two-knob guilty one. A region's size says nothing about
+whether the cause is in it. The ranking was **deleted, not tuned** — two regions that are simply
+both empty come back in a fixed order with *both* reported, because no evidence on the map
+separates them.
+
+So `also_named` is reported and not scored against. **A blind spot is a place to look, not a
+diagnosis.** Inventing a preference between two empty corners would be exactly the confident wrong
+answer the rest of this package keeps refusing to produce.
+
+### What this does not do, said plainly
+
+It does not invent the axes. `Knob` is supplied, the way `Benchmark.key` and `Benchmark.reachable`
+are supplied, because *what could be varied* is domain knowledge. The claim is narrower and
+testable: **given the axes, does it notice that every experiment landed in one corner, and does it
+stay quiet when they did not?**

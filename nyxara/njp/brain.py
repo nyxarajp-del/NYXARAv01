@@ -2816,6 +2816,35 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def where_it_never_looked(self) -> Any:
+        """Which region of the causal map every experiment left untouched.
+
+        The step V.83 was missing. *Every hypothesis I hold failed* and *the cause is unknowable*
+        are different claims, and this returns the one between them: which corner of the space
+        nothing informative ever entered, and what it would take to enter it. Needs the reading
+        corpus, so ``None`` where it is not present.
+        """
+        try:
+            from nyxara.njp.fieldwork import explore
+
+            return explore().to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_blind_spot_school(self) -> Any:
+        """Sit the blind-spot audit: does it find the empty corner, or call every corner empty?
+
+        ``false_alarms`` is the number that matters. Half the fixtures are maps that were fully
+        examined, where naming any region at all is wrong — without them the exam is passed by a
+        function that returns every region it was given.
+        """
+        try:
+            from nyxara.njp.spaceschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_gate_school(self, each: int = 150) -> Any:
         """Sit the self-rewrite audit: what the gate lets through, by kind of candidate.
 

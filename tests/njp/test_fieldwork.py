@@ -11,7 +11,8 @@ from __future__ import annotations
 import pytest
 
 from nyxara.njp.fieldwork import (
-    HELD, LEARN_FROM, MORE, SMALL_POOL, Fieldwork, Stage, _cut, _shortest, span_stage,
+    HELD, LEARN_FROM, MORE, SMALL_POOL, SPAN_KNOBS, Fieldwork, Stage, _cut, _shortest, _thinned,
+    span_stage,
 )
 from nyxara.njp.finding import Reading, Span, candidates
 from nyxara.njp.findingschool import taught_finder
@@ -147,3 +148,55 @@ def test_a_clean_cut_reports_leakage_clear_rather_than_unchecked(engine, little)
     got = span_stage(engine, little[2:], taught=little[:2])
     found = next(f for f in critique(got.bench).findings if f.check == "leakage")
     assert found.informative and found.verdict == "clear"
+
+
+# --------------------------------------------------------------------------------------------- #
+#  V.84 — the experiment V.83 ended owing
+# --------------------------------------------------------------------------------------------- #
+def test_thinning_the_pool_keeps_what_it_is_thinning_toward(engine, little):
+    """`_shortest` asked the question and could not answer it. This one can.
+
+    Same twelve candidates, same ranker, same items — and the gold span forced in among them, so
+    the **only** thing that differs from `as found` is how many wrong candidates compete. That is
+    the quantity the hand-diagnosis was about and the one no hypothesis in `attribution` tests.
+    """
+    whole = span_stage(engine, little)
+    capped = span_stage(engine, little, name="capped", pool=_shortest)
+    kept = span_stage(engine, little, name="kept", pool=_thinned)
+    assert kept.pool <= SMALL_POOL, "it must actually thin the pool"
+    assert kept.pool < whole.pool
+    assert kept.reachable == pytest.approx(whole.reachable, abs=1e-4), \
+        "the ceiling is what `_shortest` dropped and this must not"
+    assert kept.reachable > capped.reachable or capped.reachable == whole.reachable
+
+
+def test_thinning_keeps_the_gold_span_specifically():
+    """Not merely the same rate — the same items. A rate that matches by luck is not holding."""
+    from nyxara.njp.finding import Span, gold_key
+
+    reading = Reading(passage="The capital of France is Paris.",
+                      question="What?", answer="Paris")
+    spans = [Span(text="x" * n, start=0, end=n) for n in range(1, 40)]
+    spans.append(Span(text="Paris", start=0, end=5))
+    got = _thinned(spans, reading)
+    assert len(got) <= SMALL_POOL
+    assert any(s.key == gold_key(reading.answer) for s in got), \
+        "the gold span was not among the twelve shortest, so it had to be forced in"
+
+
+def test_thinning_does_not_invent_an_answer_that_was_never_there():
+    """When the gold is not in the pool at all, forcing it in would be fabricating reachability."""
+    from nyxara.njp.finding import Span, gold_key
+
+    reading = Reading(passage="nothing here", question="What?", answer="Paris")
+    spans = [Span(text="x" * n, start=0, end=n) for n in range(1, 40)]
+    got = _thinned(spans, reading)
+    assert len(got) == SMALL_POOL
+    assert not any(s.key == gold_key(reading.answer) for s in got)
+
+
+def test_the_span_map_spans_more_regions_than_the_experiments_do():
+    """The whole reason to draw a map: four experiments in two regions is visible here."""
+    regions = {k.region for k in SPAN_KNOBS}
+    assert {"built", "scored"} <= regions
+    assert len([k for k in SPAN_KNOBS if k.region == "built"]) >= 2

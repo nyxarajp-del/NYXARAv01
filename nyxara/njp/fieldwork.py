@@ -57,16 +57,17 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.njp.attribution import Attribution, Failure, attribute
 from nyxara.njp.finding import (Finder, Reading, Setting, Span, candidates, gold_key, probe,
                                 read_passages)
 from nyxara.njp.findingschool import SEED, TRAIN, gold_sentence, taught_finder
 from nyxara.njp.measurement import Benchmark, Critique
+from nyxara.njp.space import Held, Intervention, Knob, Map, gaps, propose, survey
 
-__all__ = ["Stage", "Fieldwork", "span_stage", "diagnose", "run", "HELD", "SMALL_POOL",
-           "LEARN_FROM", "MORE"]
+__all__ = ["Stage", "Fieldwork", "span_stage", "diagnose", "explore", "run", "HELD",
+           "SMALL_POOL", "LEARN_FROM", "MORE", "SPAN_KNOBS"]
 
 #: How many readings the stage is taught from as found, and how many the `more data` experiment
 #: gets. They must differ, and :func:`diagnose` refuses to run if they do not — see :func:`_cut`.
@@ -147,6 +148,27 @@ def _cut(readings: Sequence[Reading]) -> List[List[Reading]]:
     at = int(len(passages) * TRAIN)
     return [[r for passage in passages[:at] for r in by_passage[passage]],
             [r for passage in passages[at:] for r in by_passage[passage]]]
+
+
+def _thinned(spans: Sequence[Span], reading: Reading) -> List[Span]:
+    """The experiment V.83 ended owing: thin the pool **without dropping what it is thinning toward**.
+
+    :func:`_shortest` asked *does the ranker do better with fewer things to choose between* and
+    could not answer, because it also threw the right answer away for most items. This keeps the
+    same twelve and forces the gold span in among them, so the only thing that changes is **how
+    many wrong candidates are competing** — which is the quantity my hand-diagnosis was about and
+    the one no hypothesis in :mod:`nyxara.njp.attribution` tests.
+
+    It consults the gold answer, so it is an **oracle** and can never be a repair: at run time
+    nobody knows which span is right. It is an experiment, and confusing the two is how a
+    measurement gets announced as a fix.
+    """
+    want = gold_key(reading.answer)
+    short = sorted(spans, key=lambda s: len(s.text))[:SMALL_POOL]
+    if any(s.key == want for s in short):
+        return short
+    gold = next((s for s in spans if s.key == want), None)
+    return short if gold is None else [gold] + short[:SMALL_POOL - 1]
 
 
 def span_stage(engine: Finder, held: Sequence[Reading], *, name: str = "as found",
@@ -287,3 +309,82 @@ def run() -> Dict[str, Any]:  # pragma: no cover — a report over the corpus, n
 
 if __name__ == "__main__":  # pragma: no cover
     run()
+
+
+# --------------------------------------------------------------------------------------------- #
+#  V.84 — the same organ, drawn as a map instead of a list
+# --------------------------------------------------------------------------------------------- #
+#: What could be varied about a run of the span stage. Supplied, like every other map in
+#: :mod:`nyxara.njp.space` — the claim is not that these were discovered, it is that four
+#: experiments landing in two of five regions is visible here and was not visible as a list.
+SPAN_KNOBS: Tuple[Knob, ...] = (
+    Knob("how many examples", "given", "readings the finder is taught from"),
+    Knob("which rule family", "method", "the purity bar the rules must clear"),
+    Knob("which readings", "shown", "whether the answer-shape organ is consulted"),
+    Knob("how answers are compared", "scored", "`Span.key` against `gold_key`"),
+    Knob("what counts as answering", "scored", "abstention against a wrong span"),
+    Knob("how candidates were made", "built", "the generator that proposes spans"),
+    Knob("how many candidates compete", "built", "how many wrong ones are in the way"),
+    Knob("how the split was cut", "built", "by passage, and where"),
+)
+
+
+def explore(readings: Optional[Sequence[Reading]] = None) -> Map:
+    """Run the four experiments the attributor holds, plus the one V.83 ended owing, on a map.
+
+    The fifth is the point. ``remove(how many candidates compete) hold(the right answer stays
+    producible)`` is the experiment that could not be written before :mod:`nyxara.njp.space`,
+    because holding something fixed was a property of the checker rather than of the experiment.
+    It is an oracle and therefore never a repair — but if it moves the number, the cause is in
+    `built`, and if it does not, my hand-diagnosis of this organ was wrong.
+    """
+    learn, held = _cut(readings if readings is not None else read_passages())
+    held = list(held[:HELD])
+    if len(learn) <= LEARN_FROM:
+        raise ValueError(f"only {len(learn)} rows to learn from, so `more data` is the same data")
+    more = min(MORE, len(learn))
+    base = taught_finder(learn[:LEARN_FROM])
+    found = span_stage(base, held, learned_from=LEARN_FROM, taught=learn[:LEARN_FROM])
+
+    keeps = Held(name="the right answer stays producible", read=lambda st: st.reachable)
+    same_rows = Held(name="the same items are examined", read=lambda st: float(st.rows))
+    both = (keeps, same_rows)
+    what: List[Intervention] = [
+        Intervention(verb="add", on="how many examples", holds=both,
+                     run=lambda: span_stage(taught_finder(learn[:more]), held,
+                                            name="more data", learned_from=more,
+                                            taught=learn[:more])),
+        Intervention(verb="replace", on="which rule family", holds=both,
+                     run=lambda: span_stage(taught_finder(learn[:LEARN_FROM], purity=0.5), held,
+                                            name="other algorithm", learned_from=LEARN_FROM,
+                                            taught=learn[:LEARN_FROM])),
+        Intervention(verb="add", on="which readings", holds=both,
+                     run=lambda: span_stage(taught_finder(learn[:LEARN_FROM], use_shape=True),
+                                            held, name="richer readings",
+                                            learned_from=LEARN_FROM, taught=learn[:LEARN_FROM])),
+        Intervention(verb="remove", on="how many candidates compete", holds=both,
+                     says="the repair my hand-diagnosis implies, exactly as it failed",
+                     run=lambda: span_stage(base, held, name="a smaller pool",
+                                            learned_from=LEARN_FROM, taught=learn[:LEARN_FROM],
+                                            pool=_shortest)),
+        Intervention(verb="remove", on="how many candidates compete", holds=both,
+                     deployable=False,
+                     says="the same thinning, with the right answer held in the pool",
+                     run=lambda: span_stage(base, held, name="a smaller pool, answer kept",
+                                            learned_from=LEARN_FROM, taught=learn[:LEARN_FROM],
+                                            pool=_thinned)),
+    ]
+    return survey("the span stage, as a map", SPAN_KNOBS, what, found,
+                  score=lambda st: st.bench.score() if st.bench else 0.0)
+
+
+def chart() -> Dict[str, Any]:  # pragma: no cover — a report over the corpus, not a test
+    drawn = explore()
+    print(drawn.render())
+    asked = propose(drawn)
+    empty = [g.region for g in gaps(drawn)]
+    print(f"\n  {len(asked)} experiments the map says are worth building in {empty or 'nowhere'};"
+          f" the first four:")
+    for one in asked[:4]:
+        print(f"    {one.name}")
+    return drawn.to_dict()

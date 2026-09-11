@@ -503,6 +503,20 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.84. `Map` is free; `Knob`, `Held`, `Intervention`, `Outcome` and `Gap` are free; `survey`,
+# `gaps` and `propose` are free. `Intervention` is qualified anyway — `njp.causal` has a notion of
+# intervening on a graph, and a bare name here would read as the general case of that.
+from nyxara.njp.space import (
+    Gap as BlindSpot,
+    Held,
+    Intervention as Experiment,
+    Knob,
+    Map as HypothesisSpace,
+    Outcome,
+    gaps,
+    propose,
+    survey,
+)
 # V.83. `Stage` is already a stage of a *curriculum*, which is not a run of an organ under
 # examination, so the fieldwork one is qualified. `Fieldwork`, `diagnose` and `span_stage` are free.
 from nyxara.njp.fieldwork import (
@@ -769,6 +783,8 @@ __all__ = [
     # `njp.programming`'s, so the loop's carry qualified names.
     "Ascent", "LoopTurn", "CandidateRepair", "ascend",
     "Fieldwork", "MeasuredStage", "diagnose", "span_stage",
+    "HypothesisSpace", "Knob", "Held", "Experiment", "Outcome", "BlindSpot",
+    "survey", "gaps", "propose",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
