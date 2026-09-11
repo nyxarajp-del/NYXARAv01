@@ -238,3 +238,43 @@ def test_the_breakdown_of_nothing_is_zeros_not_an_error():
 
     got = how_it_misses(Stage())
     assert all(got[k] == 0 for k in MISSES)
+
+
+# --------------------------------------------------------------------------------------------- #
+#  V.84c — the check that could have run, and never did
+# --------------------------------------------------------------------------------------------- #
+def test_the_abstention_check_can_now_run(engine, little):
+    """Missing through V.83 and V.84 — the one check that would have found what both were hunting.
+
+    A wrong answer and no answer at all are different failures needing different repairs, and a
+    score that folds them together says so to nobody. This is the third time in two versions that a
+    check which *could* have run did not, which is turning out to be the most expensive failure
+    mode in this stack: it produces no wrong answer to notice.
+    """
+    from nyxara.njp.measurement import critique
+
+    got = span_stage(engine, little)
+    found = next(f for f in critique(got.bench).findings if f.check == "abstention")
+    assert found.informative, "`spoke` must be supplied or the check cannot run"
+
+
+def test_spoke_says_answered_exactly_when_a_span_was_chosen(engine, little):
+    got = span_stage(engine, little)
+    bench = got.bench
+    assert all(bench.spoke(i) == bool(bench.predict(i)) for i in bench.items)
+
+
+def test_the_fallbacks_include_a_null(engine):
+    """`a` fallback helping and `my` fallback helping are different claims, and one is testable."""
+    from nyxara.njp.fieldwork import FALLBACKS, _fallback
+    import random
+
+    assert "random" in FALLBACKS and "silent" in FALLBACKS
+    spans = [Span(text="x" * n, start=0, end=n) for n in range(1, 6)]
+    rng = random.Random(0)
+    assert _fallback("silent", spans, rng) is None
+    assert _fallback("first", spans, rng) is spans[0]
+    assert _fallback("longest", spans, rng).text == "xxxxx"
+    assert _fallback("shortest", spans, rng).text == "x"
+    assert _fallback("random", spans, rng) in spans
+    assert all(_fallback(kind, [], rng) is None for kind in FALLBACKS)

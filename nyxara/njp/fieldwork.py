@@ -287,6 +287,13 @@ def span_stage(engine: Finder, held: Sequence[Reading], *, name: str = "as found
                  reachable=round(sum(reach) / max(1, len(reach)), 4),
                  bench=Benchmark(name=name, items=items, gold=gold,
                                  predict=lambda i: answers.get(i, ""),
+                                 # Without this the critic's **abstention** check cannot run, and
+                                 # it was missing through V.83 and V.84 — the one check that would
+                                 # have found what those two versions were looking for. A wrong
+                                 # answer and no answer at all are different failures needing
+                                 # different repairs, and a score that folds them together says so
+                                 # to nobody.
+                                 spoke=lambda i: bool(answers.get(i, "")),
                                  reachable=lambda i, _w: reach[i],
                                  train=[r.passage for r in taught],
                                  key=lambda x: where.get(x, x)))
@@ -449,6 +456,81 @@ def explore(readings: Optional[Sequence[Reading]] = None) -> Map:
                   score=lambda st: st.bench.score() if st.bench else 0.0)
 
 
+#: Fallbacks tried when no rule fires. Several, deliberately: *a* fallback helping and *my clever*
+#: fallback helping are different claims, and one of them is testable.
+FALLBACKS: Tuple[str, ...] = ("silent", "first", "longest", "shortest", "random")
+
+
+def _fallback(kind: str, spans: Sequence[Span], rng: Any) -> Optional[Span]:
+    if not spans or kind == "silent":
+        return None
+    if kind == "first":
+        return spans[0]
+    if kind == "longest":
+        return max(spans, key=lambda s: len(s.text))
+    if kind == "shortest":
+        return min(spans, key=lambda s: len(s.text))
+    return rng.choice(list(spans))
+
+
+def when_it_says_nothing(readings: Optional[Sequence[Reading]] = None) -> Dict[str, Any]:
+    """What the span stage does on the items where no rule fires, and what it could do instead.
+
+    `how_it_misses` found the stage silent on 0.5480 of items — it picks **nothing** more often
+    than it picks anything, and every measurement of this organ has counted that as a wrong answer.
+    This asks the question that follows and that four versions never asked: on exactly those items,
+    is the right answer even in the pool, and does any trivial fallback beat saying nothing?
+
+    Four fallbacks rather than one, with ``random`` among them as the null. *A* fallback helping and
+    *my* fallback helping are different claims; reporting only the best one is how the second gets
+    told as the first.
+    """
+    import random as _random
+
+    learn, held = _cut(readings if readings is not None else read_passages())
+    held = list(held[:HELD])
+    engine = taught_finder(learn[:LEARN_FROM])
+    rng = _random.Random(84)
+    rows = 0
+    silent = 0
+    silent_reachable = 0
+    right = {kind: 0 for kind in FALLBACKS}
+    for reading in held:
+        at = gold_sentence(reading)
+        fixed = Setting.of(reading)
+        if at >= len(fixed.spans):
+            continue
+        sentence, start = fixed.spans[at]
+        offered = candidates(sentence)
+        if not offered:
+            continue
+        rows += 1
+        want = gold_key(reading.answer)
+        shape = engine.wants(reading.question)
+        best: Any = (0, 0.0)
+        chosen: Optional[Span] = None
+        for span in offered:
+            placed = Span(text=span.text, start=span.start + start,
+                          end=span.end + start, sentence=at)
+            got = engine._score(probe(reading, placed, shape, use_shape=engine.use_shape,
+                                      setting=fixed), engine.rules)
+            if got > best:
+                best, chosen = got, span
+        if chosen is not None:
+            for kind in FALLBACKS:
+                right[kind] += int(chosen.key == want)
+            continue
+        silent += 1
+        silent_reachable += int(any(s.key == want for s in offered))
+        for kind in FALLBACKS:
+            pick = _fallback(kind, offered, rng)
+            right[kind] += int(pick is not None and pick.key == want)
+    return {"rows": rows, "silent": silent,
+            "silent_rate": round(silent / max(1, rows), 4),
+            "gold_reachable_among_silent": round(silent_reachable / max(1, silent), 4),
+            "scores": {kind: round(right[kind] / max(1, rows), 4) for kind in FALLBACKS}}
+
+
 def _compared(stage: Stage) -> Stage:
     """The same stage with a different ``same``. Nothing else about it moves — that is the point."""
     if stage.bench is not None:
@@ -466,6 +548,17 @@ def chart() -> Dict[str, Any]:  # pragma: no cover — a report over the corpus,
     for one in asked[:4]:
         print(f"    {one.name}")
     return drawn.to_dict()
+
+
+def silence() -> Dict[str, Any]:  # pragma: no cover — a report over the corpus, not a test
+    got = when_it_says_nothing()
+    print(f"  {got['rows']} items; it says nothing on {got['silent']} of them "
+          f"({got['silent_rate']:.4f})")
+    print(f"  among those, the right answer is in the pool {got['gold_reachable_among_silent']:.4f} "
+          f"of the time — that is the most any fallback could win")
+    for kind, score in got["scores"].items():
+        print(f"    {kind:<10} {score:.4f}")
+    return got
 
 
 def misses() -> Dict[str, Any]:  # pragma: no cover — a report over the corpus, not a test

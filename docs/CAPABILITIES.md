@@ -6519,3 +6519,44 @@ apart — which is exactly why four versions of measuring one number found nothi
 True, and it reads as progress. Downward leverage now says so: *"this knob reaches it, downward —
 it has leverage and this is the wrong way"*. Third time this version that a verdict was accurate
 about its number and misleading about its meaning.
+
+### V.84c — it picks nothing more often than it picks anything
+
+The map named `scored` — *how answers are compared* and *what counts as answering*. `how_it_misses`
+entered it, and the breakdown on 250 held-out items is not what either of my diagnoses predicted:
+
+| kind | count | rate |
+|---|---|---|
+| `exact` | 8 | 0.0320 |
+| `contains` | 4 | 0.0160 |
+| `inside` | 14 | 0.0560 |
+| `overlaps` | 23 | 0.0920 |
+| `elsewhere` | 64 | 0.2560 |
+| **`silent`** | **137** | **0.5480** |
+
+**For 55% of items no rule fires at all**, `chosen` stays `None`, and the empty string is scored as
+a wrong answer. Not the pool. Not the comparison. The stage abstains more often than it answers,
+and every measurement this organ has ever had folded that into one accuracy figure.
+
+Checked that it is the organ and not the harness: `Finder.answer` uses the identical `(0, 0.0)`
+floor and returns `""` the same way.
+
+### The third check that could have run and didn't — and it is the expensive one
+
+`measurement.CHECKS` has contained **`abstention`** since V.74. `span_stage` never supplied
+`spoke`, so it reported `? not checked` throughout V.83 and V.84 — while both versions hunted for
+exactly this. `SPAN_KNOBS` even names the knob *"what counts as answering"*, in the region the map
+flagged as never entered.
+
+| version | the check that was skipped | what it would have said |
+|---|---|---|
+| V.83 | `leakage` — no `key`/`train` | nothing; the cut was clean |
+| V.84 | `abstention` — no `spoke` | **it answers 0.4520 of the time** |
+
+Three times in two versions. This is turning out to be the most expensive failure mode in the whole
+stack, and the reason is structural: a wrong answer leaves a wrong number to notice, and a skipped
+check leaves nothing at all. The rule *a check that cannot run is reported as `not checked`, never
+as passed* protects the reader. It does not protect the **caller**, who is the one who failed to
+supply what the check needed — and in both cases the caller was me.
+
+`spoke` is now supplied and the check runs.
