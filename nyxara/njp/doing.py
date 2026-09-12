@@ -77,7 +77,7 @@ changed nothing, because from the outside that is what it is.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 __all__ = ["Goal", "Affordance", "Attempt", "ActionValue", "CognitiveAgency", "AFFORDANCES"]

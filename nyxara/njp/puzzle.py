@@ -58,7 +58,7 @@ from __future__ import annotations
 
 import collections
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 #: How many hops a constructed answer may cross. Beyond this the confidence a chain carries is

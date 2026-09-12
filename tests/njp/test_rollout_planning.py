@@ -22,7 +22,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.njp.predict import PredictionEngine
-from nyxara.njp.rollout import Candidate, Plan, RolloutPlanner, Target
+from nyxara.njp.rollout import Candidate, RolloutPlanner, Target
 from nyxara.njp.universe import InternalUniverse
 
 

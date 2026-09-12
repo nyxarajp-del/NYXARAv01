@@ -45,7 +45,7 @@ which from the outside is what it is.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 __all__ = ["Source", "CompressionProgress", "SOURCES"]

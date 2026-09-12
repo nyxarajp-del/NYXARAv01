@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.njp import corpus as corpus_module
 from nyxara.njp.corpus import load, verify
 from nyxara.njp.corpussolver import CorpusSolver
 from nyxara.njp.school import ExamConditions

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import random
 
-import pytest
 
 from nyxara.njp.universe import InternalUniverse, Orientation
 

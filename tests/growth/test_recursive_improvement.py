@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import hashlib
 from pathlib import Path
 
@@ -150,6 +152,9 @@ def test_enact_edits_respects_budget():
     assert report.kept == 2
 
 
+# 227s on an idle machine: `optimize(enact=True)` walks and re-reads the source tree. Same story
+# as `test_self_improvement_runs_on_cadence` — under the 300s bar alone, over it under any load.
+@pytest.mark.timeout(900)
 def test_lessons_stored_in_memory_when_enacting():
     from nyxara.memory.store import MemoryStore
     mem = MemoryStore()

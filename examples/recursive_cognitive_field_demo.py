@@ -83,7 +83,7 @@ def main() -> int:
 
     coverage = genesis.explain("horse")
     print(f"   explain(horse)   gap={coverage.gap!r}  violated={coverage.violated}")
-    print(f"   → not 'the coefficient is wrong'. The CONCEPT is wrong.\n")
+    print("   → not 'the coefficient is wrong'. The CONCEPT is wrong.\n")
 
     before_ratio = genesis.compression()
     report = genesis.restructure(coverage)

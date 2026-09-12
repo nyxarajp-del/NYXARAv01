@@ -227,6 +227,34 @@ def test_a_new_export_does_not_take_a_name_that_was_already_taken():
         assert name in njp.__all__
 
 
+def test_no_export_in_the_package_namespace_shadows_another():
+    """The general form of the same defect, asserted once for every name rather than per version.
+
+    Seven of these were live when this was written — `Step` three ways, `Observation`,
+    `Situation`, `Assumption`, and the two V.49 added. Each one made an earlier export silently
+    unreachable, and each was found by a linter rather than by anything that ran. Read from the
+    source rather than from the imported module, because by the time the module is imported the
+    shadowing has already happened and left no trace.
+    """
+    import ast
+    import pathlib
+
+    import nyxara.njp as njp
+
+    source = pathlib.Path(njp.__file__).read_text(encoding="utf-8")
+    seen: dict = {}
+    clashes = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        for alias in node.names:
+            bound = alias.asname or alias.name
+            if bound in seen and seen[bound] != node.module:
+                clashes.append(f"{bound}: {seen[bound]} then {node.module}")
+            seen[bound] = node.module
+    assert not clashes, "one of each pair is unreachable: " + "; ".join(clashes)
+
+
 # --------------------------------------------------------------------------------------------- #
 #  the brain
 # --------------------------------------------------------------------------------------------- #

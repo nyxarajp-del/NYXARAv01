@@ -1077,6 +1077,16 @@ _PREDICATE_AFFINITY: Dict[str, Dict[str, float]] = {
     # committed by the reader that produces them. A place and an event's setting answer for each
     # other and are not the same thing, so the weights are asymmetric.
     "occurs_in": {"occurs_in": 1.0, "located_in": 0.8, "part_of": 0.5, "involves": 0.5},
+    # V.50. `njp.programming` induces two things about a failure by causing it: the condition under
+    # which it happens and the change that removes it. The first has a home already; the second had
+    # none, and a fix she worked out by experiment that no question could reach would be a fact
+    # stored and unreachable — the defect `njp.ingest`'s docstring names.
+    "fixed_by": {"fixed_by": 1.0, "requires": 0.5, "purpose": 0.4},
+    # V.53. `njp.procedure` reads a task definition's answer *space* -- the set of values it
+    # allows and nothing else -- and that is a different claim from what the task produces.
+    # `produces` says "a summary"; `answered_by` says "Yes, No", and answering the second with
+    # the first would name a kind of thing where a list of permitted values was asked for.
+    "answered_by": {"answered_by": 1.0, "produces": 0.4},
     "purpose": {"purpose": 1.0, "involves": 0.7, "means": 0.6, "is_a": 0.5},
     # "What causes X?" asked about the effect and wants the cause. A forward `causes` edge *from*
     # X answers the opposite question, and answering with it is not a weaker answer — it is a
@@ -1149,6 +1159,19 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
      r"(?:located|situated|found|placed)\b", "located_in"),
     (r"\bwhere\s+(?:was|were)\s+(?P<s>.+?)\s+born\b", "birthplace"),
     (r"\bwhere\s+(?:can\s+)?(?:you|we|one|i)\s+find\s+(?P<s>.+?)\??$", "located_in"),
+    (r"\bhow\s+(?:do\s+(?:you|i|we)|to|can\s+(?:you|i|we))\s+"
+     r"(?:fix|repair|solve|avoid|prevent)\s+(?:an?\s+|the\s+)?(?P<s>.+?)\??$", "fixed_by"),
+    (r"\bhow\s+is\s+(?:an?\s+|the\s+)?(?P<s>.+?)\s+(?:fixed|avoided|prevented)\??$",
+     "fixed_by"),
+    # V.53. The answer space of a procedure, asked for in the four ways a person asks for it.
+    # Written the day the store was measured rather than assumed: `answered_by` rows were being
+    # filed at volume and *every* phrasing of the question returned UNKNOWN, which is the same
+    # unreachable-predicate defect V.49 found in `occurs_in` and V.50 found in `fixed_by`.
+    (r"\bwhat\s+(?:are\s+the\s+)?(?:answers|options|labels|choices|categories|classes)\s+"
+     r"(?:for|of|to|in)\s+(?P<s>.+?)\??$", "answered_by"),
+    (r"\bwhat\s+can\s+(?P<s>.+?)\s+(?:answer|return|output)\??$", "answered_by"),
+    (r"\bwhat\s+(?:does|do)\s+(?P<s>.+?)\s+answer\s+with\??$", "answered_by"),
+    (r"\bwhat\s+is\s+(?P<s>.+?)\s+answered\s+(?:by|with)\??$", "answered_by"),
     # Asked of a process rather than a thing. Before `where is X`, because that pattern is broad
     # enough to swallow "where does fermentation occur" if it gets there first.
     (r"\bwhere\s+do(?:es)?\s+(?P<s>.+?)\s+"
@@ -1171,7 +1194,12 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # ``produces`` (see the process-intake tests), so reading the question as ``causes`` meant a
     # verb that could be told and never asked back — the exact defect the comment above this
     # block names. It reaches ``produces`` through `_PREDICATE_ALIASES` like every other spelling.
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:cause|causes|lead\s+to|leads\s+to)\b",
+    # Anchored to the end of the question, and it has to be. `.+?` is non-greedy, so without the
+    # anchor this takes the shortest prefix before *any* occurrence of the word — and "What does
+    # finding the cause require?" read as `causes` about a subject called "finding the". The
+    # causal verb is the last thing a question of this form says; anything after it means the
+    # question was a different one.
+    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:cause|causes|lead\s+to|leads\s+to)\s*\??$",
      "causes"),
     (r"\bwhat\s+(?:happens|results?)\s+(?:from|because\s+of|due\s+to|with)\s+(?P<s>.+?)\??$",
      "causes"),

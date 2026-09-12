@@ -1,10 +1,9 @@
 """The same shape in two subjects that never met (NJP V.40)."""
 from __future__ import annotations
 
-import pytest
 
 from nyxara.njp.explain import Explainer
-from nyxara.njp.fusion import MIN_EDGES, Fusion, Pattern
+from nyxara.njp.fusion import MIN_EDGES, Fusion
 
 
 class T:

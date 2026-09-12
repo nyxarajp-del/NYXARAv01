@@ -56,8 +56,8 @@ than breaking a turn.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple
 
 __all__ = ["AssumptionKind", "AssumptionStatus", "Assumption", "AssumptionMiner"]
 

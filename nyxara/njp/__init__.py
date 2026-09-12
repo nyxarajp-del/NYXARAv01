@@ -241,7 +241,8 @@ from nyxara.njp.adversary import (
 from nyxara.njp.brain import NJPBrain, NJPPercept, NJPThought
 from nyxara.njp.canon import canonical_entity, canonical_relation, singular
 from nyxara.njp.cell import Cell
-from nyxara.njp.concepts import Concept, ConceptGenesis, Coverage, GenesisReport, Observation
+from nyxara.njp.concepts import (Concept, ConceptGenesis, Coverage, GenesisReport,
+                                 Observation as ConceptObservation)
 from nyxara.njp.field import (
     Bottleneck,
     CycleReport,
@@ -292,13 +293,17 @@ from nyxara.njp.society import (
     Contribution,
     Role,
 )
+# `Step` collides three ways in this namespace — a teaching step, an agent's step and a step of
+# an explanation — and only the last one imported was ever reachable. The two the linter found
+# shadowed are qualified here; the winner keeps the bare name, so nothing that resolves today
+# resolves differently.
 from nyxara.njp.teacher import (
     CortexTeacher,
     Distillation,
     Distiller,
     Lesson,
     RecordedTeacher,
-    Step,
+    Step as TeachingStep,
     Teacher,
     TeacherCouncil,
     Verdict as TeachingVerdict,
@@ -309,10 +314,10 @@ from nyxara.njp.evolution import (
     EvolutionTrial,
     Measurement,
     Mutation,
-    Situation,
+    Situation as EvolutionSituation,
 )
 from nyxara.njp.assume import (
-    Assumption,
+    Assumption as MinedAssumption,
     AssumptionKind,
     AssumptionMiner,
     AssumptionStatus,
@@ -332,7 +337,7 @@ from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.integrate import LearningLoop, LoopReport
 from nyxara.njp.ledger import ErrorMemory, ErrorRecord, Generation, Ledger
 from nyxara.njp.manifold import Manifold, Prediction, Snapshot
-from nyxara.njp.agency import ActionValue, Agent, Outcome, Step
+from nyxara.njp.agency import ActionValue, Agent, Outcome, Step as AgencyStep
 from nyxara.njp.agency import Plan as ActionPlan
 from nyxara.njp.calculate import Calculator, Evaluation
 # The mathematician has no `__main__` and is imported here; `nyxara.njp.mathschool` carries one
@@ -375,7 +380,10 @@ from nyxara.njp.predator import (
     Survival,
 )
 # `Structure` and `Pattern` are aliased for the reason `CausalExplanation` was: the namespace was
-# checked before these went in. `Observation` is free, `Surgeon` and `Fusion` are free.
+# checked before these went in. `Surgeon` and `Fusion` are free. `Observation` was **not** — this
+# comment said it was, and `njp.concepts.Observation` had held the name since long before. The
+# surgeon's kept it because it was imported later; the concept layer's is now
+# `ConceptObservation`.
 from nyxara.njp.surgery import (
     Observation,
     Structure as CausalStructure,
@@ -428,6 +436,31 @@ from nyxara.njp.encyclopedia import (
     Encyclopedia,
     taught_on_wikipedia,
 )
+# V.50. `Situation` is `njp.theory`'s and `Law` is too; `Operation` is free; `Trial` is not — the
+# namespace test written in V.49 caught it here, which is the second time it has. The
+# programmer's situation is an act she performed, which is a different thing from an occasion she
+# observed, and the namespace test added in V.49 is what makes saying so mandatory.
+# V.51. `Rule` is `njp.language`'s and `Case` is `njp.society`'s — two more the namespace test
+# caught, which is the third time it has paid for itself. `Pair` is `njp.study`'s. The reasoner's
+# pair is two sentences to be judged, its case a measured occasion and its rule a conjunction of
+# readings; none of them is the thing that had the name first, so none of them keeps it.
+from nyxara.njp.arithmetic import (
+    Arithmetic,
+    Check as WorkingCheck,
+    Problem as WordProblem,
+    Shape as ChainShape,
+    read_problems,
+)
+from nyxara.njp.entail import Pair as Inference, Reasoner, read_pairs
+from nyxara.njp.induce import Case as MeasuredCase, Rule as InducedRule, cover
+from nyxara.njp.programming import (
+    Law as FailureLaw,
+    Operation,
+    Programmer,
+    Repair,
+    Situation as Attempt,
+    Trial as ActTrial,
+)
 from nyxara.njp.passage import (
     Demonstration as ReadingLesson,
     KnowledgeObject,
@@ -435,6 +468,230 @@ from nyxara.njp.passage import (
     Relation as ReadRelation,
     Shape as ReadingShape,
     taught_reader,
+)
+from nyxara.njp.asked import (
+    Asked,
+    Question as AskedQuestion,
+    read_questions,
+    satisfies,
+    shape_of,
+)
+# V.57 and V.58. Every plain name in this pair is taken: `Slot` is the grammar's, `Example` and
+# `Learned` are the coding faculty's, `Group` and `Shape` are general enough to be anybody's, and
+# `probe` is a verb three modules use. So all of them are qualified at the door. The rule this
+# package keeps is that an export list never renames a thing where it lives and never silently
+# takes a name somebody else already answers to.
+from nyxara.njp.shapes import (
+    Group as TaskGroup,
+    Shape as TaskShape,
+    Slot as TemplateSlot,
+    align as align_prompts,
+    induce as induce_shape,
+    read_groups as read_task_groups,
+    read_shapes,
+)
+# V.74. `Critique` is `njp.metareason`'s — a critique of a *plan*, which is a different thing from
+# a critique of a *measurement* — so the newcomer is qualified at the door rather than taking a
+# name something else already answers to. `Benchmark` and `Finding` are free but qualified with it,
+# because a half-qualified pair reads as though one of them were the general case.
+# V.82. Both plain names are taken by `njp.programming` — a `Repair` there is a fix to a *program*
+# and a `Situation` is aliased to `Attempt` — so the loop's are qualified at the door. `Ascent` and
+# `ascend` are free and stay bare.
+from nyxara.njp.ascent import (
+    Ascent,
+    Attempt as LoopTurn,
+    Repair as CandidateRepair,
+    ascend,
+)
+# V.99. `Route` is free and `Across` is free; `carried` and `across` are far too general to take
+# bare, and `free_lunch` reads as a joke rather than a name without its module around it.
+from nyxara.njp.supply import Across, Route, across as price_across_worlds, carried, free_lunch
+# V.97. `Rule` is `njp.finding`'s and `njp.regularity`'s already, and `Footing` is
+# `njp.discourse`'s — where it is how one speaker stands to another, not what a tower rests on.
+# Both qualified; `stand` is far too general to take bare.
+from nyxara.njp.bedrock import (
+    Footing as PricedFooting,
+    Rule as FamilyRule,
+    reach_needed,
+    stand as price_the_footings,
+)
+# V.96. `Language` is free — `njp.language` is a module, not a class — and `Storey` and `Climb`
+# are free. `price` and `climb` are both far too general to take bare.
+from nyxara.njp.tower import (
+    Climb,
+    Language,
+    Storey,
+    climb as price_the_tower,
+    price as price_a_storey,
+)
+# V.95. `Way` is free and `Found` is free; `search` is `njp.interact`'s already under a qualified
+# name, so this one is qualified too.
+from nyxara.njp.combining import Found, Way, charged, search as search_ways, ways
+# V.94. `Description` is free, `Recipe` is free; `describe` is far too general to take bare and
+# `Observed` is a type alias rather than a class, so it stays inside its module.
+from nyxara.njp.generators import (
+    Description,
+    Recipe,
+    describe as describe_transformations,
+    longhand,
+    watch_behaviour,
+)
+# V.93. `Fingerprint` is free; `claim`, `watch` and `compare` are all far too general to take bare,
+# and `compare` is `njp.worth`'s already under a qualified name.
+from nyxara.njp.integrity import (
+    Disturbed,
+    Fingerprint,
+    Occupied,
+    claim as claim_path,
+    fingerprint,
+    watch as watch_instruments,
+)
+# V.92. `Vocabulary` is free and `Weighed` is free; `compare` and `weigh` are far too general to
+# take bare, and `separates` would read as the general case of something specific.
+from nyxara.njp.worth import (
+    Vocabulary,
+    Weighed,
+    compare as compare_vocabularies,
+    weigh as weigh_vocabulary,
+)
+# V.91. `Shape` is `njp.shapes`' already — a task's template — so the move substrate's is
+# qualified. `reach` and `earns` are far too general to take bare.
+from nyxara.njp.substrate import (
+    Earned,
+    Shape as MoveShape,
+    earns as move_earns,
+    every_move,
+    reach as readable_pairs,
+    separations,
+)
+# V.90. `Rule` is `njp.finding`'s — a learned rule for scoring a span — and `Move` is
+# `njp.procedure`'s. Both qualified. `Split` is free and `discover` is not: `njp.discover` is a
+# whole module about finding regularities in episodes.
+from nyxara.njp.regularity import (
+    Move as RowMove,
+    Rule as CandidateLaw,
+    Split,
+    discover as discover_laws,
+    differ,
+    holds,
+    rules,
+)
+# V.89. `Law` is `njp.discover`'s already — a regularity found in episodes, not a structural
+# property of an operation — and `Finding` is `njp.measurement`'s. Both qualified. `Reading` is
+# `njp.finding`'s too, so the trio goes together rather than one of them taking a bare name.
+from nyxara.njp.probing import (
+    Family,
+    Finding as LawFinding,
+    Law as StructuralLaw,
+    Reading as ProbeReading,
+    partition,
+    probe,
+)
+# V.88. `Stencil` and `response` are free; `Verdict` is `njp.truth`'s and `njp.attribution`'s
+# already, so this one is qualified. `judge` is far too general to take bare.
+from nyxara.njp.closure import (
+    Stencil,
+    Verdict as ClosureVerdict,
+    difference,
+    in_span,
+    judge as judge_primitive,
+    obeys_superposition,
+    response,
+)
+# V.87. `Measurement` is already taken — `njp.metrology` has one, which is a reading with a unit,
+# not a recipe for producing one — so the newcomer is qualified, and `Register` and `Trace` are
+# qualified with it so the trio reads as one thing rather than one general case and two specifics.
+from nyxara.njp.genesis import (
+    Measurement as InventedMeasurement,
+    Register as MeasurementRegister,
+    Trace as RawTrace,
+    admit,
+    criticise,
+    mine,
+)
+# V.86. `Candidate` is `njp.evolution`'s — a candidate *rewrite* — and `Standing` is
+# `njp.discourse`'s, where it is how one speaker stands to another. Both are qualified. `Trait`,
+# `sift` and `uncontrolled` are free, and `sift` is kept bare because nothing else in this
+# namespace sifts anything.
+from nyxara.njp.latent import (
+    LADDER,
+    Candidate as CausalCandidate,
+    Standing as CausalEvidence,
+    Trait,
+    put_to_the_test,
+    sift,
+    uncontrolled,
+)
+# V.85. `Interaction` is free and `Reading` is not — `njp.finding` has a Reading, which is a
+# passage and a question, and nothing like one run's per-item scores. `search` and `compose` are
+# both far too general to take bare.
+from nyxara.njp.interact import (
+    Interaction,
+    Reading as PerItemReading,
+    compose as compose_interventions,
+    interaction,
+    mechanisms,
+    search as search_interactions,
+)
+# V.84. `Map` is free; `Intervention` and `Outcome` are **not** — `njp.universe` has exported an
+# `Experiment` since long before this, and `njp.agency` an `Outcome`, and the first version of this
+# block took both bare names and silently shadowed them for eight versions. A duplicated entry in
+# `__all__` is a name one module lost, and nothing complains about it.
+# `Map` is free; `Knob`, `Held`, `Intervention`, `Outcome` and `Gap` are free; `survey`,
+# `gaps` and `propose` are free. `Intervention` is qualified anyway — `njp.causal` has a notion of
+# intervening on a graph, and a bare name here would read as the general case of that.
+from nyxara.njp.space import (
+    Gap as BlindSpot,
+    Held,
+    Intervention as ProbeExperiment,
+    Knob,
+    Map as HypothesisSpace,
+    Outcome as ProbeOutcome,
+    gaps,
+    propose,
+    survey,
+)
+# V.83. `Stage` is already a stage of a *curriculum*, which is not a run of an organ under
+# examination, so the fieldwork one is qualified. `Fieldwork`, `diagnose` and `span_stage` are free.
+from nyxara.njp.fieldwork import (
+    Fieldwork,
+    Stage as MeasuredStage,
+    diagnose,
+    span_stage,
+)
+# V.78. All three names are free, and kept bare for once — nothing else in this namespace answers
+# to a rung of a difficulty ladder.
+from nyxara.njp.reach import Ladder, Rung, climb, the_gap
+# V.77. `Verdict` is `njp.truth`'s already — a verdict on a *claim*, not on a hypothesis about why
+# something failed — so the newcomers are qualified together rather than half of them taking bare
+# names while the other half does not.
+from nyxara.njp.attribution import (
+    Attribution as FailureAttribution,
+    Failure as ObservedFailure,
+    Verdict as CauseVerdict,
+    attribute as attribute_failure,
+    chain as failure_chain,
+)
+from nyxara.njp.measurement import (
+    Benchmark as MeasuredBenchmark,
+    Critique as MeasurementCritique,
+    Finding as MeasurementFinding,
+    critique as critique_measurement,
+)
+from nyxara.njp.answering import (
+    Example as TaskExample,
+    Learned as TaskLearned,
+    TaskLearner,
+    probe as probe_fields,
+    read_examples as read_task_examples,
+)
+from nyxara.njp.procedure import (
+    Condition as Branch,
+    Lesson as ProcedureLesson,
+    Procedure,
+    ProcedureReader,
+    RoleShape,
+    taught_procedures,
 )
 from nyxara.njp.provenance import (
     Blame,
@@ -625,9 +882,60 @@ __all__ = [
     # NJP V.46/V.47 — what cannot work, and what a concept is made of
     "Boundary", "HardConstraint", "Necessary", "Impossible", "Funnel",
     "Genome", "Kinship", "read_genome",
+    # Names that were shadowed and unreachable until V.49's lint pass found them.
+    "TeachingStep", "AgencyStep", "ConceptObservation", "EvolutionSituation",
+    "MinedAssumption",
     "KnowledgeObject", "PassageReader", "ReadRelation", "ReadingLesson", "ReadingShape",
     "taught_reader",
     "Article", "ReadingCoverage", "Encyclopedia", "taught_on_wikipedia",
+    "Programmer", "Operation", "Attempt", "ActTrial", "FailureLaw", "Repair",
+    "Reasoner", "Inference", "read_pairs", "InducedRule", "MeasuredCase", "cover",
+    "Arithmetic", "WordProblem", "WorkingCheck", "ChainShape", "read_problems",
+    # V.53. `Condition` and `Lesson` were both taken -- by `njp.core`'s conditional and by
+    # `njp.distil`'s teaching step -- so the procedural pair is qualified at the door rather than
+    # silently replacing them, which is what the export-shadowing test exists to stop.
+    "Procedure", "ProcedureReader", "ProcedureLesson", "Branch", "RoleShape",
+    "taught_procedures",
+    # V.54. `Question` is `njp.asking`'s already, so the question-with-an-answer is qualified at
+    # the door rather than silently replacing it.
+    "Asked", "AskedQuestion", "read_questions", "satisfies", "shape_of",
+    # V.57 -- the dataset's own templates, induced by alignment rather than written down. Every
+    # name here is qualified because every plain one was already answered to by something else.
+    "TaskShape", "TaskGroup", "TemplateSlot", "align_prompts", "induce_shape",
+    "read_task_groups", "read_shapes",
+    # V.58 -- learning to answer a task from examples of it, against its own majority floor.
+    "TaskLearner", "TaskExample", "TaskLearned", "probe_fields", "read_task_examples",
+    # V.74 -- asking whether a number measures what it appears to. `Critique` was taken by the
+    # planner's critique of a strategy, which is a different object entirely.
+    "MeasuredBenchmark", "MeasurementCritique", "MeasurementFinding", "critique_measurement",
+    # V.77 -- why it failed, tested rather than guessed. `Verdict` was the truth gauntlet's.
+    "ObservedFailure", "FailureAttribution", "CauseVerdict", "attribute_failure",
+    "failure_chain",
+    # V.78 -- how far a capability reaches, and the four ways it has no edge to report.
+    "Ladder", "Rung", "climb", "the_gap",
+    # V.82 -- the loop, and whether diagnosing beats guessing. `Repair` and `Attempt` were
+    # `njp.programming`'s, so the loop's carry qualified names.
+    "Ascent", "LoopTurn", "CandidateRepair", "ascend",
+    "Fieldwork", "MeasuredStage", "diagnose", "span_stage",
+    "HypothesisSpace", "Knob", "Held", "ProbeExperiment", "ProbeOutcome", "BlindSpot",
+    "survey", "gaps", "propose",
+    "Interaction", "PerItemReading", "interaction", "mechanisms",
+    "search_interactions", "compose_interventions",
+    "Trait", "CausalCandidate", "CausalEvidence", "LADDER",
+    "sift", "uncontrolled", "put_to_the_test",
+    "RawTrace", "InventedMeasurement", "MeasurementRegister", "mine", "criticise", "admit",
+    "Stencil", "ClosureVerdict", "difference", "in_span", "judge_primitive",
+    "obeys_superposition", "response",
+    "StructuralLaw", "LawFinding", "ProbeReading", "Family", "probe", "partition",
+    "CandidateLaw", "RowMove", "Split", "rules", "holds", "differ", "discover_laws",
+    "Vocabulary", "Weighed", "compare_vocabularies", "weigh_vocabulary",
+    "Fingerprint", "Occupied", "Disturbed", "fingerprint", "claim_path", "watch_instruments",
+    "Description", "Recipe", "describe_transformations", "watch_behaviour", "longhand",
+    "Way", "Found", "ways", "charged", "search_ways",
+    "Language", "Storey", "Climb", "price_the_tower", "price_a_storey",
+    "FamilyRule", "PricedFooting", "reach_needed", "price_the_footings",
+    "Route", "Across", "carried", "free_lunch", "price_across_worlds",
+    "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",

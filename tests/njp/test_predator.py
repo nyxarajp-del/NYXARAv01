@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.njp.explain import Explainer
-from nyxara.njp.predator import EXCLUDES, Attack, Predator, Survival
+from nyxara.njp.predator import EXCLUDES
 
 
 class Triple:

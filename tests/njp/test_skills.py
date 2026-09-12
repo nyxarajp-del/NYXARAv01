@@ -21,7 +21,6 @@ is stability by use over ninety days — was empty on every session while both w
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.njp import NJPBrain
 from nyxara.njp.levels import Level

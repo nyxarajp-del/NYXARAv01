@@ -47,7 +47,7 @@ because a broken accountant must not be able to silence her.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 __all__ = ["Tier", "Budget", "CognitiveEconomy", "budget_for"]

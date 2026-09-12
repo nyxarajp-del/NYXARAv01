@@ -18,7 +18,6 @@ goes back to asking `ambiguous()`.
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.njp.universe import InternalUniverse, Orientation, _MIN_DEATHS
 

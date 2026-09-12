@@ -42,7 +42,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from dataclasses import field as dc_field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.ledger import Ledger
@@ -398,6 +398,16 @@ class NJPBrain:
         #: everything that reads it treats that as "no encyclopedia", never as an error.
         self.encyclopedia = None
         self.reader = self._build_reader(c)
+        self.programmer = self._build_programmer(c)
+        self.entailer = self._build_entailer(c)
+        self.arithmetic = self._build_arithmetic(c)
+        self.procedures = self._build_procedures(c)
+        self.asked = self._build_asked(c)
+        # After `asked` and independent of it. The shape reader holds the dataset's own templates
+        # and the answerer learns to fill them; neither files a fact, so nothing downstream of the
+        # fact store cares in which order they arrive.
+        self.shapes = self._build_shapes(c)
+        self.answerer = self._build_answerer(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
@@ -653,6 +663,17 @@ class NJPBrain:
                               min_precision=self._cfg("discover_min_precision", 0.7),
                               max_order=self._cfg("discover_max_order", 3))
         except Exception:  # noqa: BLE001 — she keeps her pairs, and forms no rules above them
+            return None
+
+    def _build_arithmetic(self, c: Any) -> Any:
+        """The organ that recomputes a worked sum instead of believing it."""
+        if not self._gate("arithmetic", True):
+            return None
+        try:
+            from nyxara.njp.arithmetic import Arithmetic
+
+            return Arithmetic()
+        except Exception:  # noqa: BLE001
             return None
 
     def _build_reasoner(self, c: Any) -> Any:
@@ -1898,6 +1919,109 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a brain without it still parses sentences
             return None
 
+    def _build_procedures(self, c: Any) -> Any:
+        """The organ that reads a task definition into goal, prerequisites and answer space.
+
+        Taught, unlike the programmer and the reasoner, because its demonstrations are the
+        module's own and a reader with none of them reads nothing at all -- measured, on all three
+        fields, on every one of the 698 definitions.
+        """
+        if not self._gate("procedure", True):
+            return None
+        try:
+            from nyxara.njp.procedure import taught_procedures
+
+            return taught_procedures()
+        except Exception:  # noqa: BLE001 — a brain without it still reads passages
+            return None
+
+    def _build_asked(self, c: Any) -> Any:
+        """The organ that knows what *kind* of thing a question is asking for.
+
+        Untrained, like the programmer and the entailer: everything it knows comes from questions
+        it has been shown, and a brain shown none should expect nothing of an answer.
+        :meth:`learn_answer_kinds` gives it some.
+        """
+        if not self._gate("asked", True):
+            return None
+        try:
+            from nyxara.njp.asked import Asked
+
+            return Asked()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_shapes(self, c: Any) -> Any:
+        """The dataset's own templates, as she induced them by alignment.
+
+        Empty until :meth:`learn_task_shapes` is called or a shapes corpus is shipped beside the
+        package. A brain that has been shown no tasks knows the form of none of them, and this
+        returns an empty index rather than pretending to a library it does not have.
+        """
+        if not self._gate("shapes", True):
+            return None
+        try:
+            from nyxara.njp.shapes import read_shapes
+
+            return {shape.task: shape for shape in read_shapes()}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_answerer(self, c: Any) -> Any:
+        """The organ that learns to *do* a task from examples of it.
+
+        Untrained, like the programmer and the entailer. What it holds after
+        :meth:`learn_tasks` is one small rule set per task, each carrying the accuracy it reached
+        on rows it was not shown and the majority floor it had to clear to mean anything.
+        """
+        if not self._gate("answering", True):
+            return None
+        try:
+            from nyxara.njp.answering import TaskLearner
+
+            return {"engine": TaskLearner(), "learned": {}}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_entailer(self, c: Any) -> Any:
+        """The organ that answers whether one sentence follows from another.
+
+        Named ``_build_entailer`` and not ``_build_reasoner``, which is what V.51 called it — and
+        :meth:`_build_reasoner` was already taken, by the deliberate-reasoning organ four hundred
+        lines above. Python keeps the second definition, so from V.51 until this line was written
+        ``self.reasoner`` held an entailment reasoner and ``njp.reason.Reasoner`` was **never
+        constructed at all**. Nothing raised: both objects exist, both are truthy, and the brain
+        went on answering. The linter found it; no test did.
+
+        Untrained, for the same reason the programmer is: everything it knows came from pairs it
+        was shown, so a brain shown none should know none. :meth:`learn_reasoning` gives it some.
+        """
+        if not self._gate("entail", True):
+            return None
+        try:
+            from nyxara.njp.entail import Reasoner
+
+            return Reasoner()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_programmer(self, c: Any) -> Any:
+        """The organ that finds out what breaks a program by breaking one.
+
+        Built **untrained**, and that is not laziness about a slow constructor — although it is one
+        (a run that learns every error kind is a minute of real work). It is that everything this
+        organ knows comes from acts it has performed, so a brain that has performed none should
+        know none. :meth:`learn_programming` is the call that gives it a history.
+        """
+        if not self._gate("programming", True):
+            return None
+        try:
+            from nyxara.njp.programming import Programmer
+
+            return Programmer(seed=int(getattr(c, "seed", 0) or 0))
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_language(self, c: Any) -> Any:
         """The organ that can acquire a grammar she was not shipped with.
 
@@ -2206,6 +2330,405 @@ class NJPBrain:
             return out
         return out
 
+    def learn_programming(self, *, acts: int = 1200, file: bool = True) -> Dict[str, Any]:
+        """Perform operations, watch what breaks, work out why, and file what survived.
+
+        Every law is filed as ``occurs_when`` and every repair she found **by experiment** as
+        ``fixed_by``, so *"what causes an IndexError"* and *"how do you fix an IndexError"* are
+        answerable from what she did rather than from anything anybody wrote down. A law that did
+        not survive :meth:`~nyxara.njp.programming.Programmer.challenge` is not filed at all.
+        """
+        out: Dict[str, Any] = {"acts": 0, "laws": 0, "filed": [], "outcomes": {}}
+        if self.programmer is None:
+            return out
+        try:
+            self.programmer.experiment(int(acts))
+            self.programmer.learn()
+            self.programmer.learn_failure()
+            self.programmer.challenge(tries=250)
+            out["acts"] = len(self.programmer.trials)
+            out["laws"] = len(self.programmer.laws)
+            out["outcomes"] = self.programmer.seen()
+            if not file or self.grounder is None:
+                return out
+            from nyxara.njp.grounding import GroundedTriple
+
+            seen: set = set()
+            for law in self.programmer.laws:
+                condition = law.english().split(" happens when ", 1)[-1]
+                # Filed **both ways round**, and not for symmetry's sake. "What causes X" is an
+                # inverted lookup — it searches for something whose `causes` edge points *at* X —
+                # so a forward `X occurs_when C` answers "when does X happen" and leaves "what
+                # causes X" empty from the very same fact. Raising the affinity does not fix that
+                # and would only be a tuned table hiding a missing edge. The law genuinely says
+                # both things, so both are stored, and `njp.explain` can walk the causal one.
+                rows = [("occurs_when", condition)]
+                repair = self.programmer.fix_for(law.outcome)
+                if repair is not None:
+                    rows.append(("fixed_by", repair.render()))
+                for predicate, value in rows:
+                    if not value or (law.outcome, predicate, value) in seen:
+                        continue
+                    seen.add((law.outcome, predicate, value))
+                    self.grounder._assert(GroundedTriple(
+                        subject=law.outcome,
+                        predicate=self.grounder._predicate(predicate), object=value,
+                        confidence=0.85, source="experiment",
+                        text=f"{law.outcome}: {law.render()}", provenance="observed"))
+                    out["filed"].append(f"{law.outcome} | {predicate} = {value[:60]}")
+                if condition:
+                    self.grounder._assert(GroundedTriple(
+                        subject=condition, predicate="causes", object=law.outcome,
+                        confidence=0.85, source="experiment",
+                        text=f"{law.outcome}: {law.render()}", provenance="observed"))
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def read_procedure(self, text: str, *, name: str = "", task: str = "",
+                       source: str = "", licence: str = "") -> Any:
+        """Read a task definition into a :class:`~nyxara.njp.procedure.Procedure`. Files nothing.
+
+        The counterpart of :meth:`read_passage`, and separate from :meth:`learn_procedures` for
+        the same reason: extracting is a reading and filing is a decision.
+        """
+        if self.procedures is None:
+            return None
+        try:
+            return self.procedures.read(str(text or ""), name=str(name), task=str(task),
+                                        source=str(source), licence=str(licence))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def can_do(self, name: str, have: Sequence[str] = ()) -> Dict[str, Any]:
+        """Could she run this procedure with what she has been handed, and what is missing?
+
+        Answers from a procedure she has read, never from the fact store: a prerequisite is about
+        this job and not about the world. ``missing`` is returned rather than swallowed, because
+        "no" without "what is absent" is not usable by anything.
+        """
+        out: Dict[str, Any] = {"known": False, "ready": False, "missing": [], "goal": "",
+                               "outputs": []}
+        held = getattr(self, "_procedures_read", {}).get(str(name))
+        if held is None:
+            return out
+        met, missing = held.prerequisites_met(list(have))
+        out.update({"known": True, "ready": met, "missing": missing, "goal": held.goal,
+                    "outputs": list(held.outputs), "action": held.action})
+        return out
+
+    def learn_procedures(self, *, limit: int = 0, file: bool = True) -> Dict[str, Any]:
+        """Read the task-definition corpus and file what each procedure needs and produces.
+
+        Three predicates, and each is a different question in English. ``requires`` answers *what
+        do you need to do X*; ``produces`` answers *what does X give you*; ``answered_by`` answers
+        *what are the answers for X*. A procedure whose answer space is unstated files no
+        ``answered_by`` row rather than an empty one — an answer space of nothing and an unstated
+        answer space are different claims and only one of them is true.
+        """
+        out: Dict[str, Any] = {"read": 0, "filed": 0, "with_goal": 0, "with_outputs": 0,
+                               "actions": {}}
+        if self.procedures is None:
+            return out
+        try:
+            from nyxara.njp.grounding import GroundedTriple
+            from nyxara.njp.procedureschool import read_corpus
+
+            rows = read_corpus()
+            if limit:
+                rows = rows[:int(limit)]
+            store: Dict[str, Any] = getattr(self, "_procedures_read", {})
+            for row in rows:
+                got = self.procedures.read(str(row.get("instruction") or ""),
+                                           task=str(row.get("task") or ""),
+                                           source=str(row.get("source") or ""),
+                                           licence=str(row.get("licence") or ""))
+                out["read"] += 1
+                store[got.name] = got
+                if got.goal:
+                    out["with_goal"] += 1
+                    out["actions"][got.action] = out["actions"].get(got.action, 0) + 1
+                if got.outputs:
+                    out["with_outputs"] += 1
+                if not file or self.grounder is None:
+                    continue
+                claims = [("requires", need) for need in got.given]
+                if got.goal:
+                    claims.append(("produces", got.goal))
+                if got.decides:
+                    claims.append(("answered_by", ", ".join(got.outputs)))
+                for predicate, value in claims:
+                    if not value:
+                        continue
+                    self.grounder._assert(GroundedTriple(
+                        subject=got.name, predicate=self.grounder._predicate(predicate),
+                        object=value, confidence=0.8, source=got.source or "flan",
+                        text=got.text[:400], provenance="read"))
+                    out["filed"] += 1
+            self._procedures_read = store
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def learn_answer_kinds(self, *, limit: int = 0) -> Dict[str, Any]:
+        """Read the question corpus and induce what kind of answer each shape of question wants.
+
+        Files nothing. What comes out is a set of rules about **questions**, not facts about the
+        world, and the fact store is not where a rule about a question belongs.
+        """
+        out: Dict[str, Any] = {"questions": 0, "rules": 0}
+        if self.asked is None:
+            return out
+        try:
+            from nyxara.njp.asked import read_questions
+            from nyxara.njp.askedschool import shuffled
+
+            # Shuffled before it is cut, never a prefix. The corpus lands on disk in the order the
+            # nine shards were folded, so the first 20,000 rows are one part of one submix — the
+            # same slice bias that made `entailschool`'s first learning curve meaningless.
+            rows = read_questions()
+            if limit:
+                rows = shuffled(rows)[:int(limit)]
+            self.asked.learn_from(rows)
+            out.update({"questions": len(rows), "rules": len(self.asked.rules),
+                        "learned": self.asked.learned()})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def answer_kind(self, question: str) -> Dict[str, Any]:
+        """What kind of answer this question wants, and which rule says so. Silence is allowed."""
+        out: Dict[str, Any] = {"kind": "", "why": ""}
+        if self.asked is None:
+            return out
+        try:
+            kind, why = self.asked.expects(str(question or ""))
+            out.update({"kind": kind, "why": why})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def check_answer(self, question: str, answer: str) -> Dict[str, Any]:
+        """Is this candidate the wrong *kind* of thing for this question?
+
+        A veto and nothing else — it supplies no fact and raises no confidence. Deliberately not
+        wired into :meth:`perceive`: at the bar where it is cheap it can speak about an eighth of
+        questions, and at the bar where it catches a counting question offered a phrase it
+        suppresses one correct answer in thirty-four. That is a trade for the caller to make with
+        the table in :mod:`nyxara.njp.asked` in front of them, not one to make silently for
+        everything the grounder ever answers.
+        """
+        out: Dict[str, Any] = {"wrong_kind": False, "why": "", "expected": ""}
+        if self.asked is None:
+            return out
+        try:
+            wrong, why = self.asked.contradicts(str(question or ""), str(answer or ""))
+            kind, _rule = self.asked.expects(str(question or ""))
+            out.update({"wrong_kind": bool(wrong), "why": why, "expected": kind})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def learn_task_shapes(self, path: str = "", *, limit: int = 0) -> Dict[str, Any]:
+        """Induce the template behind each group of rows the collector kept.
+
+        Files nothing. A shape is a claim about how a *prompt was rendered*, not about the world,
+        and the fact store is not where a claim about a string belongs.
+        """
+        out: Dict[str, Any] = {"groups": 0, "shapes": 0}
+        if self.shapes is None:
+            return out
+        try:
+            from pathlib import Path as _Path
+
+            from nyxara.njp.shapes import induce, read_groups
+
+            paths = sorted(_Path(path).glob("*.jsonl.gz")) if path else []
+            seen = 0
+            for one in paths:
+                for group in read_groups(one):
+                    if limit and seen >= int(limit):
+                        break
+                    seen += 1
+                    if len(group.prompts) < 3:
+                        continue
+                    shape = induce(group)
+                    # The template with the most rows behind it wins: a shape induced from six
+                    # rows is better evidence than one induced from two, and a task may render
+                    # through several templates.
+                    if shape is None:
+                        continue
+                    held = self.shapes.get(group.task)
+                    if held is None or shape.rows > held.rows:
+                        self.shapes[group.task] = shape
+            out.update({"groups": seen, "shapes": len(self.shapes)})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def learn_tasks(self, path: str = "", *, limit: int = 0) -> Dict[str, Any]:
+        """Learn to answer each task from examples of it, and keep only what beat its own floor.
+
+        Files nothing, and claims nothing about a task whose rules did not clear the majority
+        baseline for that task. A rule set that does no better than always saying the commonest
+        answer has learned nothing about the task, whatever its accuracy looks like, so it is
+        counted and discarded rather than kept and quoted.
+        """
+        out: Dict[str, Any] = {"tasks": 0, "learned": 0, "free_text": 0, "too_few": 0}
+        if self.answerer is None:
+            return out
+        try:
+            from pathlib import Path as _Path
+
+            from nyxara.njp.answering import read_examples
+
+            engine = self.answerer["engine"]
+            known = self.shapes or {}
+            seen = 0
+            for one in sorted(_Path(path).glob("*.jsonl.gz")) if path else []:
+                for task, examples in read_examples(one):
+                    if limit and seen >= int(limit):
+                        break
+                    seen += 1
+                    got = engine.learn(examples, known.get(task))
+                    if got is None:
+                        out["too_few"] += 1
+                        continue
+                    if not got.learned_something:
+                        continue
+                    self.answerer["learned"][task] = got
+            out.update({"tasks": seen, "learned": len(self.answerer["learned"])})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def do_task(self, task: str, prompt: str) -> Dict[str, Any]:
+        """Her answer to one instance of a task she was taught, with what it is worth beside it.
+
+        ``accuracy`` and ``majority`` are both returned and neither is decoration: an answer from
+        a task whose two numbers are equal is an answer from a rule set that learned nothing, and
+        a caller that reads only the first number will believe otherwise.
+        """
+        out: Dict[str, Any] = {"answer": "", "accuracy": 0.0, "majority": 0.0, "known": False}
+        if self.answerer is None:
+            return out
+        try:
+            got = self.answerer["learned"].get(str(task or ""))
+            if got is None:
+                return out
+            engine = self.answerer["engine"]
+            # No vocabulary passed: the rules were induced over the one the task was learned with
+            # and `Learned` carries it. Rebuilding one from the prompt in hand would read every
+            # term as missing, fire no rule, and return the majority answer without saying so.
+            out.update({"answer": engine.answer(got, str(prompt or "")),
+                        "accuracy": got.accuracy, "majority": got.majority, "known": True})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def learn_reasoning(self, *, limit: int = 0) -> Dict[str, Any]:
+        """Read FLAN's worked inferences and induce what predicts which answer.
+
+        Files nothing. What comes out is a small set of rules about **pairs of sentences**, not
+        facts about the world, and the fact store is not where a rule about a pair belongs.
+        """
+        out: Dict[str, Any] = {"pairs": 0, "rules": 0, "near_misses": 0}
+        if self.entailer is None:
+            return out
+        try:
+            from nyxara.njp.entail import read_pairs
+
+            pairs = read_pairs()
+            if limit:
+                pairs = pairs[:int(limit)]
+            self.entailer.learn_from(pairs)
+            out.update({"pairs": len(pairs), "rules": len(self.entailer.rules),
+                        "near_misses": len(self.entailer.near_misses),
+                        "learned": [r.to_dict() for r in self.entailer.rules]})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def entails(self, premise: str, hypothesis: str = "") -> Dict[str, Any]:
+        """Does the second sentence follow from the first?
+
+        Takes the two sentences, or one string in the form the question is usually asked in —
+        *If "P" does that mean that "H"?* — because a capability reachable only by passing two
+        arguments from Python is not reachable from English.
+        """
+        out: Dict[str, Any] = {"answer": "unknown", "why": "", "premise": "", "hypothesis": ""}
+        if self.entailer is None:
+            return out
+        try:
+            import re as _re
+
+            first, second = str(premise or ""), str(hypothesis or "")
+            if not second:
+                quoted = _re.findall(r'"([^"]{4,400})"', first)
+                if len(quoted) < 2:
+                    out["why"] = "two sentences are needed, or one that quotes both"
+                    return out
+                first, second = quoted[-2], quoted[-1]
+            said, why = self.entailer.answer(first, second)
+            out.update({"answer": said, "why": why, "premise": first, "hypothesis": second})
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def check_working(self, worked: str, answer: str = "") -> Dict[str, Any]:
+        """Recompute someone's working. Every stated sum, and whether the chain reaches its end.
+
+        The one place in this package where a claim can be **settled** rather than weighed: ``5 *
+        120`` is 600 or it is not. So this returns what disagreed, not a confidence.
+        """
+        out: Dict[str, Any] = {"steps": 0, "sound": False, "reaches": False, "wrong": ""}
+        if self.arithmetic is None:
+            return out
+        try:
+            import re as _re
+
+            from nyxara.njp.arithmetic import Problem
+
+            pattern = _re.compile(r"(?<![\d.)])(\d[\d,.\s()+\-*/×÷]*[\d)])\s*=\s*"
+                                  r"(-?\d[\d,]*(?:\.\d+)?(?:\s*/\s*\d+)?)")
+            steps = tuple((" ".join(a.split()), " ".join(b.split()))
+                          for a, b in pattern.findall(str(worked or ""))
+                          if any(op in a for op in "+-*/×÷"))
+            got = self.arithmetic.check(Problem(worked=str(worked or ""),
+                                                answer=str(answer or ""), steps=steps))
+            out = got.to_dict()
+            out["steps"] = len(steps)
+        except Exception:  # noqa: BLE001
+            return out
+        return out
+
+    def go_to_arithmetic_school(self) -> Any:
+        """The corpus audited by recomputation, and how far shape-picking gets on unseen problems."""
+        try:
+            from nyxara.njp.arithmeticschool import run
+
+            return run()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_reasoning_school(self) -> Any:
+        """Held-out accuracy, the base rate, the induction-off floor, and the purity sweep."""
+        try:
+            from nyxara.njp.entailschool import run
+
+            return run()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_programming_school(self) -> Any:
+        """Held-out prediction, the two floors, repair, and transfer to an operation never done."""
+        try:
+            from nyxara.njp.programmingschool import run
+
+            return run()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_encyclopedia_school(self) -> Any:
         """Coverage, audited precision and definition accuracy on real encyclopedia prose."""
         try:
@@ -2221,6 +2744,495 @@ class NJPBrain:
             from nyxara.njp.passageschool import run
 
             return {name: report.to_dict() for name, report in run().items()}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_procedure_school(self) -> Any:
+        """Sit the procedure audit: thirty-six hand-marked definitions, the floor and four
+        ablations, with the sealed fifteen read last."""
+        try:
+            from nyxara.njp.procedureschool import examine
+
+            return {name: report.to_dict() for name, report in examine().items()}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_asked_school(self) -> Any:
+        """Sit the answer-kind audit: the purity table, the veto table, and the two ablations.
+
+        The veto table is the one to read. It prints how far the veto reaches beside how often it
+        rejects a correct answer, because either number alone can be made to look perfect.
+        """
+        try:
+            from nyxara.njp.askedschool import examine, veto_bar
+
+            return {"kinds": {name: report.to_dict() for name, report in examine().items()},
+                    "veto": [{"bar": bar, "fires_on": fires, "rejects_correct": cost}
+                             for bar, fires, cost in veto_bar()]}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def critique_measurement(self, benchmark: Any) -> Any:
+        """Ask of a benchmark what it is comparing against, before believing what it reports.
+
+        Takes a :class:`~nyxara.njp.measurement.Benchmark` and returns the seven checks, including
+        the ones it could not run — which are reported as *not checked* and never as passed. A
+        number this returns ``trusted=False`` for is not a bad score; it is a score this benchmark
+        cannot support, and the two need different responses.
+        """
+        try:
+            from nyxara.njp.measurement import critique
+
+            return critique(benchmark).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_ascent_school(self, capabilities: int = 60) -> Any:
+        """Sit the loop audit: is diagnosing worth more than guessing?
+
+        The number is ``moved_over_blind``. A loop that diagnoses carefully and then repairs no
+        better than chance has learned nothing about itself — it has only spent longer — and
+        without this comparison the six organs underneath it are bookkeeping.
+        """
+        try:
+            from nyxara.njp.ascentschool import examine
+
+            return examine(capabilities)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def diagnose_a_real_organ(self) -> Any:
+        """Point the whole diagnostic stack at the span stage, not at a fixture built for it.
+
+        Returns ``root`` and ``spoiled``. The interesting outcome is the one that actually
+        happened: ``root`` empty, because every repair on the shelf was genuinely refuted — and one
+        of them refuted **nothing**, having moved the ceiling as well as the method. Needs the
+        reading corpus, so ``None`` where it is not present.
+        """
+        try:
+            from nyxara.njp.fieldwork import diagnose
+
+            return diagnose().to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def where_it_never_looked(self) -> Any:
+        """Which region of the causal map every experiment left untouched.
+
+        The step V.83 was missing. *Every hypothesis I hold failed* and *the cause is unknowable*
+        are different claims, and this returns the one between them: which corner of the space
+        nothing informative ever entered, and what it would take to enter it. Needs the reading
+        corpus, so ``None`` where it is not present.
+        """
+        try:
+            from nyxara.njp.fieldwork import explore
+
+            return explore().to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_substrate_school(self) -> Any:
+        """Sit the earned-vocabulary audit: does a generated move buy anything?
+
+        A move is four numbers — ``out[i] = scale · row[(stride·i + offset) mod n] + lift`` — and
+        all seven of V.90's are special cases. ``flattered`` is the number: a move credited for a
+        separation the supplied seven could already make is the supplied seven wearing different
+        arithmetic.
+        """
+        try:
+            from nyxara.njp.substrateschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def does_the_bill_charge_for_being_told(self) -> Any:
+        """The limit of everything V.92 to V.98 measured, stated as a number.
+
+        ``charged(1)`` is zero: a choice among one option costs nothing, so the cheapest
+        description is the one that considered nothing — which is the one with the most handed to
+        it. A hard-coded answer beat V.98's own baseline, 55.58 against 57.17. It closes only
+        across worlds, where a constant has to be re-supplied in the source once per world it is
+        right about, and the two columns then balance to the digit.
+
+        So those numbers rank searches against each other on the same worlds and license nothing
+        absolute. **One world cannot tell a search from a lookup.**
+        """
+        try:
+            from nyxara.njp.supply import across, free_lunch
+
+            return {"a choice among one option costs": free_lunch(),
+                    "across three worlds": across([3, 4, 5], [53.0, 120.0, 290.0]).to_dict()}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def where_did_the_family_come_from(self, observed: Any = ()) -> Any:
+        """Price rules for **deriving** the family of languages, instead of writing one down.
+
+        V.96's family was five entries long because five were written. Writing a family of families
+        moves that debt one storey up, so the family is derived by rules with no free numbers — and
+        V.96's own hand-written choice competes in the same list, charged identically. It wins past
+        thirty-two observations, which is a real limit of deriving the family and is computed
+        rather than searched for.
+        """
+        try:
+            from nyxara.njp.bedrock import stand
+
+            return [f.to_dict() for f in stand(observed)] if observed else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def where_does_the_tower_stop(self) -> Any:
+        """Price the storeys and let the arithmetic say how high is worth climbing.
+
+        V.95 charged for picking a way out of a language and never for the language existing.
+        Adding that line opens a regress — a language is chosen from a family, which is chosen
+        from — and it closes by arithmetic: each storey's toll does not shrink as you climb, and
+        the savings do. ``stops_at`` is where that crosses, and it is 0, 1 or 2 depending on the
+        world rather than on anybody's preference.
+        """
+        try:
+            from nyxara.njp.towerschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_combining_school(self) -> Any:
+        """Sit the audit where even *how things combine* is searched, and the search pays its rent.
+
+        V.94 found what to combine and was told how. Here the how is a short word over two letters
+        — ``ab`` happens to be composition, ``a`` ignores its second argument — and the total
+        includes ``log2`` of how many words were considered. ``cost_climbs_with_the_search`` is the
+        number: a wider search finds the same answer and pays more, which is what stops *invent a
+        way of combining* being an instruction a search can satisfy by widening itself.
+        """
+        try:
+            from nyxara.njp.combiningschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_generator_school(self) -> Any:
+        """Sit the audit that asks where the candidates come from at all.
+
+        Every version from V.89 to V.92 was handed the thing it was meant to be clever about — nine
+        laws, seven moves, a substrate, a list of vocabularies. Here the input is behaviour only,
+        and what comes back is a subset of the observations themselves: the few things everything
+        else is a composition of. ``flattered`` is the number, and three of the five families have
+        nothing to find.
+        """
+        try:
+            from nyxara.njp.generatorschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def are_the_instruments_untouched(self, touching: Any = ()) -> Any:
+        """Fingerprint the organs, so an experiment cannot quietly edit what measures it.
+
+        Twice this package destroyed a working module by writing a new one over it, and neither
+        was caught by a test — the tests that would have caught them belonged to the module that
+        had just been deleted. Returns the fingerprint; :func:`nyxara.njp.integrity.watch` is the
+        guard that uses it, and :func:`nyxara.njp.integrity.claim` is the one-second check that
+        would have prevented both.
+        """
+        try:
+            from nyxara.njp.integrity import fingerprint
+
+            return fingerprint().to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def which_vocabulary_is_worth_it(self) -> Any:
+        """Weigh vocabularies by what they cost and what they buy, on pairs they never saw.
+
+        The scale a claim to have invented a better representation would have to be weighed on —
+        and the first thing it weighed was this repository's own V.91 substrate, which lost to
+        seven plain slides by more than half the bits. Ranked on the **whole** description: the
+        vocabulary plus everything it fails to explain, because worth-per-bit alone prefers a
+        vocabulary that explains almost nothing and costs almost nothing.
+        """
+        try:
+            from nyxara.njp.worthschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_law_school(self) -> Any:
+        """Sit the law-discovery audit: did a generated law separate what the supplied ones merged?
+
+        The milestone, and nothing else substitutes for it. V.89's nine supplied laws put *sort
+        upward* with *sort downward*, *smallest window* with *largest*, and *hold first* with *hold
+        last* — three pairs they cannot tell apart at any number of tries, because the distinction
+        is not in them. ``rescued`` counts how many a generated law split.
+        """
+        try:
+            from nyxara.njp.regularityschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def what_is_this_operation(self, operation: Any) -> Any:
+        """Find out what a black box is by trying to break it, never by reading its name.
+
+        Returns the laws it **broke**, with the counterexample for each. Nothing is ever returned
+        as holding: a law that survives reports how many attempts it survived, because that number
+        is the whole content of *not refuted*.
+        """
+        try:
+            from nyxara.njp.probing import probe
+
+            return probe(operation).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_probing_school(self) -> Any:
+        """Sit the behavioural-taxonomy audit on fourteen operations with their names taken off.
+
+        Three numbers, and the third is the one that grows as the proofs get stronger:
+        ``flattered`` is two operations that behave identically called different, ``buried`` is two
+        that genuinely differ called the same — *we could not express the difference, therefore
+        there is none*.
+        """
+        try:
+            from nyxara.njp.probingschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def is_this_primitive_new(self, taps: Any) -> Any:
+        """Decide whether a candidate primitive could be a discovery — before looking at any data.
+
+        Returns the identity when it could not. Every linear stencil's energy response is a
+        combination of iterated differences, so ``(1, 0, -1)`` — the stride-two difference, which
+        looks like something new — is ``4·d − d∘d`` exactly. A search with no algebra rediscovers
+        that under a fresh name and reports it as an invention.
+        """
+        try:
+            from nyxara.njp.closure import judge
+
+            return judge(taps).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_closure_school(self) -> Any:
+        """Sit the not-new audit. ``flattered`` is the number: things the algebra already owns,
+        reported as discoveries."""
+        try:
+            from nyxara.njp.closureschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_measurement_genesis_school(self) -> Any:
+        """Sit the invented-measurement audit: can it build a quantity nobody named?
+
+        Three unrelated worlds — spans, control gains, doses — with the centre reading matched
+        between the items that failed and the ones that did not, so every quantity computed from
+        the middle alone is useless and only the *shape* of the neighbourhood differs. ``invented``
+        is the number: three of the six orderings are ones where nothing may survive.
+        """
+        try:
+            from nyxara.njp.genesisschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_latent_school(self) -> Any:
+        """Sit the latent-variable audit: does it tell a cause from a thing that travels with one?
+
+        ``invented`` is the number. The world is built so the *consequence* of the failure
+        separates the groups **better** than the cause does — 2.087 against 1.740 — so a module
+        that reports the strongest correlation scores four of four and is wrong three times.
+        """
+        try:
+            from nyxara.njp.latentschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_interaction_school(self) -> Any:
+        """Sit the interaction audit: does it find the pair, or find a pair in everything?
+
+        ``invented`` is the number. ``I = ΔAB − ΔA − ΔB`` is a subtraction of four noisy means and
+        is very good at being large, so four of the six worlds are ones where finding a pair is
+        wrong — including one whose harness leaks and one where composing does not commute. Both
+        produce a large subtraction and neither is an interaction.
+        """
+        try:
+            from nyxara.njp.interactschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_blind_spot_school(self) -> Any:
+        """Sit the blind-spot audit: does it find the empty corner, or call every corner empty?
+
+        ``false_alarms`` is the number that matters. Half the fixtures are maps that were fully
+        examined, where naming any region at all is wrong — without them the exam is passed by a
+        function that returns every region it was given.
+        """
+        try:
+            from nyxara.njp.spaceschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_gate_school(self, each: int = 150) -> Any:
+        """Sit the self-rewrite audit: what the gate lets through, by kind of candidate.
+
+        ``let_through`` is the number. A gate is judged on refusals, and a permissive one does not
+        fail loudly — it degrades what it guards, one accepted edit at a time.
+        """
+        try:
+            from nyxara.njp.gateschool import examine
+
+            return {"held_out": examine(each).to_dict(),
+                    "on_motivating": examine(each, on_holdout=False).to_dict()}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_fusion_school(self, pairs: int = 60) -> Any:
+        """Sit the analogy audit: shapes that are there, and shapes that are not.
+
+        Two figures and neither means much alone. A finder that claims an analogy between every
+        pair of domains has told nobody anything, and one that claims none has only refused.
+        """
+        try:
+            from nyxara.njp.fusionschool import examine
+
+            return examine(pairs).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def how_far_it_reaches(self, make: Any, dial: Any, *, called: str = "") -> Any:
+        """Measure a capability across a difficulty dial and say where it stops.
+
+        Returns the ladder, and the ladder is careful about the word *edge*: it reports one only
+        when competence runs unbroken up to it. Where it held nowhere, held everywhere, or held
+        above a setting it failed at, ``edge`` is ``None`` and the flag says which — because
+        "no boundary within what was tried" and "no boundary" are different claims, and one of them
+        is a capability nobody tested.
+        """
+        try:
+            from nyxara.njp.reach import climb
+
+            return climb(make, list(dial), called=called).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_reach_school(self) -> Any:
+        """Sit the reach exam: five ladders, only two of which have an edge to find.
+
+        The condition that matters is **no invented edges**, since a boundary reported where there
+        is none becomes the next thing somebody builds.
+        """
+        try:
+            from nyxara.njp.reachschool import examine
+
+            got = examine()
+            return {k: v for k, v in got.items() if k != "rows"}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def why_it_failed(self, failure: Any) -> Any:
+        """Test every hypothesis this failure supplies the means to test, and name the rest.
+
+        Takes a :class:`~nyxara.njp.attribution.Failure` and returns the ranked causes. A
+        hypothesis with no experiment behind it comes back **untested**, never as support — and a
+        ``root`` of ``""`` with rivals named means the evidence did not separate them, which is a
+        real state of knowledge rather than a failure to answer.
+        """
+        try:
+            from nyxara.njp.attribution import attribute
+
+            return attribute(failure).to_dict()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def why_behind_why(self, failure: Any) -> Any:
+        """Walk from a failure to the failure behind it, and say where the walk stops."""
+        try:
+            from nyxara.njp.attribution import chain
+
+            return [step.to_dict() for step in chain(failure)]
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_attribution_school(self) -> Any:
+        """Sit the attribution exam: eight failures whose cause is known by construction.
+
+        Every fixture supplies every experiment, so no hypothesis is credited for being the only
+        one tried, and one of the eight has no cause any available repair reaches — where naming
+        none is the right answer.
+        """
+        try:
+            from nyxara.njp.attributionschool import examine
+
+            got = examine()
+            return {k: v for k, v in got.items() if k != "rows"}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_measurement_school(self) -> Any:
+        """Sit the retrodiction exam: eight measurements from this package's own history.
+
+        Four of them were misleading and four were sound, the critic is not told which, and it has
+        to separate them. Flagging all eight fails this exam rather than passing it.
+        """
+        try:
+            from nyxara.njp.measurementschool import examine
+
+            got = examine()
+            return {k: v for k, v in got.items() if k != "rows"}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_shape_school(self, path: str = "") -> Any:
+        """Sit the reconstruction exam: does the induced template rebuild rows it never saw?"""
+        try:
+            from pathlib import Path as _Path
+
+            from nyxara.njp.shapes import read_groups
+            from nyxara.njp.shapeschool import LEARN_ROWS, examine
+
+            groups = [g for one in (sorted(_Path(path).glob("*.jsonl.gz")) if path else [])
+                      for g in read_groups(one) if len(g.prompts) >= LEARN_ROWS + 1]
+            return {name: report.to_dict() for name, report in examine(groups).items()}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def go_to_answering_school(self, path: str = "", shapes: str = "") -> Any:
+        """Sit the task audit: what she learned, what the shape was worth, and the shuffled null.
+
+        The null is the row to read first. It is the same machinery on the same tasks with the
+        answers permuted, so whatever share of *those* "beats its own floor" is the share that
+        means nothing at all.
+        """
+        try:
+            from pathlib import Path as _Path
+
+            from nyxara.njp.answeringschool import examine, shapes_by_task
+
+            learn = sorted(_Path(path).glob("*.jsonl.gz")) if path else []
+            known = shapes_by_task(sorted(_Path(shapes).glob("*.jsonl.gz"))) if shapes else {}
+            with_shape = examine(learn, known, use_shapes=True)
+            without = examine(learn, known, use_shapes=False)
+            null = examine(learn, known, use_shapes=False, shuffled=True)
+            return {"with_shapes": with_shape.to_dict(), "whole_prompt": without.to_dict(),
+                    "shuffled": null.to_dict(),
+                    "above_chance": without.above_chance(null)}
         except Exception:  # noqa: BLE001
             return None
 
@@ -5493,7 +6505,6 @@ class NJPBrain:
 
         try:
             compiler = getattr(self.compiler, "stats", lambda: {})()
-            grounded = getattr(self.grounder, "stats", lambda: {})()
             universe = getattr(self.universe, "stats", lambda: {})()
             predict = getattr(self.predictor, "stats", lambda: {})()
 

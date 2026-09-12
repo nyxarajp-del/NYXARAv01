@@ -1,0 +1,317 @@
+"""NYXARA · njp/entailschool.py — is a rule about a pair of sentences worth anything (📏).
+
+7,226 inference pairs, split once and deterministically: the first seven tenths to learn from, the
+last three tenths never seen. Four numbers, and three exist to keep the first honest.
+
+* **accuracy** over every held-out pair, counting an abstention as a miss. The number a caller
+  actually gets.
+* **the base rate** — always answer the commonest label. On this corpus that is *it is not possible
+  to tell*, and it is 0.42, which any learner must beat to have done anything.
+* **no induction at all** — the same reasoner with learning off. It abstains on everything, which
+  is the honest floor for something that has been shown pairs and concluded nothing.
+* **when she does answer** — accuracy over the pairs she did not abstain on, printed beside the
+  share she answered. A reasoner that answers a tenth of the pairs at 0.9 and one that answers all
+  of them at 0.5 are different things and one number cannot say which is which.
+
+And the sweep. ``purity`` is how clean a rule must be to be kept, and it is not a taste: it is set
+by running the whole examination at each value and reading the held-out column. A threshold chosen
+any other way is a knob turned until the training number looked nice.
+"""
+
+from __future__ import annotations
+
+import random
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from nyxara.njp.entail import PURITY, Pair, Reasoner, read_pairs, relation_of
+
+__all__ = ["Result", "shuffled", "split", "examine", "sweep", "knowledge_gap", "run"]
+
+#: Relations the fact store holds that could link two words of a pair. Nothing narrower: the point
+#: of :func:`knowledge_gap` is to be generous about what would count as knowing something.
+LINKS: Tuple[str, ...] = ("excludes", "is_a", "has_property", "capable_of", "part_of",
+                          "used_for", "at_location")
+
+#: The share of the corpus learned from. The rest is never shown to the reasoner.
+TRAIN = 0.7
+
+
+@dataclass
+class Result:
+    name: str = ""
+    right: int = 0
+    asked: int = 0
+    answered: int = 0
+    rules: int = 0
+    by_label: Dict[str, Tuple[int, int]] = field(default_factory=dict)
+
+    @property
+    def accuracy(self) -> float:
+        """Over every pair, an abstention counting as a miss."""
+        return round(self.right / self.asked, 4) if self.asked else 0.0
+
+    @property
+    def when_answered(self) -> float:
+        return round(self.right / self.answered, 4) if self.answered else 0.0
+
+    @property
+    def coverage(self) -> float:
+        return round(self.answered / self.asked, 4) if self.asked else 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"accuracy": self.accuracy, "when_answered": self.when_answered,
+                "coverage": self.coverage, "asked": self.asked, "rules": self.rules,
+                "by_label": {k: {"right": v[0], "asked": v[1]} for k, v in self.by_label.items()}}
+
+    def render(self) -> str:
+        return (f"{self.name:<16} {self.accuracy:.3f}   "
+                f"answered {self.coverage:.3f} of them at {self.when_answered:.3f}   "
+                f"({self.rules} rules)")
+
+
+#: The seed every deterministic shuffle in this module uses. Named once so that "the same cut
+#: every run" and "the same cut in :func:`split` as in :func:`curve`" are the same statement.
+SEED = 20250908
+
+
+def shuffled(pairs: Optional[Sequence[Pair]] = None) -> List[Pair]:
+    """The corpus in a fixed pseudo-random order rather than the order the files were folded in.
+
+    This is not a nicety. The broad corpus is the fold of nine shards and lands on disk *in shard
+    order*: 24,909 chain-of-thought pairs, then Flan2021's, then P3's. A prefix cut over that hands
+    :func:`split` a training set drawn from one submix and a "held-out" set drawn from another,
+    which measures transfer between datasets while calling itself held-out — and hands
+    :func:`curve` a first point that is one submix and a last point that is all of them, so the
+    curve would show composition changing and report it as size. Both were true of the first run
+    on this corpus, whose 12,000-pair reading of 0.121 is an artefact of exactly that and is not
+    comparable to anything.
+    """
+    rows = list(pairs if pairs is not None else read_pairs())
+    random.Random(SEED).shuffle(rows)
+    return rows
+
+
+def split(pairs: Optional[Sequence[Pair]] = None,
+          train: float = TRAIN) -> Tuple[List[Pair], List[Pair]]:
+    """One deterministic cut, over a deterministically shuffled corpus.
+
+    A held-out set that moves between runs is not held out; a held-out set drawn from a different
+    part of the corpus than the training set is not held out either.
+    """
+    rows = shuffled(pairs)
+    cut = int(len(rows) * float(train))
+    return rows[:cut], rows[cut:]
+
+
+def _mark(reasoner: Reasoner, held: Sequence[Pair], name: str, *,
+          fallback: bool = False) -> Result:
+    """Score against the **relation** the pair holds, not the spelling its template happened to use.
+
+    FLAN asks these three relations in two vocabularies (see :data:`nyxara.njp.entail.RELATIONS`)
+    and the reasoner learns and answers in one of them. Marking a folded answer against an unfolded
+    gold would count `yes` wrong on a pair whose template spelled it `entailment` — punishing her
+    for a difference in the question's wording, and quietly, since the by-label table would still
+    look sensible.
+    """
+    out = Result(name=name, rules=len(reasoner.rules))
+    speak = reasoner.guess if fallback else reasoner.answer
+    for pair in held:
+        out.asked += 1
+        want = relation_of(pair.label)
+        right, asked = out.by_label.get(want, (0, 0))
+        answer, _why = speak(pair.premise, pair.hypothesis)
+        hit = int(relation_of(answer) == want)
+        if answer != "unknown":
+            out.answered += 1
+        out.right += hit
+        out.by_label[want] = (right + hit, asked + 1)
+    return out
+
+
+#: How many pairs the examination reads when a caller does not say. Zero means all of them, which
+#: is what :func:`run` and :func:`curve` pass, and what nothing else should.
+#:
+#: Set from the curve's own timings rather than from taste. Induction over the broad corpus is
+#: badly superlinear -- 12,000 pairs cost 62 seconds and 50,000 cost 617, a fourfold corpus for a
+#: tenfold bill -- so a bound of 40,000 turned a test file into half an hour. Twelve thousand is
+#: the largest slice the curve shows costing under a minute, and it is enough: at that size the
+#: induction already finds the containment rule and answers at 0.706 when it answers, which is
+#: what the mechanism tests are about. What the *corpus* is worth is a different question and
+#: :func:`curve` is where it is asked.
+EXAMINE_PAIRS = 12_000
+
+
+def examine(purity: float = PURITY, pairs: Optional[Sequence[Pair]] = None,
+            limit: int = EXAMINE_PAIRS, **kwargs: Any) -> Dict[str, Result]:
+    """The whole examination, with every control, on a deterministic slice of the corpus.
+
+    ``limit`` bounds the slice and ``0`` removes the bound. The slice is taken from
+    :func:`shuffled`, so it is the same mixture as the whole — bounding it changes how much is
+    read and not what is read, which is the only kind of bound that leaves the columns
+    comparable.
+    """
+    rows = shuffled(pairs)
+    if limit:
+        rows = rows[:int(limit)]
+    learn, held = split(rows)
+    out: Dict[str, Result] = {}
+
+    taught = Reasoner(purity=purity, **kwargs)
+    taught.learn_from(learn)
+    out["taught"] = _mark(taught, held, "taught")
+    out["with_fallback"] = _mark(taught, held, "taught + fallback", fallback=True)
+
+    # C's control: the same reasoner with the mined incompatibilities withheld. What the
+    # exclusions were worth is the distance between these two rows and nothing else.
+    surface = Reasoner(purity=purity, mine=False, **kwargs)
+    surface.learn_from(learn)
+    out["no_exclusions"] = _mark(surface, held, "surface readings only")
+
+    blind = Reasoner(purity=purity, learn=False, **kwargs)
+    blind.learn_from(learn)
+    out["no_rules"] = _mark(blind, held, "no rules")
+
+    # The floor is computed over the same folded relations the reasoner is scored on, or the two
+    # columns are not comparable.
+    folded = Counter(relation_of(p.label) for p in learn)
+    commonest = folded.most_common(1)[0][0] if folded else ""
+    base = Result(name=f"base rate ({commonest})")
+    for pair in held:
+        base.asked += 1
+        base.answered += 1
+        base.right += int(relation_of(pair.label) == commonest)
+    out["base_rate"] = base
+    return out
+
+
+#: The sweep runs the whole examination once per threshold, and on 36,302 pairs that is minutes
+#: each. It runs on a fixed slice instead — the same slice every time, so the columns are
+#: comparable — and the chosen threshold is then examined on everything.
+SWEEP_PAIRS = 9000
+
+
+def sweep(values: Sequence[float] = (0.40, 0.45, 0.50, 0.55, 0.65, 0.72, 0.90),
+          **kwargs: Any) -> List[Tuple[float, Result]]:
+    """The examination at each threshold. What sets ``purity`` is this table, not a preference."""
+    rows = shuffled()[:SWEEP_PAIRS]
+    out: List[Tuple[float, Result]] = []
+    for value in values:
+        learn, held = split(rows)
+        reasoner = Reasoner(purity=value, **kwargs)
+        reasoner.learn_from(learn)
+        out.append((value, _mark(reasoner, held, f"purity {value}")))
+    return out
+
+
+def knowledge_gap(brain: Any = None, sample: int = 300) -> Dict[str, Any]:
+    """Is the knowledge the hard cases need actually in the store? Asked, not assumed.
+
+    Separating *no* from *it is not possible to tell* needs to know that performing in a
+    competition and watching television are incompatible. Word overlap cannot see that; a fact
+    store could. So this counts, over held-out pairs of each label, how often the store holds
+    **any** relation at all between a premise word and a hypothesis word.
+
+    The answer decides whether the near misses are a defect of this module or a gap in the corpus,
+    and it is not the same question as whether she has heard of the words.
+    """
+    from nyxara.njp.entail import _content
+
+    if brain is None:
+        from nyxara.njp.general import load_brain
+        brain = load_brain(broad=True)
+    grounder = getattr(brain, "grounder", None)
+    if grounder is None:
+        return {}
+    _learn, held = split()
+    out: Dict[str, Any] = {"facts": len(getattr(grounder, "facts", {}) or {})}
+
+    def linked(pair: Pair) -> bool:
+        hypothesis = _content(pair.hypothesis)
+        for word in _content(pair.premise):
+            for relation in LINKS:
+                for triple in grounder.facts.get((grounder._key(word), relation), ()):
+                    if str(triple.object).lower() in hypothesis:
+                        return True
+        return False
+
+    words: set = set()
+    for label in ("no", "it is not possible to tell", "yes"):
+        rows = [p for p in held if p.label == label][:sample]
+        out[label] = {"linked": sum(1 for p in rows if linked(p)), "of": len(rows)}
+        for pair in rows[:150]:
+            words |= _content(pair.premise) | _content(pair.hypothesis)
+    out["words_known"] = sum(
+        1 for word in words
+        if any((grounder._key(word), relation) in grounder.facts for relation in LINKS))
+    out["words"] = len(words)
+    return out
+
+
+def run() -> Dict[str, Any]:
+    got = examine()
+    return {"held_out": {name: result.to_dict() for name, result in got.items()},
+            "sweep": [{"purity": value, **result.to_dict()} for value, result in sweep()]}
+
+
+def curve(sizes: Sequence[int] = (12_000, 50_000, 200_000, 800_000),
+          **kwargs: Any) -> List[Tuple[int, Result, int]]:
+    """The same examination at four corpus sizes. The one measurement that settles the argument.
+
+    Every version of this has answered the same question with a different number of pairs and got
+    the same answer — one rule, and about the same accuracy. 7,226 pairs gave 0.853 when she
+    answered; 36,302 gave 0.862. If a million gives 0.87 as well then the shortage is not evidence
+    and no amount of reading will fix it; if the rule count climbs, it is. Reported as a curve
+    rather than a single figure, because a single figure cannot tell those two apart.
+    """
+    pairs = shuffled()
+    out: List[Tuple[int, Result, int]] = []
+    for size in sizes:
+        rows = pairs[:size]
+        if len(rows) < size * 0.9:
+            break                        # the corpus does not reach this size; do not pretend
+        learn, held = split(rows)
+        reasoner = Reasoner(**kwargs)
+        reasoner.learn_from(learn)
+        out.append((len(rows), _mark(reasoner, held, f"{len(rows)} pairs"),
+                    len(reasoner.rules)))
+    return out
+
+
+def main() -> None:  # pragma: no cover — a report, not a test
+    pairs = read_pairs()
+    if not pairs:
+        print("no corpus; run scripts/build_reasoning_corpus.py")
+        return
+    learn, held = split(pairs)
+    print(f"{len(pairs)} pairs — {len(learn)} learned from, {len(held)} held out")
+    print(f"(the sweep below runs on the first {SWEEP_PAIRS} of them)\n")
+    print("purity   held-out   answered   when answered   rules")
+    for value, result in sweep():
+        print(f"  {value:.2f}     {result.accuracy:.3f}      {result.coverage:.3f}"
+              f"          {result.when_answered:.3f}        {result.rules}")
+    print()
+    got = examine(limit=0)
+    for name in ("base_rate", "no_rules", "no_exclusions", "taught", "with_fallback"):
+        print("  " + got[name].render())
+    print("\nby label, taught:")
+    for label, (right, asked) in sorted(got["taught"].by_label.items()):
+        print(f"    {label:<28} {right}/{asked}  {right / max(1, asked):.3f}")
+    reasoner = Reasoner()
+    reasoner.learn_from(learn)
+    print("\nwhat she worked out:")
+    print("\n".join(reasoner.render().splitlines()[:6]))
+    print("\nis the knowledge the hard cases need even in the store?")
+    gap = knowledge_gap()
+    if gap:
+        print(f"    {gap['facts']} facts; she has heard of "
+              f"{gap['words_known']}/{gap['words']} of the content words")
+        for label in ("no", "it is not possible to tell", "yes"):
+            row = gap.get(label, {})
+            print(f"    {label:<28} a stored relation links the two sentences in "
+                  f"{row.get('linked')}/{row.get('of')}")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

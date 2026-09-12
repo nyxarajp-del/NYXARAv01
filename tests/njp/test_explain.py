@@ -12,7 +12,7 @@ import itertools
 import pytest
 
 from nyxara.njp.explain import (
-    MAX_ORDERS, Chain, Explainer, Plan, Step,
+    MAX_ORDERS, Chain, Explainer, Step,
 )
 from nyxara.njp.explainread import (
     candidates_for, nominalisations, nominalise, read_explanation_question,

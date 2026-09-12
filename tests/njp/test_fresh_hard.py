@@ -29,7 +29,7 @@ import zlib
 
 import pytest
 
-from nyxara.njp.coding import Coder, CodeError, Spec, read_python
+from nyxara.njp.coding import Coder, CodeError, read_python
 from nyxara.njp.tasks import normalise, reference
 from tests.njp.test_unseen_hard import _distinct, _params, _spec
 

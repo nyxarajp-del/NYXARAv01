@@ -1,7 +1,6 @@
 """What a concept is made of, before it is called anything (NJP V.47)."""
 from __future__ import annotations
 
-import pytest
 
 from nyxara.njp.explain import Explainer
 from nyxara.njp.conceptgenome import SLOT_RELATIONS, SLOTS, Genome, read_genome

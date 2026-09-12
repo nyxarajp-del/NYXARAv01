@@ -1051,7 +1051,6 @@ def _guarded(brain: Any, path: str) -> str:
     """
     import gzip
     import json
-    import os
     import tempfile
 
     from nyxara.njp.immune import Immune

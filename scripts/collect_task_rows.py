@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Keep a handful of rows of every task in FLAN, so the shapes can be induced from them.
+
+The first read of this dataset extracted 747,897 rows out of 83,271,754 — **0.9%** — and threw the
+rest away. Not because the rest held nothing, but because the extractor decided in advance what a
+piece of knowledge looks like: a premise and a hypothesis, a ``Q:``, an ``In this task``, a chain of
+sums. Five hand-written shapes, and anything not in one of them was invisible. `dialog` is 10.7 GB
+and yielded four items.
+
+This does the opposite. It reads every row and keeps almost none of them — but it keeps a *few of
+each kind*, and the kind is not something anybody decided: FLAN stamps every row with the task it
+came from and the index of the template that rendered it, so rows sharing both were produced by
+**one string with holes in it**. Six of them are enough to find that string by alignment, and the
+string is the task's shape: what is constant is the instruction, what varies is the data.
+
+    python3 scripts/collect_task_rows.py --out <dir> --per-group 6
+
+What comes out is small — a few rows per group rather than a share of 83 million — and it covers
+*every* task in the dataset rather than the ones that matched a pattern. What is done with it is
+:mod:`nyxara.njp.shapes`, which aligns each group and induces the template without being told what
+any of the fields mean.
+"""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import json
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+from typing import Any, Dict, Optional, Sequence
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from stream_flan import BASE, FILES, objects  # noqa: E402
+
+#: How much of a prompt is kept, from the front and only from the front.
+#:
+#: Keeping both ends and dropping the middle was the obvious thing and it is wrong. Rows of one
+#: group differ in length, so "the last four hundred characters" starts at a different point in
+#: each of them, and an anchor found in one tail matches the wrong place in another. Measured:
+#: groups whose rows were clipped reconstructed at **0.373**, against **0.966** for groups short
+#: enough to be kept whole. Aligning the two halves separately did not fix it either — 0.903
+#: overall against 0.951 — because the tails were still cut at unrelated points.
+#:
+#: A head is a prefix. Every clipped row is then a prefix of its own original, all of them start
+#: at the same place, and alignment is exact whether or not a row was cut. The instruction and the
+#: field markers live at the front; what is lost is the far end of a long passage, which is data
+#: rather than shape.
+HEAD = 2000
+
+#: How many rows of one group are enough to see which parts vary. Two would find the varying
+#: regions; six makes it unlikely that a constant-looking span is a coincidence of two rows.
+PER_GROUP = 6
+
+#: A ceiling, so a pathological file cannot exhaust memory. FLAN has on the order of ten thousand
+#: (task, template) pairs; this is well above that and is reported if it is ever reached.
+MAX_GROUPS = 120_000
+
+
+def _clip(text: str, head: int = 0, tail: bool = False) -> str:
+    """A prefix, or a suffix when what is wanted is the part that varies.
+
+    Which end to keep depends on the job, and getting it backwards is silent. Alignment wants the
+    **prefix**: rows of one template share their opening, so every clipped row starts where its
+    original starts (V.57 measured 0.373 against 0.966 for the alternative). Learning wants the
+    **suffix**, for the mirror-image reason — the instruction is identical in every row of a task
+    and carries no signal, and what was poured in comes after it.
+
+    Taking the prefix for learning threw away the data and kept the instruction. Measured on the
+    300-row collection: **334 of 1,007 in-scope tasks had repeated prompts**, 11.7% of all rows,
+    and in the worst cases 297 of 300 rows were the *same string* — a task whose instruction runs
+    past 700 characters clipped every row to the same instruction and cut the question off
+    entirely. 160 identical prompts carrying four different answers, which no learner can tell
+    apart and which no null can either.
+    """
+    raw = str(text or "")
+    size = head or HEAD
+    return raw[-size:] if tail else raw[:size]
+
+
+def one_file(name: str, out: str, per_group: int, limit_bytes: int,
+             by_task: bool = False, max_target: int = 0, head: int = 0) -> Dict[str, Any]:
+    """One submix, in its own process, writing the groups it saw.
+
+    Two jobs, one pass. Grouped by task *and template* with a few rows each, what comes out is
+    what :mod:`nyxara.njp.shapes` aligns to find the template. Grouped by task alone with many
+    rows and only short answers kept, what comes out is what :mod:`nyxara.njp.answering` learns the
+    task *from* — a template says what is being asked, and it takes examples to learn the answer.
+    """
+    kept: Dict[str, list] = {}
+    seen_prompts: Dict[str, set] = {}
+    rows = 0
+    full = 0
+    repeats = 0
+    whole = True
+    began = time.time()
+    try:
+        for row in objects(BASE + name, limit_bytes=limit_bytes):
+            if not row:
+                continue
+            rows += 1
+            task = str(row.get("_task_name") or "")
+            index = str(row.get("_template_idx") or "")
+            if not task:
+                continue
+            key = task if by_task else f"{task}\t{index}"
+            here = kept.get(key)
+            if here is None:
+                if len(kept) >= MAX_GROUPS:
+                    full += 1
+                    continue
+                here = kept[key] = []
+            if len(here) >= per_group:
+                continue
+            if max_target and len(str(row.get("targets") or "")) > max_target:
+                continue
+            text = _clip(row.get("inputs"), head, tail=by_task)
+            # A row whose clipped prompt repeats one already kept is not another example of the
+            # task — it is the same string a second time, and a learner shown it in training and
+            # again in the examination has been examined on what it was taught. Counted and
+            # reported rather than dropped silently, so a group that yields few distinct rows says
+            # so instead of looking full.
+            here_seen = seen_prompts.setdefault(key, set())
+            if text in here_seen:
+                repeats += 1
+                continue
+            here_seen.add(text)
+            here.append({"inputs": text,
+                         "targets": _clip(row.get("targets")),
+                         "kind": str(row.get("_template_type") or ""),
+                         "source": str(row.get("_task_source") or "")})
+            if rows % 1_000_000 == 0:
+                print(f"  {name}: {rows:,} rows, {len(kept):,} groups",
+                      file=sys.stderr, flush=True)
+    except Exception as error:  # noqa: BLE001 — one file failing is not the run failing
+        whole = False
+        print(f"  {name}: stopped after {rows:,} rows — {error}", file=sys.stderr, flush=True)
+
+    # A shard from a read that did not finish is written — the rows in it are perfectly good, the
+    # run did read them — but under a name nothing downstream globs for. The rows being good is
+    # exactly why this matters: a partial shard is indistinguishable from a complete one by
+    # inspection, so it has to be distinguishable by *name*, or the next run silently reports the
+    # numbers of half a submix as the numbers of a submix.
+    stem = name.split('_submix')[0] + ("" if whole else ".partial")
+    target = Path(out) / f"rows.{stem}.jsonl.gz"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(target, "wt", encoding="utf-8") as handle:
+        for key, group in kept.items():
+            task, _, index = key.partition("\t")
+            handle.write(json.dumps({"task": task, "template": index, "rows": group},
+                                    ensure_ascii=False) + "\n")
+    print(f"  {name}: {rows:,} rows in {time.time() - began:.0f}s; "
+          f"{len(kept):,} groups kept, {repeats:,} repeated prompts skipped, "
+          f"{full:,} refused at the ceiling"
+          f"{'' if whole else '  ** PARTIAL — the read did not finish **'}",
+          file=sys.stderr, flush=True)
+    return {"rows": rows, "groups": len(kept), "refused": full, "repeats": repeats,
+            "partial": 0 if whole else 1}
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--only", default="")
+    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--per-group", type=int, default=PER_GROUP)
+    parser.add_argument("--bytes", type=int, default=0)
+    parser.add_argument("--by-task", action="store_true",
+                        help="group by task alone, for learning rather than aligning")
+    parser.add_argument("--max-target", type=int, default=0,
+                        help="keep only rows whose answer is at most this long")
+    parser.add_argument("--head", type=int, default=0)
+    parser.add_argument("--tag", default="tasks")
+    args = parser.parse_args(argv)
+
+    files = (args.only,) if args.only else FILES
+    began = time.time()
+    totals = {"rows": 0, "groups": 0, "refused": 0, "repeats": 0, "partial": 0}
+    with ProcessPoolExecutor(max_workers=max(1, args.workers)) as pool:
+        futures = [pool.submit(one_file, name, args.out, args.per_group, args.bytes,
+                               args.by_task, args.max_target, args.head)
+                   for name in files]
+        for future in futures:
+            try:
+                got = future.result()
+            except Exception as error:  # noqa: BLE001
+                print(f"  a file failed: {error}", file=sys.stderr, flush=True)
+                continue
+            for key in totals:
+                totals[key] += got.get(key, 0)
+    print(f"read {len(files)} files in {time.time() - began:.0f}s; {totals['rows']:,} rows, "
+          f"{totals['groups']:,} groups", file=sys.stderr, flush=True)
+    if totals["partial"]:
+        print(f"  {totals['partial']} of {len(files)} did not finish and were written as "
+              f"`rows.*.partial.jsonl.gz`; re-run those files before quoting any number",
+              file=sys.stderr, flush=True)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

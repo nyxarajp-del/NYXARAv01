@@ -45,7 +45,7 @@ any error yields no transfers, never an exception into the SLEEP pass.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["Transferred", "ZeroShotTransfer"]

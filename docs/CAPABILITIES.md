@@ -4648,6 +4648,765 @@ retracted) and `go_to_encyclopedia_school`. The reader the brain builds is taugh
 sets when the corpus is present and falls back silently when it is not — a brain must not need a
 data file to read a paragraph.
 
+## V.50 — what breaks a program, learned by breaking one
+
+`njp.coding` lets her *write* a program. Asked anything **about** programming she had nothing —
+measured, twelve questions, twelve empty answers:
+
+    what is a for loop?            ->  ""
+    what causes an IndexError?     ->  ""
+    how do you fix an IndexError?  ->  ""
+
+The first is a fact somebody can tell her and `njp.encyclopedia` now does. The other two are not.
+*"IndexError happens when the index is at least the length"* is not a sentence she should be
+handed: a table has no idea why, cannot say what would fix it, and is silent the moment the
+situation is one nobody wrote a row for.
+
+So `njp/programming.py` does not read about errors. **It causes them.** A situation is a real
+Python operation on real arguments — `[1,2,3][5]`, `{"a":1}["b"]`, `7/0`, `int("x")` — and every
+outcome in the module is what the interpreter did, at run time, every time. Nothing here states
+which operations raise what. (Nothing is `eval`ed or `exec`ed either: these are calls the module
+makes with arguments it built, the same boundary `njp.coding` draws.)
+
+**The probes are senses, not answers.** Before running, a situation is measured by generic
+relational questions — what type each argument is, how long, whether it is zero, whether one is
+less than another's length, whether one is a name in another. Not one mentions an error. What
+connects `arg1 < len(arg0)` to `IndexError` is induced from trials where it held and trials where
+it did not.
+
+### What she works out, and what it is worth
+
+| | |
+| --- | --- |
+| held-out situations, never run | **0.724** |
+| the base rate (always guess the commonest) | 0.535 |
+| the same watcher with induction off | 0.535 |
+| repair — a fix found by experiment, checked by re-running | **0.719** |
+
+Some of what came out, in her words:
+
+```
+ValueError        happens when argument 0 is not all digits and the operation converts
+StopIteration     happens when argument 0 is empty and the operation iterates
+ZeroDivisionError happens when argument 0 is a int and argument 1 is zero and the operation splits by
+IndexError        happens when argument 1 is not within reach counting backwards and the operation takes position
+```
+
+### Transfer, and the one number that explains the other four
+
+Trained having **never performed** an operation, then asked about nothing else:
+
+| held out | names the error | sees it fail | distinguishing siblings |
+| --- | --- | --- | --- |
+| `lookup` | 0.095 | **0.922** | 1 |
+| `divide` | 0.650 | **0.905** | 3 |
+| `index` | 0.383 | 0.485 | 0 |
+| `to_int` | 0.245 | 0.250 | 0 |
+
+Naming the error cannot transfer where the name depends on the container — reading an absent name
+raises `KeyError` from a dict and `AttributeError` from an object, and no amount of watching one
+teaches the other's name. **Whether it fails** can, and the last column says exactly when: a law
+about *the operation takes a name* is only learnable if something else in the world takes one.
+`lookup` has `attribute` for a sibling and `divide` has `modulo`; `index` is the only thing that
+takes a position and `to_int` the only thing that converts, so holding those out deletes the only
+evidence for the trait and there is nothing to transfer from. Transfer tracks siblings, not effort.
+
+### Four defects the measurements found
+
+* **The world was one in which everything failed.** Drawing every argument at random made
+  `TypeError` 60% of all outcomes, the greedy cover carved that mass into **thirty** exact and
+  meaningless laws, and the errors worth learning never surfaced. Operations now declare what they
+  are *written for* — intent, not consequence — and a quarter of arguments still slip.
+* **One outcome, one cause.** A search for a single conjunction covering every `ValueError` found
+  the only reading they all share, which was *"argument 0 has a length"*, with 254 counterexamples.
+  `int("x")` and unpacking the wrong number of things are different causes; the cover takes them
+  one at a time.
+* **Candidates drawn from what all positives share** meant `op` could never enter a law when an
+  outcome spanned two operations — so `ZeroDivisionError` came out as *"argument 1 is zero"*, true
+  of `xs[0]` and `a * 0` as well, and wrong 35 times.
+* **Exact on the data and wrong about the world.** *"AttributeError happens when argument 1 is a
+  str"* was exact — because in a thousand trials she had never once asked for an attribute that
+  exists. `challenge()` builds situations **to satisfy** each law and runs them; a law that dies
+  is demoted. No amount of the same sampling would have found that out.
+
+Two more were in the reporting: the search took the *first* exact conjunction rather than the
+widest, which kept passenger terms and cost a second law for each; and the induction over "does
+this fail at all" used the per-outcome floor, which for a class with as many members as every error
+put together meant no conjunction qualified and it learned **nothing**.
+
+Wired at `NJPBrain.learn_programming` — which files each surviving law as `occurs_when` **and** as
+a `causes` edge in the other direction, because *"what causes X"* is an inverted lookup and a
+forward fact alone answers *"when does X happen"* and leaves it empty — and `go_to_programming_school`.
+`fixed_by` is new in `grounding.py` with the question that reaches it: a fix she worked out by
+experiment that nothing could ask for would be a fact stored and unreachable.
+
+    what causes an IndexError?      -> argument 1 is not less than the length of argument 0 ...
+    how do you fix a ValueError?    -> see that argument 0 is not empty (argument 0: [] -> [4, 5])
+
+## V.51 — reasoning from a dataset, without storing its answers
+
+FLAN's chain-of-thought split is worked reasoning: a question, one line of rationale saying why,
+and an answer. `scripts/build_reasoning_corpus.py` samples 4,980 rows of it (the corpus is
+377,759,274 rows and 317 GB, so nothing is downloaded whole), and the largest task in it by a
+distance is natural-language inference — premise, hypothesis, and one of *yes*, *no*, *it is not
+possible to tell*.
+
+The tempting thing to do with a dataset is store its answers. That is a lookup table with 7,226
+rows in it, and it scores zero on the 7,227th because nothing in it is about **why** any answer was
+right. So `njp/entail.py` stores none of them. It measures each pair with generic questions — how
+many of the hypothesis's content words the premise also has, how many it adds, whether one carries
+a negation the other does not, whether either counts something — and `njp/induce.py` works out
+which readings predict which answer. Not one probe names an answer.
+
+Two things had to be got right before any of that.
+
+**The prompt is data too.** A FLAN row is several *complete* worked examples followed by an
+unanswered question. Reading only the answers gave 3,116 items; reading every block that ends in
+"The answer is …" gave **11,642**, and 7,226 unique inference pairs out of them.
+
+**Sampling uniformly found nothing.** FLAN is ordered by task and the CoT block is a small band at
+the very front — two batches drawn from all 377 million rows returned **zero** CoT rows. The range
+is named in the sampler as a claim about the file, not hidden inside a filter.
+
+### What she learned, and the honest size of it
+
+| | over every pair | answered | when answered |
+| --- | --- | --- | --- |
+| base rate (always *not possible to tell*) | 0.423 | 1.000 | 0.423 |
+| induction switched off | 0.000 | 0.000 | — |
+| **taught** | 0.051 | 0.059 | **0.853** |
+| taught, with a majority guess where she is silent | **0.468** | 1.000 | 0.468 |
+
+One rule survived, and it is a real one: **a hypothesis made only of the premise's own words
+usually follows from it** — 294 pairs, right in 0.86 of them at training and 0.85 held out. That
+rule alone lifts a majority guesser from 0.423 to 0.468.
+
+Everything else is a negative result, and it is the useful half. `no` and `it is not possible to
+tell` produce **35 near misses and no rules**: every candidate conjunction has hundreds of
+counterexamples. Word overlap can recognise containment; it cannot see that performing in a
+competition and watching television are incompatible.
+
+The fallback is reported apart and never folded into `answer()`. Guessing the commonest label is
+not reasoning; it is what a caller gets when the reasoning has nothing to say, and one number
+mixing the two cannot say which of them earned it.
+
+### Is the missing knowledge in the store? Asked, not assumed
+
+`entailschool.knowledge_gap()` loads the full corpus — 158,470 facts — and counts how often the
+store holds **any** relation at all between a premise word and a hypothesis word:
+
+* she has heard of **558 of 723** of the content words;
+* a stored relation links the two sentences in **14 of 300** contradictions — and in **14 of 300**
+  non-contradictions.
+
+So she knows the words and not the relations between them, and where a relation exists it is
+equally present in both classes. The near misses are not a defect of this module; they are a gap in
+the corpus, and this names exactly what a corpus would have to contain to close it.
+
+### Two mechanisms, both corrections
+
+`njp/induce.py` is the cover from V.50, lifted out the moment a second subject needed it, plus two
+fixes the new subject exposed:
+
+* **A greedy cover that stops at the first seed it cannot explain is not a cover.** It did, and on
+  5,000 pairs exactly one of three labels ever got a rule — `yes` was covered, `no` failed on its
+  first seed, and the whole of *it is not possible to tell* was never reached.
+* **Exactness is a claim about the subject, not a setting.** At purity 1.0 — right for programs,
+  where Python does the same thing every time — she learns **nothing at all** from 5,000 pairs. A
+  rule kept below 1.0 carries the rate it was kept at, and the threshold is set by running the
+  whole examination at each value and reading the held-out column, not by preference.
+
+Wired at `NJPBrain.learn_reasoning`, `entails` — which takes the two sentences or one string in the
+form the question is usually asked in, *If "P" does that mean that "H"?*, because a capability
+reachable only from Python is not reachable from English — and `go_to_reasoning_school`.
+
+    entails('If "A large group of kids ... a lady in a blue dress." does that mean
+             that "A lady is in a blue dress."?')
+        -> yes, "added is none (0.86 of the pairs she saw)"
+
+    entails("A gymnast performing in a competition.", "The gymnast is watching tv.")
+        -> unknown, "no rule she has covers this pair"
+
+## V.52 — the whole submix, the half that can be checked, and the knowledge that is missing
+
+Three things were asked for at once, and the honest answer to the first is a number.
+
+### A — the whole chain-of-thought submix, not a sample
+
+V.51 learned from 4,980 rows: **0.00132%** of FLAN. The submix is also published whole, as one
+240 MB file, so there was no reason to sample it. `scripts/build_reasoning_corpus.py` now reads
+**192,696 rows — every one there is** — and pulls out 36,302 unique inference pairs and 23,371
+worked arithmetic problems.
+
+What could not be taken is said rather than skipped: `dialog` is 10.7 GB, `flan2021` 12.6 + 13.3
+GB, `niv2` 14.0 + 5.6 GB and `t0` 18.6 GB — about **75 GB against 20 GB** of writable disk. Those
+are dialogue, translation, summarisation and task instructions; none of them is reasoning data.
+
+Five times the pairs bought almost nothing:
+
+| | pairs | when she answers | with a majority guess where she is silent |
+| --- | --- | --- | --- |
+| V.51 | 7,226 | 0.853 | 0.468 |
+| **V.52** | **36,302** | **0.862** | **0.476** |
+
+**+0.9 points for five times the data.** The same shape as V.41's twelve-times-the-facts for
++2.8pp: more of the same evidence does not buy the structure that is missing. Still exactly **one**
+rule, and it is the same one — a hypothesis that adds no content word to the premise usually
+follows from it, 1,236 pairs at 0.87.
+
+### B — the half where an answer can be checked
+
+23,371 word problems whose rationale is a chain of stated sums. `njp/arithmetic.py` does not learn
+from them first; it **audits** them, recomputing every sum through `njp.calculate`.
+
+| | |
+| --- | --- |
+| every sum exact | **0.897** |
+| every sum, allowing rounding | 0.910 |
+| a sum this parser cannot verify | 0.041 |
+| the chain reaches its stated answer | **0.836** |
+
+Then the harder half. A chain abstracts into a **shape** — `q0 * q1; r0 + q2`, a little program over
+the question's own numbers — and solving is picking the right one:
+
+| | |
+| --- | --- |
+| no shape at all | 0.000 |
+| one shape applied to everything | 0.008 |
+| the commonest shape that binds | **0.008** |
+
+Those last two being equal is the finding: **shape frequency carries no information about which
+problem needs which shape.** 2,315 distinct shapes from 16,359 problems, and the commonest covers
+half a percent. Solving needs reading the question, and reading the question is not what this
+organ does.
+
+### C — the knowledge the hard half needs, mined and measured
+
+V.51 measured that a stored relation linked premise to hypothesis in 14 of 300 contradictions and
+14 of 300 non-contradictions — the knowledge was not in any corpus she had. It **is** in this one,
+said out loud: of 11,352 rationales for *no*, 3,264 say "cannot", 1,984 "at the same time", 1,374
+"either". So `mine_exclusions` reads the marker in the rationale and the two things it names, from
+**training pairs only**, and offers the result to the induction as one more reading.
+
+| | over every pair | when she answers |
+| --- | --- | --- |
+| surface readings only | 0.056 | 0.862 |
+| **with the mined incompatibilities** | **0.056** | **0.862** |
+
+**It changed nothing.** Not one rule, not one point. The probe is not ignored — it appears in the
+near misses (*"a word rules another out is False and added is few and shared is one"*, 710
+counterexamples) — it is simply not clean enough to carry a rule. The first miner was worse and
+its own output said so: crossing whole sentences produced *"man excludes 046, 20, 30, 90"*, which
+is a cross product, not knowledge. Naming only the two things the rationale names cut 61,837
+pairs to 6,490 and gave real ones — `sitting excludes basketball`, `running excludes asleep`,
+`riding excludes boat` — and still moved no number.
+
+And the re-measurement is sharper than before. Of 300 held-out pairs of each label, a stored
+relation links the two sentences in 17 contradictions, 7 neutrals and **24 entailments**: the
+store's relations are *commonest in the class that does not need them*.
+
+### Four defects, each caught by checking rather than assuming
+
+* **The audit reported the corpus wrong about arithmetic it had got right.** A two-operand pattern
+  cut `3/10 * 20/11 = 6/11` into `20 / 11 = 6`; 37% of chains came back "unsound". A step is a whole
+  expression, and the number is 0.897.
+* **Rounding is not error.** `45/4 = 11` has not made a mistake; it has rounded. Counted apart.
+* **A letter is not a failed chain.** Multiple-choice rows answer `(D)`, and counting those as
+  chains that missed their answer understated the corpus by a quarter.
+* **The defensive brackets her calculator refuses.** `njp.calculate` takes `3 * 40` and rejects
+  `(3) * (40)`, so all 23,371 audits returned nothing computed and nothing wrong — a clean sheet
+  that meant the checker had never run.
+
+One more was in the machinery: `induce.search` counted support by scanning every case for every
+combination, and on 25,411 pairs the induction **never finished**. Indexing each reading to the
+cases it holds of gives the same answer in 122 seconds.
+
+Wired at `NJPBrain.check_working` — which recomputes someone's working and names the sum that
+disagrees rather than returning a confidence, because this is the one place in the package where a
+claim can be settled — plus `go_to_arithmetic_school`.
+
+    check_working("Wendy's bill was 5 * 120 = 600 ... she paid 600 - 240 - 70 = 290.", "290")
+        -> sound, reaches its answer
+    check_working("He had 2 + 2 = 5 apples.", "5")
+        -> "2 + 2 = 5, but it is 4"
+
+## V.53 — the whole dataset, read; and the procedure organ it turned out to contain
+
+V.52 said what could not be taken: about 75 GB of FLAN against 20 GB of writable disk. That was a
+statement about *storing* it. Nothing required storing it.
+
+### The full read — 94.6 GB, 83,271,754 rows, 3,830 seconds
+
+`scripts/stream_flan.py` reads all nine submix files over HTTP and never writes one to disk. A
+JSON array arrives as a byte stream; brace depth says where each object ends; a prefilter drops
+the row before it is parsed unless it holds one of the strings a reasoning item must hold. Four
+readers run at once, because four saturate the wire where one does not — **9.6 MB/s alone against
+26 MB/s together**, measured, after two rounds of optimising the regular expression on the
+assumption that the parser was the limit. It was not; the wire was.
+
+| submix | rows | seconds |
+| --- | ---: | ---: |
+| cot_zs | 93,981 | 6 |
+| dialog | 5,499,148 | 423 |
+| flan2021_zsopt | 13,608,974 | 822 |
+| flan2021_zsnoopt | 12,124,188 | 872 |
+| niv2_zs | 5,030,900 | 895 |
+| niv2 | 10,061,950 | 2,467 |
+| t0_zsopt | 18,806,077 | 2,786 |
+| t0_zsnoopt | 18,046,536 | 3,002 |
+| **total** | **83,271,754** | **3,830 (parallel)** |
+
+Folded and deduplicated by `scripts/merge_flan_shards.py`: **564,166** inference pairs, **176,160**
+questions, **23,823** worked sums, **698** task definitions.
+
+**Two silent bugs in the reader, and both were silent in the worst way — at full speed, with no
+error.** A chunk boundary that fell inside a string let the braces in a prompt count as structure,
+so depth climbed and never came back; and the carried partial object's opening brace was counted
+twice. On the same 20 MB the reader went from **994 objects to 18,854**. It had been blind to 95%
+of its input and complaining about none of it.
+
+**What the size bought, stated plainly.** `dialog` is 10.7 GB and 5,499,148 rows and yielded
+**four** items. niv2's 3,796,006 instruction instances are **698 distinct procedures**. Reading
+more of a dataset is not the same as reading more.
+
+### The learning curve, and the exam defect it exposed first
+
+The question V.51 and V.52 both left open: is 0.86 the reader's ceiling or the corpus's? Only a
+curve can tell those apart, so the same examination was run at four sizes.
+
+The first run was meaningless and had to be thrown away. The broad corpus lands on disk in *shard
+order*, and `split()` was a prefix cut — so it trained on chain-of-thought and held out P3, which
+measures transfer between datasets while calling itself held-out, and gave `curve()` a first point
+that was one submix and a last that was all nine. `shuffled()` fixes both, deterministically. The
+12,000-pair reading of **0.121** from before the fix is an artefact of exactly that and is
+comparable to nothing.
+
+On the shuffled corpus the numbers are much lower than V.52's, and the reason is composition, not
+regression: **a third of the broad inference corpus is not inference.** `snli` and `mnli` are;
+`amazon_polarity_Is_this_product_review_positive` and `race_high_Is_this_the_right_answer` are
+yes/no questions the extractor dressed as premise-and-hypothesis. The three labels are the same
+three (99.2% of rows), so the exam is the same exam — the material is harder and more mixed.
+
+| pairs | held-out | answered | when answered | rules |
+| ---: | ---: | ---: | ---: | ---: |
+| 12,000 | 0.045 | 0.064 | 0.706 | 1 |
+| 50,000 | 0.072 | 0.099 | 0.726 | 2 |
+| 200,000 | 0.042 | 0.057 | 0.732 | **1** |
+
+**The curve answers its question, and the answer is no.** At the 50,000-pair point the rule count
+had gone from one to two and it was tempting to call that a climb; the 200,000-pair point takes it
+back to one. Sixteen times the corpus buys no additional structure — the same lone containment
+rule, answering a twentieth of the pairs at about 0.73 — and `when answered` barely moves across
+the whole range. This is the reading the commit message for the curve said would settle it: *"If a
+million pairs also give ~0.87 with one rule, the shortage is not evidence and no amount of reading
+will fix it."* On this corpus the shortage is not evidence. What is missing is not more premises;
+it is a way of reading a pair that these measurements do not contain.
+
+### Cold on real questions, and the number is 0.000
+
+176,160 real questions came out of the read. Asked 1,000 of them, her shipped world corpus of
+12,910 fact keys answers **7.0%** and gets **0.000** of them right:
+
+    what is the latest operating system for android?  -> "system software"   (want "Android 9 Pie")
+    When was the Battle of the Coral Sea fought?       -> "coastal protection" (want "May 1942")
+    what type of government does japan currently have? -> "island country"   (want "Constitutional monarchy")
+
+Publishing that took one correction first. The initial 0.000 was measured on pairs like
+*"What are the software testers aware of?" -> "yes"* and Portuguese-to-Galician translations — the
+extractor's noise, not her failure. `usable()` cut 887,142 questions to 176,160 before the number
+was taken.
+
+### The procedure organ — plan item #8, and nothing in the package held it
+
+Every organ before this reads a **description**. A task definition is an **instruction**: it is
+addressed to somebody, it says what they will be handed, what they must produce, and what the
+allowed answers are. Read as description, `njp.passage` returns entities `['in task', 'nyxara']`
+and no relations — the whole of it lost, on all four fields, on all 698.
+
+`nyxara/njp/procedure.py` reads one into the parts the plan names — **Goal, Prerequisites,
+Expected result, Failure, Recovery** — and keeps the definition itself:
+
+    "In this task, you are given a question and a context passage. You have to answer the
+     question based on the given passage."
+        given   : question; context passage
+        goal    : answer the question based on the given passage   [answer]
+        outputs : —
+
+    "...classify whether the given summary matches the original review. Generate "True" if the
+     given review and its summary match, otherwise generate "False"."
+        outputs : True | False
+        when the given review and its summary match -> Generate "True"
+        when otherwise                              -> generate "False"
+
+`you are given` occurs in 333 of the 698 and `your task is to` in 251. **Neither is written into
+the module**, and a test tokenises the source to prove it. The shapes come from fourteen real
+definitions with their roles marked by hand, at `njp.passage`'s two levels — a frame that keeps the
+demonstration's own words, and a cued shape that holes every open-class token so `you are <*> a
+<SLOT>` reads *"you are provided with an article"*.
+
+Thirty-six more definitions were drawn by a fixed shuffle and marked by hand on three fields:
+twenty-one to fix the reader against, fifteen **sealed** and read once.
+
+| | overall | given (p / r) | action | outputs (p / r) | kept silent |
+| --- | ---: | --- | ---: | --- | --- |
+| cold | **0.000** | 1.000 / 0.000 | 0.000 | 1.000 / 0.000 | 13/13 |
+| one lesson only | 0.111 | 1.000 / 0.000 | 0.333 | 1.000 / 0.000 | 13/13 |
+| cued shapes only | 0.668 | 0.710 / 0.846 | 0.476 | 1.000 / 0.607 | 13/13 |
+| frames only | 0.845 | 0.950 / 0.731 | 0.952 | 1.000 / 0.607 | 13/13 |
+| **taught** | **0.855** | 0.913 / 0.808 | 0.952 | 1.000 / 0.607 | 13/13 |
+| **sealed** | **0.919** | 0.909 / 0.833 | 0.933 | 1.000 / 0.913 | 9/9 |
+
+`kept silent` is the column that stops the rest being gamed: thirteen of the twenty-one name no
+answer space at all, and a reader that invents one for them is doing damage. It invents none.
+
+Over all 698: a goal in **90.3%**, a prerequisite in **87.0%**, an answer space in **26.8%**, a
+condition in **18.5%**. And the taxonomy of what people actually ask for, out of the reading rather
+than imposed on it: 80 generate, 79 classify, 54 write, 42 convert, 35 choose, 28 find, 28 judge,
+27 return, 25 determine, 25 translate, 23 identify — with **68 she still cannot give a goal to**,
+reported beside the rest rather than dropped.
+
+### Six defects the audit found, and one generalisation it refused
+
+Four of the six were the **same mistake in four places**: a boundary learned as the *word* that
+happened to sit next to a demonstration, where the demonstrations were showing a *tag*.
+
+* **The stop set.** A goal was allowed to end only before one of ten literal words — `answer`,
+  `label`, `sentences` — because `_bare` strips determiners and spans ran across sentence ends.
+  What every demonstration actually shows is one stop: the sentence ended. **39% -> 85%** of the
+  corpus got a goal.
+* **The joiner.** Every demonstration joins its answers with `or`, so `or` is what a word-level
+  joiner learns, and `"A", "B", "C", "D", and "E"` named nothing. A joiner is a conjunction or a
+  comma.
+* **The left edge**, which nothing counted at all until a reading came back with `you need to` as
+  a prerequisite and `with an article of the legal acts` as another.
+* **The coordination test** was reading the *stripped* token stream for the determiner that
+  `_bare` had just removed, so the rule was permanently off and *"a sentence in the English and
+  Hindi language"* was two prerequisites.
+
+**And the fifth time the same move was wrong.** The lead-in word before an answer space was
+generalised to *preposition* — and an answer space does follow `into`, `as` and `from`, but so does
+every other prepositional phrase in the language. Audited precision fell from **1.000 to 0.158**
+and bought no recall at all. The sweep is kept runnable in the module and the switch is off.
+
+* **An apostrophe is not a quote.** `(["'])(.+?)(["'])` opens on the apostrophe of *"the reviewer's
+  sentiment into: ..."* and every pair after it is offset by one, so a definition naming five
+  answers in plain double quotes named none.
+* **A parenthesised list is an example of the input, not an answer space** — *"count the number of
+  vowels (letters 'a', 'e', 'i', 'o', 'u')"* had five vowels as its allowed answers.
+
+### What is left, said rather than papered over
+
+Four audited definitions still name no answer space that is read: `en, ja, de, fr, zh, es` and
+`(Regulation, Decision and Directive)` and `1) positive, and 2) negative` need a lead-in word no
+demonstration shows, and `Return 1 ... else return 0` needs `else` where only `otherwise` was
+taught. Every definition in the corpus that would teach those is a **template sibling of an audited
+item** — the same sentence with a different language or subject in it — and teaching from one would
+make the audit a memory test. The gap is reported instead.
+
+### Reachable from English, and checked rather than assumed
+
+Filing a predicate nothing can ask for is the defect V.49 found in `occurs_in` and V.50 in
+`fixed_by`, and it happened again: `answered_by` rows were filed at volume and **every** phrasing
+of the question returned UNKNOWN. Measured, then fixed.
+
+    learn_procedures()   -> 698 read, 1,731 claims filed, 187 with an answer space
+    "what does <task> require?"        -> question; context passage
+    "what does <task> produce?"        -> answer the question based on the given passage
+    "what are the answers for <task>?" -> yes, no
+    "what can <task> answer?"          -> yes, no
+
+`requires`, `produces` and `answered_by` are three different questions and are filed as three
+predicates: what a task *produces* is "a summary"; what it is *answered by* is "Yes, No", and
+answering the second with the first would name a kind of thing where a list of permitted values
+was asked for.
+
+`NJPBrain.can_do(name, have)` answers whether she could run a procedure with what she has been
+handed, matched on heads so *"a sentence"* satisfies *"a sentence in the English language"* — and
+returns **what is missing** rather than just "no", because "no" without "what is absent" is not
+usable by anything.
+
+## V.54 — what kind of thing an answer has to be
+
+Asked a thousand real questions out of the read, her fact store answers seventy and gets **none**
+right. These are not near misses:
+
+    "When was the Battle of the Coral Sea fought?"        -> coastal protection
+    "what type of government does japan currently have?"  -> island country
+    "what is the latest operating system for android?"    -> system software
+
+Look at what is wrong with the first. It is not that she does not know the date — she does not, and
+saying so would have been a fine answer. It is that **"coastal protection" cannot be an answer to
+"when"**, and nothing in the package could see that, because nothing in it held any idea of what a
+question is *asking for*. The grounder matches a subject and a predicate and returns whatever
+object scores highest, and an object is an object.
+
+### Before the organ: five ways a corpus row is not a question with an answer
+
+Every number below was found by measuring, and the last two were found by the organ's own
+mistakes. 176,160 rows became **129,954**:
+
+| rows | what they actually were |
+| ---: | --- |
+| 14,485 | the source task exists to produce a **wrong** answer — `cosmosqa_incorrect_answer_generation`, `piqa_wrong_answer_generation` |
+| 7,830 | the answer names an answer *category* instead of giving one: `drop_answer_type_generation` replies to *"How many field goals were made?"* with the word `number` |
+| 13,879 | the answer is a bare multiple-choice label — `(B).`, `b).`, `[1].` |
+| 6,112 | the answer is itself a question |
+| 3,900 | roman-numeral option labels — `(I)`, `(II).` |
+
+The last two are why a filter on task names is not enough. The biggest source of question-shaped
+answers is `glue_qqp_question_paraprashing`, which FLAN spells **without the h**, so a pattern
+looking for `paraphras` walks straight past 6,112 rows. And the option-label pattern is
+deliberately strict about brackets: a first version that allowed a bare `20.` threw away every
+numeric answer `drop_answer_generation` produced.
+
+The roman numerals came out of an **itemised list**, not a rate. Asked which correct answers a
+shape-veto would reject, the reply was `(I)`, `(II).`, and one row whose gold answer is *"How many
+grams are in 5.2 pounds?"* — twice, the mechanism was right and the corpus was wrong.
+
+### The organ: a shape, never a fact
+
+`nyxara/njp/asked.py` learns what *kind* of thing a question wants. Two sets of generic surface
+measurements — one of the question, one of the answer — and **not one of them names a category**.
+Which question reading predicts which answer kind is induced by `njp.induce`, the same greedy
+cover that learned what breaks a program and what makes one sentence follow from another.
+
+What she worked out, and every line of it is a finding rather than a line of code:
+
+    count    opens_two is how many
+    year     opens_two is what year
+    year     opens_two is when was and third_class is DET
+    year     ends_word is out and opens is when
+    polar    opens is do / does / is / are
+    span     opens is what / which / where / who
+
+A test tokenises the module and asserts that `how many`, `when`, `who` and `where` appear nowhere
+in its executable text.
+
+| | right when it fires | fires on | rules |
+| --- | ---: | ---: | ---: |
+| always guess the commonest kind | 0.590 | 1.000 | — |
+| induction switched off | 0.000 | 0.000 | 0 |
+| **taught** | **0.802** | **0.847** | 13 |
+
+By kind: polar 0.840, year 0.828, span 0.801, count 0.764 — and `phrase` 0.333 on three held-out
+cases, reported rather than dropped because a rule with three cases behind it is worth knowing
+about.
+
+### The veto, and the zero that nearly passed for success
+
+The use of all this is `contradicts`, which is a **veto and not an answerer**: it supplies no fact,
+raises no confidence, and abstains wherever it has no rule. So the number that decides whether it
+may be wired into anything is not its accuracy — it is how often it rejects a **correct** answer.
+Every held-out question is handed its own gold answer and the veto is asked.
+
+| bar | veto fires on | rejects a correct answer |
+| ---: | ---: | --- |
+| 0.70 | 0.847 | 0.0492  (246 of 5000) |
+| 0.75 | 0.418 | 0.0378  (189 of 5000) |
+| 0.80 | 0.376 | 0.0292  (146 of 5000) |
+| 0.85 | 0.253 | 0.0040  ( 20 of 5000) |
+| **0.90** | **0.126** | **0.0004  ( 2 of 5000)** |
+
+Half the reach of 0.85 for a tenth of the damage, so 0.90 is the shipped default. But the
+important thing about that table is what it looked like **before the corpus was cleaned**: no rule
+reached 0.90 at all — the purest was 0.855 — so the veto never fired, and this same column read a
+flawless `0.0000`. For about an hour that zero was reported as a result. *A mechanism that does
+nothing is never wrong.* What caught it was printing reach beside cost, and there is now a test
+that refuses a row with one and not the other.
+
+**And the module does not catch the case it was built for.** At the safe bar exactly two rules
+qualify —
+
+    0.932  year   ends_word is out and opens is when
+    0.901  span   opens is which
+
+— so what the veto can actually say is that a `which` question wants something short and that
+*"when did X come out"* wants a year. The counting rule it needed, `opens_two is how many`, comes
+in at **0.816**, and letting it through means a bar of 0.80, which costs `0.0292` — one correct
+answer in thirty-four. Offered a phrase for *"How many field goals were made?"*, the shipped
+configuration says nothing.
+
+That is the finding, and picking 0.80 and calling three percent acceptable would have buried it.
+`veto_purity` is a constructor argument, the table above is in the docstring, and the choice is
+the caller's to make with the numbers in front of them.
+
+### Two fixes the itemised mistakes produced
+
+**A refinement is not a contradiction.** `what year was the film released?` → `1947` was being
+vetoed, because `opens is what` expects a `span` and `1947` reads as a `year`. But `1947` is a
+`year` only because the year test runs *before* the span test; it is a one-token answer either
+way. `satisfies()` now states the lattice — anything short answers a question wanting something
+short, a number answers a count, span and phrase differ only in wordiness — derived from the order
+of the surface tests rather than declared.
+
+**What is left is one construction, and it is named rather than averaged away.** Nearly all the
+remaining cost is the **alternative question**, which opens exactly like a polar one and is not
+one: *"Does Ridge Pond have more nitrogen or oxygen?"* → `oxygen`, *"Does Kasetsart University or
+Bilkent University focus upon agriculture?"* → `Kasetsart University`. `opens is does` predicts
+`polar` at 0.840 and these are the other sixteen percent.
+
+### What this does not do
+
+It does not make her able to answer these questions. She scores **0.000** on them and still does.
+The veto converts some confidently wrong answers into abstentions, which is the difference between
+being unreliable and being honest about a gap — and is not the same as knowing anything.
+
+## V.55 — answering from a passage: a corpus that works and a reader that does not
+
+The 0.000 on real questions was never a reading defect. She does not know when the Battle of the
+Coral Sea was fought, and no amount of better reading of an empty store produces a date. So V.55
+asked the question she can be held to — **here is the passage, now find it** — and the answer is
+that she mostly cannot.
+
+### The corpus is the part that worked
+
+29,256 rows from a second full read, and it is the only corpus in this package whose labels
+**cannot be quietly wrong**: a row is kept only if its answer appears in its passage, at word
+boundaries, exactly once. That is checked by the extractor, again by the merge, and again by a
+test over the shipped file.
+
+    squad 12,634   quac 10,297   viquiquad 2,357   drop 1,664   mrqa 1,608   ropes 302   quoref 271
+
+Getting there took three attempts, and the two failures are more instructive than the success.
+*Verbatim-in-prompt* admits every classification row in FLAN, because a classification task spells
+its label vocabulary out in its own instructions — `"classify into yes or no"` contains `no`.
+*Stripping the scaffolding* helped and did not fix it, because for those tasks the instruction **is**
+the prompt. What works is provenance plus verification: corpora that are extractive by
+construction, each row still checked.
+
+### The reader, measured on a split that shares no passage
+
+    reader                              exact   overlap   answered
+    longest span of the best sentence   0.002    0.149     1.000
+    induced span stage                  0.015    0.042     0.408
+
+Seven times the heuristic at returning the answer *exactly* — and 0.015 is a small number, and the
+overlap column is a rout. The decomposition says where it goes:
+
+    gold answer is a candidate at all      0.695   <- the ceiling
+    sentence chosen correctly              0.580
+      ...and a span came back              0.348
+      ...and it was exactly right          0.026
+    exact overall                          0.015
+
+Handed the right sentence, it picks the right span **one time in forty**.
+
+### Three findings, all negative, all of them the point
+
+**The induction cannot rank.** `induce.cover` builds conjunctions of equality tests over *bucketed*
+values. Selecting one item from many needs the winner to satisfy a rule no other item satisfies;
+argmax over a continuous quantity needs no item to be uniquely characterisable, only ordered. Asked
+to pick the sentence, the induction **rediscovered the heuristic's own signal** — `carries is many`,
+`carries is few`, `carries is two`, correctly ordered by purity — and could not use it as well,
+because every sentence sharing five or more words with the question lands in one bucket and ties.
+Six settings, none reaching the heuristic:
+
+    rules   1      2      2      2      3      4        heuristic
+            0.470  0.337  0.337  0.337  0.568  0.570      0.618
+
+Note the 2-rule rows, which refute the obvious reading: it is not that more rules are better. At a
+low enough purity the cover takes one very broad rule that fires on nearly every sentence, and a
+rule that fires on everything discriminates nothing.
+
+This explains the whole session rather than just this module. The organs that **sort things into
+kinds** work — answer-shape 0.802, procedure roles 0.855, passage roles 0.919 sealed. The one asked
+to **pick a best** does not.
+
+**The learned answer-shape organ contributes nothing.** V.54 was wired into V.55 through a single
+removable feature precisely so this could be measured. Removed, not one digit changes. And the
+precise version matters: the two induced rules use `shape`, which is `asked.shape_of()`, a pure
+surface function — neither uses `shape_fits`, the feature that consults the *learned* organ. The
+shared function earns its place; the organ does not.
+
+**The first set of numbers was measured through a leak.** Everything above replaces figures three
+to four times higher, taken with a split that cut by row. SQuAD asks a dozen questions of one
+paragraph, so the same passage sat on both sides and the reader was examined on what it had
+studied. The leak inflated the baselines too, which is why no single figure looked wrong. It was
+caught by a test written as boilerplate, which had only ever run against convenient scratch data —
+those shards repeated passages less. A fast subset of the tests against convenient data is not the
+suite.
+
+### And a method correction worth more than the module
+
+Three parameter sweeps ran before the first decomposition. The decomposition then showed that
+**41% of the answers were unreachable at every setting** — the candidate generator never proposed
+them, because it refused spans opening on a determiner (`the Henry Cole Wing`) and compared
+`Karabakh police.` against `Karabakh police` as unequal strings. Fixing those two things moved the
+ceiling from 0.587 to 0.777 on the leaky split, and no amount of sweeping would have found either.
+
+Sweeping optimises within an architecture. It cannot tell you the architecture has a hole in it.
+Decompose first.
+
+## V.56 — the induction learns to rank, and it changes nothing
+
+V.55 ended on a diagnosis: this package's induction sorts things into kinds well and picks a best
+badly. `induce.cover` builds conjunctions of equality tests, and asked which sentence of a passage
+holds an answer it lost to one line of argmax at every setting tried. V.56 fixed that, twice, and
+the second fix worked.
+
+### Two wrong answers first
+
+**"Bucketing destroys the order."** Plausible, and it survived six measurements. So `induce.AtLeast`
+was added — a term satisfied by any value at or above its own, so a rule can say `carries_n is at
+least 3` rather than only `carries is many`. The induction duly found exactly that rule, purity
+0.621 on 576 cases, the best rule in every run.
+
+It made no difference: 0.372 to 0.505 against argmax's 0.580. `at least 3` fires on every sentence
+with three or more shared words, so they all tie again. **The rule expresses an order; the ranking
+still treats it as a category.**
+
+### The actual cause is the objective
+
+`cover` is a greedy set cover. It takes the widest clean rule, removes the positives it explains,
+and looks for another — so once `at least 3` is taken, a rung at 5 explains nothing new and **can
+never be induced**. Covering deletes precisely the graded, redundant evidence that a ranking runs
+on. That is not a flaw in the cover; it is what a cover is for.
+
+`induce.ladder` does not cover. One rule per observed value, all of them kept, each carrying its
+own measured purity:
+
+    0.118  carries_n is at least 0        0.844  at least 5
+    0.267  carries_n is at least 1        0.907  at least 6
+    0.445  carries_n is at least 2        0.957  at least 8
+    0.621  carries_n is at least 3        1.000  at least 10
+
+A case at seven satisfies the rungs from zero to seven and scores seven; one at three scores three.
+**Counting rungs is the order, recovered.** On 12,692 sentences with 600 held out:
+
+    argmax over the raw count   0.580
+    ladder of eleven rungs      0.580     <- exactly
+    greedy cover                0.505
+
+Equal to argmax, not better. What it adds is **calibration rather than accuracy**: six shared words
+comes with *"that held the answer 90.7% of the time"* attached. Argmax gives an order and no
+confidence at all. And it is now general — any organ here that must rank has the machinery.
+
+### And it bought nothing downstream
+
+| first stage | sentence | exact | answered |
+| --- | ---: | ---: | ---: |
+| ladder | 0.578 | 0.015 | 0.408 |
+| argmax | 0.580 | 0.015 | 0.408 |
+| greedy cover | 0.505 | **0.017** | 0.432 |
+
+Raising the sentence stage from 0.505 to 0.580 moved the end-to-end number **not at all**, and the
+worst first stage edges the others on exact (10 right against 9, out of 600 — noise).
+
+V.55's own decomposition said this would happen and it was not read: `exact when the sentence is
+right` is **0.026**, so the span stage dominates so completely that the first stage barely
+registers. A whole version was spent improving the stage that was not the bottleneck, after the
+measurement identifying the bottleneck had already been taken and written down.
+
+That is the third method correction of the session, and the sharpest. Decomposing is not enough.
+**Act on the decomposition you already have** before improving the part that is easier to reach.
+
+### What is unaffected
+
+`AtLeast` offers a threshold only for real numbers, and `entail`, `programming`, `procedure` and
+`asked` read strings and bools — so their candidate sets are unchanged and `_matches` reduces to
+`==`. 95 tests across those four suites pass unchanged. Verified rather than assumed, which in this
+session has not been a formality.
+
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
@@ -4673,3 +5432,2308 @@ confidence down, and it disappears as she comes to recognise the ground.
 The safety core — corrigibility, oversight, loyalty, honesty — is never governed, rewritten or
 bypassed by anything in the package. Every candidate flows through the identical, unchanged,
 fail-closed sovereign gate. The mind proposes; the kernel disposes; the Master is sovereign.
+
+---
+
+## V.57 — she works out the dataset's shapes instead of being handed mine
+
+The first read of FLAN kept 747,897 rows out of 83,271,754. **Nine tenths of one percent.** Not
+because the rest held nothing — because five hand-written extractors decided in advance what
+knowledge looks like: a `Premise:`, a `Q:`, an `In this task`, a chain of sums, a quoted pair.
+Anything outside them was invisible. `dialog` is 10.7 GB and yielded **four items**.
+
+The fault was not that those patterns were bad. It is that they were *mine*. Somebody wrote down
+what a piece of knowledge looks like, and the reader could then only ever find what that person
+already knew to look for.
+
+So `njp/shapes.py` says nothing about what a task looks like. It uses a fact about the data
+instead: FLAN stamps every row with the task it came from and the index of the template that
+rendered it, so **rows sharing both were produced by one string with holes punched in it**. Given
+six such rows the string is recoverable by alignment — what every row has in common, in order, is
+the template; what differs is what was poured in.
+
+    "In this task, you are given a question and a context passage. You have to answer the
+     question based on the given passage.\nQ: ⟨1⟩, Context: ⟨2⟩"
+
+Two slots, discovered. Nobody wrote `Q:` or `Context:` down; they are what did not vary. The same
+procedure runs on a translation task, a dialogue task, a task in Tamil, and on the shapes nobody
+anticipated, because it never asks what the shape *means*.
+
+### The exam needs no answer key
+
+Induce a template from four rows of a group; hold two back; fill the template with what it reads
+out of a held-out row. **Do you get the row back, character for character?** There is no judgement
+in that and nothing to mark by hand.
+
+Two guards stop the headline being gamed, because the degenerate shape — one hole covering the
+whole prompt — reconstructs *everything* perfectly and knows nothing. So slots-per-shape and
+template-characters are printed beside the reconstruction rate, and the one-slot shape is run as an
+explicit floor.
+
+### Trimming an over-proposed anchor
+
+A run is proposed from the **first pair**, so it reaches past the template into whatever those two
+rows happened to share. Two questions that both open `wh` propose `"\nQ: wh"`, and those two
+characters are enough for row five to reject the anchor — discarding the entire instruction rather
+than shortening it. Over 13,113 real groups:
+
+| trim | shaped | reconstructs | slots | template |
+|---|---|---|---|---|
+| off | 0.847 | 0.925 | 1.41 | 336 chars |
+| on  | **0.966** | 0.908 | 1.52 | 352 chars |
+
+Read together, not separately: trimming shapes about 1,560 more groups and gives back 0.017 of
+exactness on the larger set it is then judged on, so of *all* held-out rows the share returned
+character-for-character goes from **0.783 to 0.877**. The switch stays so the claim can be taken
+away again.
+
+### What is shipped, and what it is not
+
+`nyxara/njp/data/flan_shapes.jsonl.gz` — **13,650 templates over 1,831 tasks**, from all five
+sources FLAN draws on (CoT, Dialog, Flan2021, NIv2, P3), averaging 1.76 slots each, 5,293 of them
+with an induced answer space. 11 MB.
+
+One shape per task-and-template with a handful of examples is not the 83 million rows. It is the
+**form** of all of them, which is the thing that generalises, and it fits in a repository where 83
+million rows never could.
+
+It also over-generalises where the rows it saw agreed by accident. One shipped shape reads
+
+    Given the following passage "⟨1⟩.", answer the following question. ... Question: Wh⟨2⟩
+
+because all four rows it was induced from happened to ask *Wh*-questions. That template refuses a
+`How many` row rather than mis-parsing it, which is the right failure — but it is a failure, and it
+is what the coverage column is counting.
+
+---
+
+## V.58 — learning to *do* the tasks, and the null that says what a win is worth
+
+A shape is a description. It says *"this task asks a question about a passage and answers yes or
+no"*. It cannot answer one. `njp/answering.py` is the other thing: for each task, from examples of
+it, **which readings of what was poured into the slots predict which answer?**
+
+The readings are whether the text holds each of the task's own commonest words, and nothing else —
+no sentiment lexicon, no polarity list, no notion of what any word means. If *terrible* predicts
+*negative*, that is something `induce` found by counting, in a task whose name it never read.
+
+### The floor is not zero
+
+It is **always saying whichever answer was commonest**, computed per task. A two-way task whose
+answers run nine to one is 0.9 for a machine that has learned nothing, so nothing here reports
+accuracy without the majority beside it and `learned something` means *beat its own task's floor*.
+
+### And the floor is not enough either
+
+Given forty-eight readings to choose from and thirty rows to choose on, a rule with support four
+can come out **pure by accident**, and sometimes it helps on the held-out rows too. Measured on
+forty synthetic tasks whose answers were assigned by a coin: **0.175 of them beat their own floor**,
+at a mean lift of +0.013.
+
+So the exam runs a shuffled-label null — the same tasks with their answers permuted, which destroys
+the signal and leaves size, answer space and skew exactly as they were. On the collection:
+
+All eight submixes, three hundred rows of every task, 3,454 tasks seen:
+
+| | in scope | beat own floor | accuracy | majority | lift |
+|---|---|---|---|---|---|
+| with shapes | 1,007 | **462 = 0.459** | 0.510 | 0.475 | **+0.035** |
+| whole prompt | 1,007 | 460 = 0.457 | 0.507 | 0.475 | +0.033 |
+| shuffled answers | 1,007 | 260 = 0.258 | 0.472 | 0.474 | **−0.002** |
+
+**Above chance: +0.201.** The null's lift is negative, which is what a null must do; the real lift
+is positive.
+
+Read plainly: of 3,454 tasks, 1,007 name a small enough answer space to attempt, 462 beat their own
+majority, and about 260 of those would have on shuffled answers. **Roughly 200 tasks were genuinely
+learned.** Of the rest, 2,149 answer in free text and are counted as *not attempted* rather than as
+failures, because this machinery picks among answers it has seen and cannot compose a new one; 298
+had too few examples collected to say anything about.
+
+### The prediction that was wrong
+
+Ninety rows per task gave 0.318 above a null of 0.207. Synthetic noise said the null was almost
+entirely a small-held-out-set effect and would go to **zero** at three hundred rows:
+
+    rows/task    40      60      90     150     300     600
+    noise wins  0.025   0.175   0.125   0.050   0.000   0.000
+
+On real FLAN it did the opposite — the null rose from **0.207 to 0.258**. The whole gain came from
+the signal side, 0.318 to 0.459, not from the floor dropping.
+
+The synthetic tasks were a bad model of the real ones, and it is worth saying why: they drew from
+nine words, so past some number of rows every word had been seen often enough that nothing could be
+pure by accident. A real task has a long tail — rare words stay rare however many rows are
+collected — so support-four rules that are pure by luck never stop being available, and more
+learning rows means more of them are found. **This is exactly why the shuffled null is run rather
+than reasoned about.**
+
+### The shapes still contribute nothing
+
+0.459 with them against 0.457 without: two tasks out of a thousand, which is noise. That reverses
+the sign of the ninety-row result (0.316 against 0.318) and means the same thing both times —
+**no effect**. Fourth consecutive null result for one organ feeding another here, and a difference
+that changes sign between runs is not a fifth result in the other direction.
+
+Some of what she worked out, none of it told to her:
+
+    1.000 vs 0.411   'en' when has:de is False / 'es' when has:de is True
+    0.878 vs 0.189   'Buses' when has:bus is True / 'Flights' when has:trip is True    (5-way)
+    0.722 vs 0.189   'Dutch' when has:van is True / when has:een is True               (5-way)
+    0.667 vs 0.183   'Data Retention' when has:user's is True                          (7-way)
+    0.656 vs 0.178   'anger' when ends is furious                                      (4-way)
+    0.842 vs 0.474   'No' when has:sorry is True              (a dialogue act)
+    0.893 vs 0.571   'Gujarati' when has:એક is True
+
+Language identification from function words, in scripts nothing in this package can read.
+
+**And one the null cannot catch.** `task1207_atomic_classification_atlocation` comes out at 1.000
+against 0.456 on `'No' when has:personx is True`. `personx` is a rendering token of that task's
+template, not a word about the world, and the rule is picking up which template variant carried
+which answer. Shuffling answers does not expose this — the correlation is genuinely in the data —
+so it is a real regularity and not a real *understanding*, and the difference is worth stating
+rather than counting the win and moving on.
+
+### The shapes contributed nothing
+
+0.310 with them against 0.335 without. That is the **fourth** consecutive null result for one organ
+feeding another in this package, and it is reported rather than tuned past. The instruction is
+identical in every row of a task, so its words carry no signal and should be pure noise in the
+reading — the measurement says they are, and that reading the slots alone is very slightly worse
+than reading everything, presumably because a shape that fails to parse a row costs that row.
+
+### Two defects this turned up
+
+**The cover could not learn a task decided by any one of several words.** `_one` seeds its search
+from readings *all* remaining positives share; when that yields nothing it fell back to a single
+row and accepted an impure near miss, and `cover` removes what a near miss covers — so one impure
+rule swallowed the positives and the clean rules underneath were never looked for. On a task
+decided entirely by which of six words appeared: one rule where six were available, 0.389 against a
+floor of 0.389. Trying several seeds and preferring a pure rule: five rules, 0.611. It is opt-in at
+`seeds=1`, because on 8,400 inference pairs it costs more than it is worth there.
+
+**`nyxara/njp/tasks.py` was overwritten.** V.58 first shipped under that name, on top of the V.17
+coding-task bank that `njp/school.py` reaches into in eight places. Nothing caught it because only
+the new test file had been run. Restored byte-for-byte; the module lives at `njp/answering.py`.
+
+---
+
+## V.66–V.68 — three organs re-examined, and what falsifying them actually found
+
+Everything below came from asking one question of code that already existed: **what is this
+compared against?** In each case the answer was *nothing*, and in each case the number that had
+been recorded as a hard result turned out to be a mechanism nobody had tested.
+
+### The entailer had one rule because the bar was set where nothing passes
+
+564,166 pairs, one rule. That had been written down as the honest shape of a negative result. It
+was not. The purity bar stood at 0.72, and natural-language inference read off surface differences
+between two sentences is simply not clean to 0.72.
+
+Decomposed properly — how often a rule fires, how right it is *when* it fires, and what the organ
+scores overall against its own base rate — then repeated on a disjoint slice of the corpus:
+
+| purity | rules | speaks on | right when it speaks | overall | lift |
+|---|---|---|---|---|---|
+| 0.40 | 6 | 1.000 | 0.461 | 0.461 | +0.028 |
+| **0.45** | 6 | 0.783 | 0.540 | **0.504** | **+0.077** |
+| 0.50 | 4–6 | 0.638 | 0.559 | 0.492 | +0.064 |
+| 0.55 | 3–4 | 0.558 | 0.565 | 0.475 | +0.047 |
+| 0.65 | 1 | 0.067 | 0.689 | 0.457 | +0.029 |
+| 0.72 | 1 | 0.052 | 0.780 | 0.463 | +0.030 |
+
+Read the middle two columns together. A high bar does not make the organ **wrong** — at 0.72 its
+one rule is right 78% of the time. It makes it **silent**, firing on one pair in twenty. At 0.45
+the rules are right 54% of the time, reach four pairs in five, and the organ scores 0.504 against a
+base rate of 0.428.
+
+The peak is at 0.45 on both slices by nearly the same margin, and 0.40 collapses to the base rate —
+speaking on everything and saying nothing. A unimodal curve with its maximum in the same place on
+two independent samples is a property of the subject, not of a sample.
+
+Four tests pinned the old regime (`coverage < 0.25`, `accuracy < base_rate`, "one real rule and it
+covers a sliver"). Every one of them was true at 0.72. They are **rewritten, with the superseded
+assertions kept in the replacement's docstring** — a test that quietly changes what it claims is a
+finding quietly rewritten.
+
+### The same relation, asked in two vocabularies, was six classes
+
+FLAN offers `yes / no / it is not possible to tell` in some templates and
+`entailment / contradiction / neutral` in others. Same three relations. The entailer treated them
+as six classes, so the three rare spellings — 401 `entailment`, 391 `contradiction` out of 564,166
+— could never clear a support floor in the thousands, **and each of them sat in the negatives of
+the label it means**. Every `contradiction` pair was evidence against `no`.
+
+`relation_of` folds; `as_asked` puts the spelling back, because the vocabulary belongs to the
+*question* and answering the right relation in the wrong words is still wrong. The school folds the
+gold the same way — otherwise a folded answer is marked wrong on a pair whose template spelled it
+differently, quietly, with a by-label table that still looks sensible.
+
+Worth +0.006 of lift. **Small**, and done anyway: two names for one relation are one relation.
+
+### The passage reader's span stage was never given a baseline
+
+`exact_when_sentence_right = 0.0259` had sat in its report for two versions looking like a hard
+problem. The sentence stage has had a baseline to beat since it was built; the span stage had none.
+
+Given one — every picker seeing the same candidate list, conditioned on the gold span being in it
+so the generator's ceiling cannot hide inside the ranker's score:
+
+| picker | gets the gold span |
+|---|---|
+| **learned ranker** | **0.0456** |
+| fewest question-words | 0.0312 |
+| longest | 0.0216 |
+| first | 0.0168 |
+| random | 0.0144 |
+| shortest | 0.0048 |
+
+The ranker is ranking — three times random, half again the best one-liner. What is wrong is the
+**pool: 142 candidates in the average gold sentence**. No improvement to ranking fetches that back,
+and the version spent raising the sentence stage was spent on the wrong thing for the second time.
+
+One fix tried and reported as a null: `njp.asked` knows what kind of thing a question wants, so
+candidates that cannot be that kind should be droppable. The pool goes from **131.4 to 125.7** —
+four percent — and loses 4.3% of the reachable gold. The organ abstains on 55% of these questions,
+and on the 40% where it answers `span`, a span is what nearly every candidate already is. Only
+`count` and `year` cut hard (132→2.8, 109→5.5) and together they are 24 rows in 600.
+
+**Fifth consecutive null result for one organ feeding another in this package.**
+
+### And two tests that were never broken
+
+The full suite reported timeouts in `tests/growth`. Timed alone: 190s and 227s, both passing,
+against a 300s bar. A test at three quarters of its budget passes on an idle machine and times out
+whenever anything else is using one — and a timeout reads as a hang. Both do real work over the
+live source tree, so the fix is headroom, not speed: an explicit 900s on those two with the
+measured duration written above each, and the global bar left at 300 so a real hang still shows.
+
+---
+
+## V.74 — measuring the measurement
+
+Four times in one week a number here was read as a fact about a mechanism and turned out to be a
+fact about the measurement. Not one of them was carelessness — in each case the mechanism was
+measured carefully and **the measurement was not measured at all**:
+
+| the number | what was concluded | what was actually wrong |
+|---|---|---|
+| 1 rule from 564,166 pairs | "the entailer cannot learn" | the purity bar was above the subject; nothing was compared |
+| 0.0259 exact, given the right sentence | "finding a span is hard" | the span stage had no baseline; it beats every one there is |
+| 0.23x on a C kernel | "the kernel is slow" | one wall-clock sample decided a correctness gate |
+| 0.318 of tasks beat their floor | "she learned a third of them" | shuffled answers beat their floor 0.207 of the time |
+
+Two of those were optimised against for a whole version before anybody asked what they were being
+compared to. So:
+
+> A system cannot understand its own performance without modelling the measurement process.
+
+`njp/measurement.py` takes a benchmark as an **object** rather than a score and runs against it the
+strategies that know nothing. It reads no code and infers no intent; it runs things and reports
+what they got. Seven checks, one per way a number lied here — **majority**, **chance**,
+**shuffled**, **leakage**, **abstention**, **stability**, **ceiling**.
+
+**A check it cannot run is reported as `not checked`, never as passed**, and `trusted` requires
+more than half the checks to have actually run. That is the whole point: this package has twice
+recorded a mechanism as flawless when it had simply never fired, and a critic that quietly skips
+what it cannot see would be that mistake one level up. A perfect 1.000 on a benchmark supplying
+only the three required fields comes back **not trusted** — scoring well and having been measured
+are different claims.
+
+### The exam is retrodiction, in both directions
+
+Eight measurements from this repository's own history: the four above, and the four repaired forms
+of them. The critic is not told which is which. Passing means separating them — **flagging all
+eight fails this exam rather than passing it**, because a check that always fires carries no
+information, and this package has been caught by exactly that before (a veto with a false-alarm
+rate of 0.0000 that was flawless because it never fired).
+
+    caught        4 of 4   (recall 1.000)
+    false alarms  0 of 4   (rate 0.000)
+
+Each case also names *which* check should catch it, so a right answer for the wrong reason is not
+credited.
+
+### It failed its own exam first, on its own mistake
+
+The first version drew the shuffled null **once**. One draw of a null is precisely the error this
+organ exists to catch — a single sample of a noisy quantity, believed — and it duly missed the
+task-learner case, reporting a comfortable 0.536-against-0.429 margin that was one coin landing.
+The null is now a permutation test over twenty draws, reporting how often shuffled answers reach
+the system's score. That is recorded in `PERMUTATIONS` rather than quietly corrected.
+
+### And it found something no hand-audit had
+
+Run against the real task learner on real FLAN tasks, the leakage check reported **13 of 90
+held-out items were also learned from**. Chasing it: **334 of 1,007 in-scope tasks had repeated
+prompts, 11.7% of all rows, and in the worst cases 297 of 300 rows were the same string.**
+
+The cause is a clip taken from the wrong end. V.57 established that a **prefix** is right for
+alignment — rows of one template share their opening, and a head keeps every clipped row starting
+where its original starts (0.966 against 0.373 for the alternative). For *learning* it is exactly
+backwards: the instruction is identical in every row of a task and carries no signal, and what was
+poured in comes after it. A task whose instruction runs past 700 characters clipped every row to
+that same instruction and cut the question off entirely — 160 identical prompts carrying four
+different answers, which no learner can tell apart and no null can either.
+
+The collector now takes the tail in by-task mode, refuses a row whose clipped prompt repeats one
+already kept, and reports how many it skipped. Re-collected and measured rather than argued about:
+
+| | in-scope tasks | with repeated prompts | repeated rows |
+|---|---|---|---|
+| head 700 (old) | 1,007 | 334 (0.3317) | 32,821 of 280,305 (0.1171) |
+| tail 700 (new) | 1,007 | **0** | **0** of 280,272 |
+
+The same 1,007 tasks, thirty-three rows lost out of 280,305. Across the whole read the collector
+skipped 2,957 rows whose clipped prompt repeated one already kept — against 32,821 duplicates in
+the old corpus, so the clip did about 91% of the work and the refusal caught the rest.
+
+**V.64's figures were taken over a corpus a third of whose tasks carried duplicates.** Re-measured
+on the clean one:
+
+| | in scope | beat own floor | accuracy | majority | lift |
+|---|---|---|---|---|---|
+| with shapes | 1,007 | **553 = 0.549** | 0.527 | 0.473 | +0.054 |
+| whole prompt | 1,007 | 553 = 0.549 | 0.526 | 0.473 | +0.053 |
+| shuffled answers | 1,007 | 301 = 0.299 | 0.472 | 0.475 | **−0.002** |
+
+**Above chance +0.250**, against +0.201 on the duplicated corpus. Both halves moved: the system
+0.459 → 0.549 and the null 0.258 → 0.299, and the distance between them grew by a quarter. So the
+error did run downward, as argued — but the argument is worth nothing next to the number, and it
+was made before the number existed, which is the habit this whole organ is meant to break.
+
+Roughly **250 tasks genuinely learned**, against roughly 200 before.
+
+And the shapes contribute exactly nothing again: 553 against 553, the same integer. That is the
+sixth consecutive null for one organ feeding another here, and the first time the two columns have
+been not merely close but identical.
+
+---
+
+## V.77 — why did it fail, tested rather than guessed
+
+`measurement.py` asks whether a number means what it looks like. This asks the question that
+decides what gets worked on, and it is the one this repository has repeatedly got wrong:
+**an observed failure is not its own cause.**
+
+| what failed | what was worked on | what it actually was |
+|---|---|---|
+| entailer, 1 rule from 564,166 pairs | the readings, the corpus | the bar, and no baseline |
+| span stage, 0.0259 exact | the ranker, for two versions | 142 candidates a sentence |
+| task learner, a fifth of tasks | the induction | 90 rows and no null |
+| forge refusing a good kernel | nothing — it was believed | one wall-clock sample |
+
+So a cause here is never a label. Each is a **hypothesis with an experiment that can refute it**,
+and a hypothesis whose experiment was not run comes back *untested* — never as support, and never
+quietly dropped so the survivors look unanimous. The rule that nothing may protect its favourite
+explanation is mechanical rather than aspirational: **an experiment that ran and did not move the
+number refutes its hypothesis**, rather than leaving it open.
+
+Eight hypotheses, and two of them are answered by running a `critique`, because *the benchmark is
+wrong* and *the measurement is noisy* are failure causes like any other. This organ is built on
+the last one rather than beside it.
+
+### The ordering is the design, and getting it wrong cost two runs
+
+The first version ranked every supported cause by how far its experiment moved the number. That is
+wrong twice over: a measurement wobble of 0.03 and a data repair's gain of 0.14 are not the same
+quantity, and a score that will not hold still cannot be attributed to anything at all. So:
+
+1. **measurement** gates — the reading is moving on its own, nothing downstream can be concluded.
+2. **leakage** gates — the score is not about the held-out world, so there is nothing to explain.
+3. the **repairs** compete, because they are all measured in the same units.
+4. **floor** is a fallback — only once every available repair has been tried and none moved
+   anything. Then *these levers do not reach this* is a real finding.
+
+Folding leakage and floor together as "benchmark" was the other error: they need opposite repairs,
+and an attributor that says the same word to both has told nobody which.
+
+### It is allowed to say it does not know
+
+Two repairs that move the number by within `MOVED` of each other are reported as **unseparated**,
+with both named and the missing experiment stated. That is a real state of knowledge, and it is the
+one this package has historically skipped past on the way to a confident answer.
+
+### The exam: eight failures whose cause is known by construction
+
+One per hypothesis, plus one that nothing available explains — where **naming no cause is the
+right answer**. Every fixture supplies every experiment, so no hypothesis is credited for being the
+only one anybody tried.
+
+    correct 8 of 8   wrong 0   unsettled 0   distinct causes named 7
+
+Scored three ways, and the middle one matters most: a **wrong** cause sends real work somewhere
+real and costs more than an honest shrug, so the pass condition requires zero of them. The third
+condition — more than one distinct cause across the eight — exists because an attributor that
+answers `data` to everything would otherwise score full marks on any set of fixtures about data.
+
+### Four rounds of failing its own exam
+
+It scored 4/8, then 5/8, then 6/8 before 8/8, and every repair was a real defect rather than a
+tuned threshold:
+
+* `benchmark` fired whenever the system failed to clear its floor — which is *the failure*, not its
+  cause — so a task whose real fault was a chooser allowed one rule where six were needed was
+  blamed on the benchmark.
+* `root` compared a measurement's wobble against a repair's gain as if they were the same number.
+* The fixtures cut the held-out set at the end of training, so an experiment that added rows also
+  moved the examination. **The organ's own rule is that an experiment changes exactly one thing;
+  the fixtures broke it before the organ did.**
+* The six-way disjunction made "always A" 82% correct, so no learner could beat it and three
+  fixtures collapsed into `floor`. A task whose majority answer is nearly always right tests
+  nothing.
+
+### Cause of cause
+
+`chain` walks from a failure to the failure behind it:
+
+    too few examples: data
+      └── the answer is rarely producible: reachability
+        └── the answer is not in the readings: reading
+
+Only the last is worth repairing and only the first was visible — which is exactly how two versions
+went into the span stage's ranker. The walk reports where it stops rather than implying it reached
+bottom: a chain that ends because nobody recorded what was behind it looks identical to one that
+ends because nothing is.
+
+---
+
+## V.78 — how far does it reach, and where exactly does it stop
+
+A capability reported as one number is a capability nobody can act on. *Causal reasoning: 0.73* does
+not say whether the third it misses are the hard cases or scattered at random, and those need
+different work. What is wanted is where it **stops**:
+
+    one hop     0.99
+    two hops    0.96
+    three hops  0.89
+    four hops   0.64
+    five hops   0.31      <- it stops here
+
+That edge is the next thing to build, and it is a far more useful output than a percentage. But an
+edge is easy to invent, so most of `njp/reach.py` is the **four ways a ladder has no edge** and the
+refusal to report one anyway:
+
+| | what it means | why naming the top rung is wrong |
+|---|---|---|
+| **exhausted** | every rung held | no boundary *within what was tried* is not "no boundary" |
+| **barren** | no rung held | there is no capability here to bound |
+| **patchy** | holds at 3, fails at 2 | not a boundary at all; the dial or the measurement is wrong first |
+| **graceful** | fades with no single step falling away | there is an edge, but no *place* to attack |
+
+Every rung is measured against **its own floor**, because difficulty usually moves the floor too and
+0.88 on a rung whose majority answer is right 90% of the time is not competence. A rung whose score
+will not repeat does not count as held, for the same reason the forge's timing gate was not a gate.
+A rung measured on what it was taught does not count either.
+
+### Stopping and fading are different facts, and the first version lost one
+
+`graceful` was reported *instead of* the edge, which threw away the more useful of the two. A ladder
+that fades past its floor has a last rung that held like any other — what it lacks is a single
+setting where something breaks. So both are reported: the edge says how far it reaches, the cliff
+says whether there is anywhere in particular to attack.
+
+### The exam: five ladders, two edges
+
+    right 5 of 5   invented edges 0   missed 0
+
+**No invented edges** is a separate pass condition and the stricter one — a boundary reported where
+there is none becomes the next thing somebody builds. Three of the five fixtures are refusals, so
+an organ that always answers scores two in five.
+
+Two fixture bugs found on the way, both the same mistake as the organ's own: the fade was too gentle
+and still held at the last rung (so it was genuinely `exhausted`, the right answer for the wrong
+fixture); and the per-rung floors were redrawn each time, so they wandered by three points and
+turned one step of a gentle fade into 0.163 — a fade reported as a cliff because the *fixture* let
+two things vary at once.
+
+### What the edge is for
+
+    the_gap(ladder, make) → the first setting past the edge
+
+A failure picked at random is hard to diagnose because everything about it is a candidate. A failure
+**one rung past a setting that demonstrably works** has almost everything held constant by
+construction, and what differs is the dial. Composed with V.77, end to end:
+
+    capability across depth:
+      [ok] 1..4     ~0.92   floor 0.525   above +0.39
+      [  ] 5, 6     ~0.51   floor 0.525   at its floor
+      → it reaches 4 and falls away at 5 by 0.395
+
+    depth 5: scored 0.5225
+       !  algorithm   a different way of choosing: 0.5225 → 0.9400 (+0.4175) — this is a cause
+       → algorithm
+
+`reach` deliberately does **not** import `attribution`. It measures where a capability stops; what
+to do about that is the next organ's question, and one that reaches into the organ downstream of it
+cannot be used without it.
+
+### Phase 1 is complete
+
+    measurement   caught 4 of 4, false alarms 0 of 4
+    attribution   correct 8 of 8, wrong 0, distinct causes 7
+    reach         right 5 of 5, invented edges 0
+
+Three organs, each validated by retrodiction against cases whose answer is known, and each scored in
+**both** directions — finding what is there, and refusing to find what is not.
+
+---
+
+## V.79 — Phase 2 opens by asking the designer the question nobody had
+
+`ExperimentDesigner` has been in `njp/universe.py` since V.04 and is careful work. It computes
+expected information gain exactly, refuses an experiment every live hypothesis predicts identically,
+and kills a hypothesis that made a commitment and was contradicted rather than softening it into a
+decrement.
+
+**It had never been compared to anything.** One test hands it three named experiments and checks it
+picks the one a person would. That is the defect shape found four times this week, so Phase 2 starts
+by giving it a floor rather than by building a second one beside it.
+
+    Does choosing the most informative experiment find the truth in fewer experiments
+    than choosing one at random?
+
+Four strategies over the same worlds — the organ, a uniform pick, working down the list, and
+deliberately the *least* informative. That last is not a competitor: it checks the ranking points
+somewhere, since a designer whose best and worst pick alike would be sorting noise. Worlds where no
+sequence of available experiments separates the hypotheses are set aside, because a strategy that
+cannot finish an impossible world is not failing.
+
+    designed   1.800 experiments   settled 1.000   right when settled 1.000
+    random     2.496 experiments   settled 1.000   right when settled 1.000
+    in order   2.387 experiments   settled 1.000   right when settled 1.000
+    worst      2.668 experiments   settled 1.000   right when settled 1.000
+
+**It works.** A third fewer experiments than picking at random, not bought by giving up on hard
+worlds (all settled) and not by answering fast and wrong (all correct).
+
+### And here is where it stops
+
+One number would have been the same mistake one level up, so it is swept across how many
+experiments are available per hypothesis:
+
+| hypotheses | experiments | designed | random | worst | saved | ranking holds |
+|---|---|---|---|---|---|---|
+| 4 | 12 | 1.164 | 1.808 | 2.204 | +0.644 | yes |
+| 5 | 8 | 1.800 | 2.496 | 2.668 | +0.696 | yes |
+| 8 | 5 | 2.185 | 2.815 | 2.831 | +0.630 | yes |
+| 6 | 3 | 2.375 | 2.562 | **2.305** | +0.187 | **no** |
+| 10 | 4 | 3.154 | 3.454 | **3.092** | +0.300 | **no** |
+| 12 | 3 | 2.945 | **2.782** | **2.600** | **−0.163** | **no** |
+
+The advantage fades as experiments become scarce and then **reverses**: in the last three rows the
+*least* informative choice finishes sooner than the most informative one. The ranking has inverted,
+not merely flattened.
+
+The reason is a mismatch nobody had noticed because nobody had measured it. The organ maximises
+**expected bits per experiment**; what is wanted is **experiments until settled**. Those agree while
+there is room to halve the hypothesis set repeatedly, and come apart when there is not — an
+experiment with a lopsided outcome distribution has low *expected* gain and may, on the outcome that
+actually occurs, rule out almost everything at once. Averaging over outcomes is right for bits and
+wrong for steps.
+
+`njp.field` uses this organ in the plentiful regime, where the claim is true. The boundary is
+written down rather than left for a later version to rediscover.
+
+### And a silent bug in the V.04 code, found on the way
+
+`propose` renormalised after **every** insert, so each addition divided everything already present
+by a growing total and the first hypothesis proposed kept the largest share. Asking for five uniform
+priors of 0.2 returned:
+
+    h0 0.4823   h1 0.0965   h2 0.1157   h3 0.1389   h4 0.1667
+
+The first hypothesis five times likelier than the second, from nothing but the order of the loop
+that added them — in a module whose whole business is Bayesian updating. Nobody saw it because
+nothing ever read the priors back. Normalising once at the point of use leaves `propose` storing
+the weight it was handed and the distribution correct however the hypotheses arrived.
+
+---
+
+## V.80 — the analogy finder had never been shown two domains with nothing in common
+
+Phase 2's remaining piece was Invariant Discovery, and it turned out to be built already:
+`njp/fusion.py` finds the same structure in two subjects that never met — V.40, exact isomorphism,
+a minimum edge count, a bounded radius. Algorithm Discovery is built too, in `njp/coding.py`, and
+`school.py` already decides it on held-out pairs: *"passing the shown examples is not passing."*
+
+So the work was not to build a third one. `fusion.py` names its own danger exactly — *"matching on
+four of five edges is exactly the false analogy that makes this kind of system"* worthless — and
+guards against it with three mechanisms, **every one of which is an argument**. `MIN_EDGES = 3` is
+justified by "below this an isomorphism is arithmetic rather than a finding", which is true and is
+not a measurement. Nothing had ever shown it two domains with no relationship.
+
+### The negative control was nearly softer than the finding
+
+The first version drew unrelated domains from all nine structural relations at random, which makes
+a labelled isomorphism between two random graphs almost impossible — and reported a false-alarm
+rate of **0.000 at every bar**. A flawless number produced by a control strictly easier to reject
+than the positive was to accept. The control now uses one relation, the same size and the same
+density as the planted pairs; the only thing it lacks is the shared structure being tested for.
+
+### What that found
+
+| nodes | edges | claims an analogy between unrelated domains |
+|---|---|---|
+| 8 | 10 | 0.000 |
+| 5 | 8 | 0.000 |
+| 4 | 6 | 0.013 |
+| 4 | 10 | **0.212** |
+| 3 | 4 | **0.212** |
+
+**On small dense domains it invents an analogy a fifth of the time.** The isomorphism is genuine —
+there are very few distinct graphs on three nodes, so two unrelated ones often really are the same
+shape. What is false is calling that an analogy: nothing has been discovered about either subject,
+only about how few ways three nodes can be joined.
+
+`MIN_EDGES` cannot close it. Raising it past four rejects the four-edge feedback loop the module
+exists to find — measured: at a bar of six, recall is **0.000**. The problem is not that the shape
+is small, it is that a shape that size is **unsurprising**.
+
+### The guard: compare the shape against chance, like everything else here
+
+`Fusion.surprise` draws graphs of the same order and density, matches them, and reports how often
+they agree. Above `LUCK = 0.10` the match carries no information and the analogy is refused. It is
+the shuffled null of V.74 applied to structure instead of to labels.
+
+| nodes | edges | guard off | guard on | recall |
+|---|---|---|---|---|
+| 8 | 10 | 0.000 | 0.000 | 1.000 |
+| 4 | 6 | 0.013 | 0.000 | 1.000 |
+| 4 | 10 | 0.212 | **0.000** | 1.000 |
+| 3 | 4 | 0.212 | **0.000** | 1.000 |
+
+**Recall untouched at 1.000, the invented end cut away.** The guard is off at `luck=0.0`, so the
+ablation runs both ways — a guard has to be shown to matter by being taken away.
+
+And the bar that was argued is now measured: swept from one to six, `MIN_EDGES = 3` is where recall
+is still 1.000 and false alarms are 0.000. The reasoning behind it was right, and now there is a
+table under it instead of a sentence.
+
+---
+
+## V.81 — the gate that lets her rewrite herself, measured for the first time
+
+Phase 3 is Capability Compiler → Self-Programming → Experimental Brain, and like Phase 2 it turned
+out to be mostly built. `njp/evolve.py` already has the whole loop: a profiler that nominates the
+target so nobody hand-picks it, whole-file edits with byte-exact rollback, a protected core that is
+refused, a ledger consulted before the next edit so a regression stops the one after it, and at the
+centre a Truth Gauntlet over **held-out** samples.
+
+Its docstring makes one claim above the others:
+
+> An edit whose improvement is only visible on the samples that motivated it is fitting noise, and
+> it is refused here rather than discovered later.
+
+**That claim had never been tested.** The existing tests are good and every one is a single case
+with the answer built into the fixture — a protected path refused, a failed gauntlet rolled back, a
+claim with *no* evidence refused. None hands the gate an edit that has evidence which happens to be
+worthless.
+
+For a system that rewrites itself the value of a gate is entirely in what it refuses, and a
+permissive one does not fail loudly. It degrades the thing it guards, one accepted edit at a time.
+
+### Five kinds of candidate, worth known by construction
+
+| kind | on held-out (the real gate) | judged on the samples that motivated it |
+|---|---|---|
+| real | 1.000 ✓ | 1.000 |
+| **overfit** | **0.000** ✓ | **1.000** |
+| noisy | 0.083 | 0.090 |
+| harmful | 0.000 ✓ | 0.000 |
+| null | 0.000 ✓ | 0.000 |
+| **let through** | **0.021** | 0.273 |
+| turned away | 0.000 | 0.000 |
+
+**The claim is true.** Overfit candidates pass 0.000 of the time on held-out samples and 1.000 of
+the time when judged on the samples that suggested them — so the held-out draw is worth +0.252 of
+let-through rate, and that is the mechanism doing the work rather than the arithmetic.
+
+### And my own fixture was wrong first, in the direction that flatters the finding
+
+The first version left out the `min_gain` margin the real predicate already requires, and measured
+a gate looser than the one that exists: **0.112 let through against 0.021**. Modelling a mechanism
+as weaker overstates its faults exactly as reliably as modelling it as stronger hides them, and it
+is the same error as the fusion control being easier to reject than the finding was to accept.
+
+### One bar was loose, and closing it was free
+
+| pass ratio | bad edits let through | real edits turned away |
+|---|---|---|
+| 0.75 (as configured) | 0.0208 | 0.0000 |
+| 0.80 | 0.0025 | 0.0000 |
+| **0.90** | **0.0008** | 0.0000 |
+| 1.00 | 0.0008 | 0.0000 |
+
+Every setting turns away zero real edits. There was no trade to make — the bar was simply loose, so
+`PASS_RATIO` is now **0.90**: twenty-six times fewer false promotions on the same eight samples,
+and not one genuine improvement lost. For a loop that edits its own source, a false promotion is
+permanent unless a later regression check happens to catch it, which makes this the one place in
+the package where the asymmetry is worth paying for.
+
+The remaining leak is noise, at 0.0033 — reported as a number rather than claimed to be zero.
+
+---
+
+## V.82 — the whole loop, and whether diagnosing is worth anything
+
+Six organs now each carry their own floor: `measurement`, `attribution`, `reach`, the experiment
+designer, `fusion`, and the self-rewrite gate. Separately they are six measured mechanisms.
+Together they are supposed to be a loop that acquires a capability it did not have:
+
+> find the edge → take the rung past it → ask why it fails → repair **that** → judge on hidden
+> problems → keep it only if the edge moved
+
+`njp/ascent.py` runs that loop, and it exists to answer one question, because without an answer
+everything above is elaborate bookkeeping:
+
+**Does diagnosing the cause help you choose a better repair than picking one at random?**
+
+That is not rhetorical. A loop that diagnoses carefully and then repairs no better than chance has
+learned nothing about itself; it has only spent longer.
+
+### The comparison
+
+Each capability is broken in exactly one of four ways, not disclosed. Four repairs sit on the
+shelf, one per way, and a repair applied to the wrong break changes **nothing at all** — not
+slightly less, exactly nothing — so a strategy cannot stumble into a gain by trying things. Three
+strategies pick from that same shelf and differ in one line of code:
+
+| | moved the edge | chose the repair that fits | kept | kept-but-no-gain |
+|---|---|---|---|---|
+| **diagnosed** | **1.000** | **1.000** | 1.000 | 0.000 |
+| blind | 0.275 | 0.275 | 0.275 | 0.000 |
+| greedy (a pet theory) | 0.225 | 0.225 | 0.225 | 0.000 |
+
+**Diagnosing is worth +0.725 against guessing and +0.775 against a favourite.** Blind lands on the
+right repair 0.275 of the time, which is the quarter you would expect from four repairs and one
+right answer — so the shelf is even and the advantage is not hidden in it.
+
+`kept-but-no-gain` is 0.000 for all three: nothing was kept that did not move the edge. That is the
+second number, and it is the one that could have embarrassed the first — a gate generous enough to
+keep anything would have made all three strategies look successful.
+
+### Two defects of my own on the way, both already named elsewhere in this package
+
+**A total repair read as no change.** When the post-repair ladder holds at *every* setting it is
+`exhausted`, and `Ladder.edge` is `None` by design — there is no boundary within what was tried.
+That is the right answer to *where does it stop* and the wrong one to *how far does it reach*, and
+the first version conflated them, falling back to the old edge and reporting the best possible
+outcome as no movement.
+
+**The before and after were drawn from different hidden samples.** So noise alone raised the second
+figure about half the time, and wrong repairs were "kept" at 0.683 while only 0.233 of them were
+right. That is precisely the defect `measurement.stability` exists to catch, reintroduced one level
+up by the module that imports it.
+
+### What this does not show
+
+Nothing here writes source code. The repairs are supplied, which is what makes the comparison clean
+— both twins choose from the same shelf, so what differs is *how they choose*, not what is on it.
+The capabilities are synthetic and each is broken exactly one way.
+
+Whether a system can also **invent** the repair is a different question and a harder one. Answering
+this one first is what makes that one askable: if choosing well among known repairs were worth
+nothing, inventing new ones would be worth less.
+
+---
+
+## V.83 — the loop taken out of its fixtures
+
+Everything from V.74 to V.82 was validated the same way: a fixture whose answer was known because
+it had been built that way, retrodicted, scored on catches and false alarms together. That is the
+right way to build such a thing and it is not sufficient, for one reason. **A fixture is written by
+the same hand that writes the organ**, so it inherits that hand's idea of what can go wrong — and
+the failure modes it cannot contain are exactly the ones nobody had thought of.
+
+So `njp/fieldwork.py` points the finished stack at a **real** organ: the span stage of
+`njp/finding.py` — given the sentence containing the answer, pick the span inside it. The target
+was chosen because its cause is already known **by hand**. Two versions of work went into the
+ranker before a decomposition found that the generator proposes about 126 spans per sentence and
+the ranker was never what held the number down. If the loop is worth anything it should find that
+by itself.
+
+It did not. What it did instead is this version.
+
+### 1. It declined to name a cause, and that was correct
+
+250 held-out readings, the gold sentence handed to the stage so that only the span choice is being
+measured, 125.9 candidates offered per item.
+
+| arm | taught from | candidates | gold reachable | scored | moved |
+|---|---|---|---|---|---|
+| **as found** | 1,500 | 125.9 | 0.700 | **0.0320** | — |
+| more data | **6,000** | 125.9 | 0.700 | 0.0400 | +0.0080 |
+| other algorithm | 1,500 | 125.9 | 0.700 | 0.0000 | −0.0320 |
+| richer readings | 1,500 | 125.9 | 0.700 | 0.0320 | +0.0000 |
+| a smaller pool | 1,500 | **12.0** | **0.160** | 0.0160 | −0.0160 |
+
+Four times the data moves it **+0.0080**, against a bar of 0.03. A different ranker makes it worse.
+Richer readings do nothing at all. The shelf ran out. *These levers do not reach this* is true,
+useful, and exactly what a diagnostician that produced a word anyway would have hidden.
+
+### 2. `reachability` came back refuted, and that was also correct
+
+The right answer is in the pool for 0.700 of items and the stage scores 0.032, so the ceiling is
+nowhere near binding. **"The pool is too big" and "the answer is not in the pool" are different
+claims and only the second is a ceiling.** My hand-diagnosis was the first. The organ has no
+hypothesis for it. That gap is real and is written down below rather than papered over.
+
+### 3. Knowing the cause did not hand me the repair
+
+The one repair built from my own hand-diagnosis — keep the twelve shortest candidates instead of a
+hundred and twenty-six — made the score **worse**, 0.0320 → 0.0160. A correct diagnosis is not a
+design.
+
+### 4. And that repair is why the organ changed
+
+Capping the pool also threw the right answer out of it: reachable fell **0.700 → 0.160**. The
+attributor recorded `budget: refuted` — *more search would not have helped* — on the strength of an
+experiment that had changed two things at once.
+
+`njp/attribution.py`'s own first rule is that an experiment changes exactly one thing, and it was
+checking its callers for everything except that. V.83 adds `SPOILED = 0.05`: the ceiling is re-read
+after every repair and compared with the original. Moved by that much in **either** direction and
+the verdict is `spoiled` — *ran, tested nothing* — instead of a refutation.
+
+| direction | what it looks like | what the old organ said | why it is dangerous |
+|---|---|---|---|
+| ceiling **falls** | the repair scored worse | `refuted` | an unearned claim: the lever was never pulled |
+| ceiling **rises** | the repair scored better | `supported` | names the **wrong cause**, and the next version goes to work on it |
+
+`spoiled` is neither tested nor untested, and it withholds the `floor` fallback: *no lever reaches
+this* is not shown by a lever nobody pulled.
+
+### The exam, extended
+
+A ninth fixture joins `attributionschool`: a task sitting on its own floor, every honest repair
+refuted, and the budget experiment handed a ceiling of 0.20 against the base's 1.00. Before V.83
+the attributor read that as `floor` — a confident, wrong, and expensive conclusion, because it
+closes the question.
+
+| | cause named | spoiled caught | false alarms |
+|---|---|---|---|
+| **9 fixtures** | **9 / 9**, 0 wrong, 7 distinct | **1 / 1** | **0 / 8** |
+
+Both spoiled numbers are reported because either alone is trivially satisfiable — flag nothing, or
+flag everything. An organ that meets one by failing the other has learned to make a noise rather
+than to look.
+
+### A fifth defect, in the file that found the fourth
+
+The first draft's `more data` experiment read `learn[:LEARN_FROM * 2]` against
+`findingschool.split`, whose learn side is already capped at 1,500 rows. It showed the reader
+**exactly the same rows**, came back flat, and would have been recorded as `data: refuted`: *more
+examples would not have helped*, concluded from an experiment that showed no more examples.
+
+Same defect, same class, same afternoon, one level down from where it had just been fixed — which
+says something about how quietly it happens. Caught by reading the call rather than by reading the
+number, which is the wrong way round, so `diagnose` now **refuses to run** when the two training
+sets are the same size instead of trusting that they differ.
+
+### Two smaller things the run said about the organ rather than the stage
+
+**A refutation was misdescribing its own evidence.** Every not-a-cause verdict read *changing it
+changed nothing*, which on the `more data` arm — four times the rows, +0.0080 — is simply false. It
+changed something, by less than the bar. Three outcomes now get three sentences: changed nothing at
+all, moved but under the bar, or made it worse. A refutation that misstates what it saw invites the
+next reader to re-run the experiment that was already run.
+
+**A check that could have run did not.** The first field run came back `? leakage — no key and
+train supplied`. That is the right thing for the critic to say and the wrong thing for the caller to
+have caused: the cut is by passage, so the answer was available the whole time. `span_stage` now
+supplies both, with the **passage** as identity — two questions about one paragraph are not two
+independent items however differently they are worded. A check that could have run and did not is
+worth exactly as little as one that cannot.
+
+Both corrections confirmed on the organ itself. The same run now reads:
+
+```
+x  leakage   none of 250 examined items were learned from
+x  data      0.0320 → 0.0400 (+0.0080) — it moved, but by less than the 0.03 that counts
+x  algorithm 0.0320 → 0.0000 (-0.0320) — changing it made it worse, so it is not
+x  reading   0.0320 → 0.0320 (+0.0000) — changing it changed nothing at all, so it is not
+~  budget    0.0320 → 0.0160 (-0.0160), but reachability moved 0.7000 → 0.1600 — this tests nothing
+→ nothing tested here explains it, and budget was never actually tried
+```
+
+Three refutations, three different reasons, each true of what it saw. And the two runs — before and
+after the fixes, executed independently — agree on all five arm scores to the digit, which is the
+`measurement` check's own claim (`5 identical runs span 0.0000`) holding across processes as well as
+within one.
+
+### What is still owed
+
+The organ tests *is the answer producible* and does not test *is it producible among so many
+alternatives that nothing could pick it out*. That is a distractor-count hypothesis, and it needs
+an experiment that thins the pool **without dropping what it is thinning toward**. It is not
+written here, because the obvious way to write it is the one that just failed.
+
+---
+
+## V.84 — when the hypotheses run out, which corner was never looked in
+
+V.83 ended with the loop saying *nothing tested here explains it* on a real organ. That was honest
+and it was a **terminal state**, which is the defect this version removes. Two claims sit next to
+each other and only one of them was ever true:
+
+| | |
+|---|---|
+| *every hypothesis I hold failed* | ✅ what the evidence showed |
+| *therefore the cause is unknowable* | ❌ never shown, and never true |
+| **my model of what could be causing this is incomplete** | the one in between |
+
+`njp/space.py` builds the step between them. Two mechanisms, useless apart.
+
+### A map, so that emptiness is visible
+
+A `Knob` is one thing about a system that could be varied, in a **region** — what the system is
+*given*, what it *does* (`method`), what it is *shown*, what it is *scored* against, how the world
+it runs on was *built*. The four repairs `attribution` holds all land in `given` and `method`.
+
+That was invisible as a flat list and is the first thing you see on a map:
+
+```
+ !  built      0/3 knobs actually examined  ← nothing here was ever varied
+ok  given      1/2 knobs actually examined
+ok  method     2/2 knobs actually examined
+ !  scored     0/2 knobs actually examined  ← nothing here was ever varied
+ok  shown      1/2 knobs actually examined
+→ the hypotheses are exhausted and the map is not: built, scored
+```
+
+### An intervention that says what it holds still
+
+V.83 caught a repair that shrank a candidate pool and threw the right answer out of it, by
+re-reading the ceiling afterwards. That check was **hardcoded**, because the ceiling was the only
+invariant anyone had thought of. Here an `Intervention` *declares* its invariants and they are
+measured after it runs:
+
+| verdict | meaning |
+|---|---|
+| `moved` / `flat` | it kept every promise; the number is evidence |
+| `spoiled` | a promise broke; the number is evidence about **nothing** |
+| `unvouched` | a promise could **not be read**; not known kept, not known broken |
+| `not run` | the experiment raised, and says so |
+
+`unvouched` is the one worth spelling out. Folding it in with the clean results treats an unrun
+check as passed; calling it `spoiled` treats an unrun check as failed. It is its own state, and it
+does **not** cover the region it was aimed at.
+
+And `Intervention.deployable` separates an experiment from a repair. *Keep twelve candidates, but
+make sure the right one is among them* consults the gold answer — it can never ship. It is marked
+`[oracle]`, because losing that distinction is how a measurement gets announced as a fix.
+
+### The exam — and it is scored on silence
+
+A blind-spot detector has one failure mode that matters, and it is not missing things. It is
+**firing on everything**, which looks like diligence and is worth nothing. So half the fixtures are
+maps where the correct answer is *no gap*.
+
+| | found | missed | quiet when covered | false alarms |
+|---|---|---|---|---|
+| **6 maps** | **3 / 3** | 0 | **3 / 3** | **0** |
+
+The first fixture's cause is not invented: it is a bug this repository actually had — the reader
+produced the right answer and scored zero, because gold answers carry the sentence's full stop
+(`Czech Republic.`) and candidates end at the last token. Every lever in `given`, `method` and
+`shown` is flat, because nothing is wrong with any of them.
+
+There is also a test that **breaks** the detector on purpose (`Map.touched` forced empty) and
+asserts the exam catches it. An exam nothing can fail is not an exam.
+
+### The defect the exam found in its first minute
+
+I had ranked empty regions by **how many knobs they hold**, and the exam immediately put a
+three-knob innocent region above the two-knob guilty one. A region's size says nothing about
+whether the cause is in it. The ranking was **deleted, not tuned** — two regions that are simply
+both empty come back in a fixed order with *both* reported, because no evidence on the map
+separates them.
+
+So `also_named` is reported and not scored against. **A blind spot is a place to look, not a
+diagnosis.** Inventing a preference between two empty corners would be exactly the confident wrong
+answer the rest of this package keeps refusing to produce.
+
+### What this does not do, said plainly
+
+It does not invent the axes. `Knob` is supplied, the way `Benchmark.key` and `Benchmark.reachable`
+are supplied, because *what could be varied* is domain knowledge. The claim is narrower and
+testable: **given the axes, does it notice that every experiment landed in one corner, and does it
+stay quiet when they did not?**
+
+### V.84b — the map on the real organ, and the hypothesis it killed
+
+The map was pointed at the span stage of `njp/finding.py`, carrying the experiment V.83 ended
+owing: `remove(how many candidates compete) hold(the right answer stays producible)`.
+
+```
+~  remove(how many candidates compete) hold(ceiling) hold(items)
+   0.0320 → 0.0160 (-0.0160), but the right answer stays producible moved -0.5400
+   — it changed more than it meant to, so this tests nothing
+x  remove(how many candidates compete) hold(ceiling) hold(items)   [oracle]
+   0.0320 → 0.0440 (+0.0120) — this knob does not reach it
+```
+
+**126 distractors cut to 12, the gold span guaranteed present, the ceiling held at 0.700 — and the
+score moves +0.0120 against a bar of 0.03.**
+
+I have claimed the opposite across three versions: *142 candidates per gold sentence, not the
+ranker*. It is **refuted**. And the reason it survived that long is the reason this module exists —
+every version of the experiment built by hand also dropped the ceiling, so the claim was never
+tested, only re-asserted under a number that looked like a test.
+
+| | region | what happened |
+|---|---|---|
+| `given` | 1/1 entered | more data: +0.0080, flat |
+| `method` | 1/1 entered | another ranker: **−0.0320**, downward leverage |
+| `shown` | 1/1 entered | richer readings: +0.0000 |
+| `built` | 1/3 entered | the pool: **+0.0120, refuted** |
+| **`scored`** | **0/2 entered** | **nothing ever varied it** |
+
+`scored` is *how answers are compared* and *what counts as answering*. Four versions of work on
+this organ never once entered it. The map proposed 24 experiments there, and the first is
+`replace(how answers are compared) hold(ceiling) hold(items)`.
+
+**The division of labour is worth being exact about.** The map produced the *specification* — a
+verb, a knob in an unentered region, and the promises any honest version must keep. It did not
+write the experiment; I did. That boundary is the one `njp/space.py` declares in its own docstring,
+and this is it holding in practice rather than in principle.
+
+So `how_it_misses` was built to enter that region: the misses split by **kind** —
+
+| kind | meaning | what it would imply |
+|---|---|---|
+| `exact` | the gold span | — |
+| `contains` | holds the answer and more besides | the span **ends** in the wrong place |
+| `inside` | a fragment of the answer | same, the other way |
+| `overlaps` | shares words, neither contains | boundary noise |
+| `elsewhere` | a different part of the sentence | the **choice** is wrong |
+| `silent` | chose nothing | abstention, not error |
+
+`contains` and `elsewhere` call for opposite repairs, and no single accuracy figure can tell them
+apart — which is exactly why four versions of measuring one number found nothing.
+
+### A third wording defect, same class as the other two
+
+`replace(which rule family)` took the score to 0.0000 and the organ said *"this knob reaches it"*.
+True, and it reads as progress. Downward leverage now says so: *"this knob reaches it, downward —
+it has leverage and this is the wrong way"*. Third time this version that a verdict was accurate
+about its number and misleading about its meaning.
+
+### V.84c — it picks nothing more often than it picks anything
+
+The map named `scored` — *how answers are compared* and *what counts as answering*. `how_it_misses`
+entered it, and the breakdown on 250 held-out items is not what either of my diagnoses predicted:
+
+| kind | count | rate |
+|---|---|---|
+| `exact` | 8 | 0.0320 |
+| `contains` | 4 | 0.0160 |
+| `inside` | 14 | 0.0560 |
+| `overlaps` | 23 | 0.0920 |
+| `elsewhere` | 64 | 0.2560 |
+| **`silent`** | **137** | **0.5480** |
+
+**For 55% of items no rule fires at all**, `chosen` stays `None`, and the empty string is scored as
+a wrong answer. Not the pool. Not the comparison. The stage abstains more often than it answers,
+and every measurement this organ has ever had folded that into one accuracy figure.
+
+Checked that it is the organ and not the harness: `Finder.answer` uses the identical `(0, 0.0)`
+floor and returns `""` the same way.
+
+### The third check that could have run and didn't — and it is the expensive one
+
+`measurement.CHECKS` has contained **`abstention`** since V.74. `span_stage` never supplied
+`spoke`, so it reported `? not checked` throughout V.83 and V.84 — while both versions hunted for
+exactly this. `SPAN_KNOBS` even names the knob *"what counts as answering"*, in the region the map
+flagged as never entered.
+
+| version | the check that was skipped | what it would have said |
+|---|---|---|
+| V.83 | `leakage` — no `key`/`train` | nothing; the cut was clean |
+| V.84 | `abstention` — no `spoke` | **it answers 0.4520 of the time** |
+
+Three times in two versions. This is turning out to be the most expensive failure mode in the whole
+stack, and the reason is structural: a wrong answer leaves a wrong number to notice, and a skipped
+check leaves nothing at all. The rule *a check that cannot run is reported as `not checked`, never
+as passed* protects the reader. It does not protect the **caller**, who is the one who failed to
+supply what the check needed — and in both cases the caller was me.
+
+`spoke` is now supplied and the check runs.
+
+### V.84d — the silence is real, filling it is not the repair, and one thing finally moved
+
+On the 137 silent items the right answer **is** in the pool 0.8321 of the time. The headroom is
++0.456. Four fallbacks were tried, with `random` among them as the null:
+
+| fallback | scores | gains |
+|---|---|---|
+| silent (as it is) | 0.0320 | — |
+| first | 0.0400 | +0.0080 |
+| longest | 0.0400 | +0.0080 |
+| shortest | 0.0320 | +0.0000 |
+| **random** (the null) | 0.0360 | +0.0040 |
+
+The answer is there and nothing cheap finds it. Best gain **+0.0080**, under the bar. **Abstention
+is real and filling it is not the repair** — a third hypothesis of mine, refuted with a number.
+
+But the breakdown holds one thing that clears the bar, in the region the map named:
+
+| comparison | scores | moved |
+|---|---|---|
+| exact match (as shipped) | 0.0320 | — |
+| **containment** (`exact`+`contains`+`inside`) | **0.1040** | **+0.0720** |
+| any word shared | 0.1960 | +0.1640 |
+
+**+0.0720 against a bar of 0.03 — the first intervention in two versions to clear it in the right
+direction.** `contains` and `inside` are both the span ending in the wrong place, so roughly a
+tenth of the whole failure is about **where the span stops**, not which span was chosen.
+
+It is an instrument, not a repair: a reader that returns the enclosing clause has not answered the
+question, and `finding` should keep its exact match. What the instrument buys is a *specific*
+repair to go and build — span boundaries — instead of another sweep.
+
+### Where this leaves the organ, stated without rounding up
+
+| | |
+|---|---|
+| ceiling (gold in the pool) | 0.7000 |
+| scores | 0.0320 |
+| explained by boundaries | +0.0720 |
+| silent | 0.5480, with 0.8321 headroom nothing cheap reaches |
+| of the 113 it does answer, lands elsewhere | 0.5664 |
+
+**Most of a 0.668 gap is still unattributed.** Three of my own hypotheses are now individually
+refuted with numbers — pool size (+0.0120), abstention-fill (+0.0080), and V.83's data / algorithm
+/ readings — and the one region nobody had entered yielded the only positive finding in two
+versions, worth about a tenth of the gap.
+
+That is the honest ledger. The map was the right instrument and it did the thing it was built for;
+it did not produce an explanation, because there is not one here yet.
+
+---
+
+## V.85 — what two changes do together that neither does alone
+
+First, a correction to what V.84 was taken to have shown. **The +0.0720 was not an interaction.** It
+was a single-variable intervention — loosening the comparison — in a region nothing had entered.
+No interaction had been measured at all, and that figure came from one breakdown on one held-out
+sample with no interval on it. *Reproducible* was not established and is not claimed here.
+
+What V.84 did establish is the shape that makes this version worth building:
+
+```
+f(A) ≈ 0        f(B) ≈ 0        f(A, B) ≫ 0
+```
+
+A single-variable search cannot see that, ever, however many variables it tries — and V.83 and V.84
+between them ran nine single-variable experiments on one organ and refuted nine hypotheses.
+
+### Two things had to change before the question was even expressible
+
+**Interventions had to become composable.** `Intervention.run` is a thunk, and two thunks cannot be
+applied one after the other — so `A then B` was not expressible, and neither was the interaction
+between them. `Intervention.change` writes the same change as a transformation of a setup.
+
+**And the measurement had to return one reading per item.** An interaction measured on a *score*
+cannot be given a null at all: there is no spread to compare it against, and the honest answer to
+*is 0.088 big?* becomes unavailable rather than yes. A version of this module built on scores would
+be unfalsifiable and should not be written.
+
+### `I = ΔAB − ΔA − ΔB`, and then three attempts to show it is nothing
+
+That ordering is the whole design. The subtraction of four noisy means is very good at being large.
+
+| what it might be | the control |
+|---|---|
+| noise | a bootstrap over items; the interval must not straddle zero |
+| a pipeline order effect | `A then B` against `B then A`; a difference means composing **mutates** |
+| a stateful harness | a **change that does nothing**; it must move nothing, alone or beside something |
+
+The third is the cheapest and the most damning: if applying *nothing* moves the number, every
+figure the harness has produced is suspect — including the flat ones that were believed.
+
+### The exam, and the defect it found in the organ
+
+Six worlds, **four of them ones where finding a pair is wrong**:
+
+| world | want | got | I | order | placebo |
+|---|---|---|---|---|---|
+| synergy | interacting | interacting | **+0.4981** | +0.0000 | +0.0000 |
+| additive | additive | additive | +0.0019 | +0.0000 | +0.0000 |
+| inert | additive | additive | +0.0000 | +0.0000 | +0.0000 |
+| antagonism | interacting | interacting | **−0.3481** | +0.0000 | +0.0000 |
+| order-dependent | order-dependent | order-dependent | +0.0000 | **−0.4982** | +0.0000 |
+| leaky apparatus | apparatus | apparatus | +0.0019 | +0.0000 | **+0.1982** |
+
+**right 6/6, invented 0, missed 0.**
+
+It did not start there. The first run scored 4/6, and the two failures were different in kind.
+
+**The organ's.** I had written the apparatus control *as an interaction* — `I(A, nothing)` — and a
+leak growing linearly with how often the harness has been touched **cancels out of that subtraction
+exactly**. Measured: a do-nothing change moved the leaky fixture **+0.1982** and the control
+reported **+0.0000**. A control written in the same shape as the thing it guards inherits that
+thing's blind spots. The leak is now read directly as well as in composition.
+
+**The fixture's.** My order-dependent world expressed the dependence through a counter both orders
+increment identically, so both orders came out the same and the order effect measured 0.0000 — a
+fixture that could not fail, proving nothing about a control that passed it. Rewritten so one switch
+consumes what the other needs; and then confined to its own world, because the first fix put the
+mechanic in the *intervention* and quietly made three unrelated fixtures order-dependent.
+
+### What it refuses to do
+
+An interaction is **not a mechanism**. `mechanisms()` returns all six candidates on the day one is
+found — *A changes what B does*, *B changes what A does*, *something neither names mediates both*, *one
+is nonlinear and the other crossed a knee*, *an artefact of how they are applied*, *the measurement
+responds to the pair*. Narrowing there would be inventing.
+
+And `search` is exhaustive, not guided — stated in the module rather than hidden. At five
+interventions the pairs are ten and exhaustive is simply correct. An ordering heuristic validated on
+nothing is the fake signal V.84's exam caught in its first minute; the honest place for one is a
+version that can test whether it beats exhaustive where exhaustive is still affordable.
+
+---
+
+## V.86 — what varies that nobody is varying
+
+V.85 can answer *do two known interventions interact*. Neither it nor anything above it can answer
+the question underneath: **what should count as a possible intervention in the first place?**
+
+Every version from V.83 to V.85 carried one assumption without once testing it — that the right
+causal variables are already in the vocabulary. Nine single-variable experiments and a pairwise
+search all drew from a list somebody wrote down. If the cause is not on that list, the whole
+apparatus is a very careful way of not finding it.
+
+So `njp/latent.py` looks in the gap between **what varies naturally** and **what the experimenter
+manipulates**. Items differ in many ways nobody chose; a trait that varies there and that no
+intervention touches is where an unlisted cause has to be if it is anywhere.
+
+### And finding one there proves almost nothing
+
+That is the other half, and the larger half. A trait that separates failures from successes is
+**observational** evidence and nothing more:
+
+| what it might be | what settles it |
+|---|---|
+| a confound | something else moves both; `do(Z)` alone changes nothing |
+| a consequence | the failure produced *it*; `do(Z)` changes nothing either |
+| a coincidence | a permutation null it does not clear |
+
+So `Evidence` is a **type on a ladder** — observational → interventional → interaction →
+mechanistic → engineering → transfer — and `Candidate.claims(kind)` refuses any rung nothing
+licensed. `causal` is never true on observational evidence, however large the separation.
+
+Quietly promoting *Z predicts failure* into *Z causes failure* is the cheapest way a system that
+improves itself comes to believe something false — cheaper than a bad experiment, because it costs
+nothing and leaves no trace.
+
+### The exam: one cause and three impostors that predict it just as well
+
+| trait | truth | got | separates | survives `do()` |
+|---|---|---|---|---|
+| `weight` | the cause | **causes** | 1.7401 | ✅ −0.3567 |
+| `shadow` | a confound | predicts | 1.7394 | ❌ +0.0000 |
+| **`scar`** | **a consequence** | predicts | **2.0870** | ❌ +0.0000 |
+| `twin` | drags the cause | **refused** | 1.7380 | — identifies nothing |
+| `dust` | noise | nothing | 0.0571 | refused by the null |
+| `paint` | constant | nothing | 0.0000 | refused before any test |
+
+**right 6/6, predicted 3, causes 1, invented 0, missed 0.**
+
+The consequence separates the groups **better than the cause does**. That is the fixture's reason
+for existing: a module that reports the strongest correlation scores four of four and is wrong
+three times, and there is a test that makes `causal` mean `observational` and asserts the exam
+catches it.
+
+Two gates fire before any of that. **A constant cannot be a cause** — refused before it is tested,
+not after, because putting it through a null invites a coincidence to speak for it. And **a trait
+already on the shelf is not a discovery** — `size` is real and varying and manipulated by something
+already there, so `uncontrolled` leaves it out. Otherwise the module scores well by listing its own
+inputs back.
+
+### A limitation, stated rather than discovered later
+
+`put_to_the_test` refuses an intervention that disturbs another trait — and it **cannot tell
+*moved something downstream of this trait* from *moved something that moves this trait back***. The
+first is a causal chain behaving exactly as a cause does. So on a world where lightening an item
+also recomputes the shadow it casts, **this refuses the real cause**.
+
+That is a wrong answer of a known shape, and it is pinned by a test that asserts the wrong answer
+rather than left to be found later. The honest fix is a supplied ordering over the traits — domain
+knowledge, like every other input here — not a cleverer statistic.
+
+Matching traits to interventions is by name, too: two names for one knob will be missed, and there
+is a test pinning that as well.
+
+---
+
+## V.87 — inventing a quantity nobody named
+
+V.86 found variables among `Trait` objects somebody wrote down, each with a `read` already
+attached. So *what can be measured* was still a supplied list, and a cause outside it was as
+invisible as ever. **Finding a new variable and building a new measurable dimension are different
+capabilities**, and only the first had been done.
+
+Here nothing is given a trait. What arrives is a `Trace`: probes at **numbered** coordinates and
+what was observed at each.
+
+```
+probe  reading          probe  reading
+ -1     0.11             -1     0.41
+  0     0.42              0     0.42
+ +1     0.10             +1     0.41
+```
+
+Both items read 0.42 at the centre. Every quantity anyone has thought to compute about *the item*
+is identical. What differs is the shape of the neighbourhood, and no supplied vocabulary has a word
+for it until something invents one.
+
+### The first draft was the old game in new clothes
+
+It listed nine operators by hand — level, slope, curvature, **width** — and `width` happened to be
+the fixture's generating variable. That is `Trait.read` one level up: the quantity was supplied and
+the search picked it out of a lineup.
+
+So the arithmetic is **composed**, not listed: four steps (`d`, `abs`, `norm`, `centred`) stacked up
+to three deep, ending in one of six (`mean`, `max`, `min`, `spread`, `range`, `sum`). **414 recipes**,
+enumerated exhaustively rather than sampled — an incomplete search whose incompleteness is
+undeclared is how a null result becomes a lie.
+
+### What came out: 406 refused, 8 kept
+
+| recipe | steady | separates | third world |
+|---|---|---|---|
+| **`mean(norm(x))`** | 0.997 | **1.987** | 1.953 |
+| `mean(d(d(norm(x))))` | 0.967 | 1.869 | 1.729 |
+| `max(d(d(x)))` | 0.995 | 1.858 | 1.835 |
+| `spread(abs(norm(d(x))))` | 0.817 | 1.849 | 1.441 |
+| `mean(d(d(x)))` | 0.980 | 1.706 | 1.619 |
+
+`mean(norm(x))` — the average reading divided by the item's own top. Dividing through throws away
+*how high* and leaves *how broad*. Nobody wrote that quantity down; it fell out of one step composed
+with one ending, and it arrives called **`measurement 19`**.
+
+And the refusals do the real work:
+
+| refused | why |
+|---|---|
+| `mean(x)` | it is the supplied *average reading* in different arithmetic |
+| `max(x)` | separates by **0.2091** — under the bar |
+| `mean(d(x))` | jiggling the reading moves it; agrees with itself only **0.338** |
+| `max(norm(x))` | reads the same on every item |
+| `min(abs(centred(x)))` | did not survive a third world (0.1603 there) |
+
+`max(x)` is the fixture's honesty check. **The centre height genuinely does not separate the
+groups**, so the discovery is not available by looking at the obvious thing.
+
+### Three worlds, three jobs — and three orderings where the answer is nothing
+
+Mined in one arithmetic (spans), gated in a second (control gains), transferred to a third (doses).
+Collapsing any two of those is how a search comes to believe its own noise.
+
+| ordering | want | kept |
+|---|---|---|
+| spans → gains → doses | something | 8 |
+| doses → spans → gains | something | 16 |
+| gains → doses → spans | something | 16 |
+| **fog → fog → fog** | **nothing** | **0** |
+| **spans → fog → doses** | **nothing** | **0** |
+| **spans → gains → fog** | **nothing** | **0** |
+
+**right 6/6, invented 0, missed 0**, and **5 measurements survive every ordering that worked** —
+three unrelated arithmetics yielding the *same* quantities is the only evidence that what was found
+is a regularity and not a fact about one world.
+
+### The name comes last
+
+`Measurement.christen` exists and **nothing in the discovery path calls it**. It refuses outright
+while the measurement holds nothing: a quantity named before it is validated is a hypothesis wearing
+a conclusion's clothes, and the name then does the arguing the evidence has not done. A test asserts
+the exam's worlds contain no semantic trait name anywhere in their source.
+
+And V.86's ladder is intact: every survivor holds **observational** evidence only. No item was
+changed, so nothing here can speak about what would happen if one were.
+
+### What is still supplied, said plainly
+
+The four steps and six endings. That is a weaker thing to be handed than nine answers — the
+composition and the selection among 414 of them is not supplied, and the winner needed a
+normalisation step that no single listed operator contained. But it is not nothing, and calling this
+Level 7 outright would be the promotion V.86 was built to refuse. **Inventing the primitives
+themselves is the next debt**, not a thing already paid.
+
+---
+
+## V.88 — proving a new primitive is not new
+
+V.87 ended owing one thing: it composed measurements from four **supplied** primitives, so
+inventing the primitives themselves was next. This version went to build that and came back with a
+proof that most of it is impossible — which is a better outcome than the organ would have been.
+
+### The obstruction
+
+A linear primitive over a row of readings is a **stencil**, a short vector of coefficients slid
+along. `d` is `(-1, 1)`. Curvature is `(1, -2, 1)`. The stride-two difference — which skips a
+neighbour and looks like something genuinely outside anything V.87 held — is `(1, 0, -1)`.
+
+It is not outside anything:
+
+> **|H₍₁,₀,₋₁₎(f)|² = 4·|H_d(f)|² − |H_{d∘d}(f)|²**, identically, at every frequency.
+
+And that is not a fact about one stencil. The energy response of a length-*m* stencil is a
+polynomial of degree *m−1* in cos 2πf; the iterated differences *dᵏ* give (2 − 2cos 2πf)ᵏ, which
+span that space **exactly**. So:
+
+**Every linear primitive, measured by how much energy it passes, is a linear combination of
+iterated differences. There is nothing to discover there.**
+
+Verified at 1e-11 or better on random stencils of length two to five.
+
+| primitive | what it actually is |
+|---|---|
+| the difference | `+1·d` |
+| the difference twice | `+1·d∘d` |
+| a two-tap average | `+4·1 −1·d` |
+| **a three-tap average** | **`+9·1 −6·d +1·d∘d`** |
+| **the stride-two difference** | **`+4·d −1·d∘d`** |
+
+Smoothing felt like it had to be outside the closure. It is `9 − 6d + d∘d`.
+
+### Two fixtures died before the proof arrived, and both taught it
+
+**The first** tried to build a world whose groups matched on variance, `d` and `d∘d` while
+differing in stride-two energy. The linear algebra returned a direction that moved **nothing at
+all** — because the identity above makes that world impossible, and I had not yet worked out why.
+
+**The second** matched the two groups' power spectra exactly, so no linear filter could see a
+difference, then rescaled each item to a common range to match the order statistics too. The
+rescaling divides each item by its own peak-to-trough — a per-item number that differs
+systematically between the groups — undoing the spectral match it was there to protect.
+`spread(d(d(x)))` read **1.93** on it.
+
+Both point the same way. V.87's composed vocabulary is far more complete than *four primitives*
+sounds: iterated differences span the whole linear-energy family, and `max`, `min`, `range` cover
+the whole-sequence order statistics.
+
+### What ships
+
+`njp/closure.py` turns the proof into a **gate that runs before any world is consulted**. V.87's
+`SAME` check catches duplicates one world at a time, empirically, after the search. This decides a
+whole family at once and returns the identity rather than a correlation.
+
+And it says where a real primitive would have to live. `obeys_superposition` tests linearity **by
+counterexample, not by name** — and `closureschool` recovers a primitive's taps by feeding it
+impulses, because a primitive does not get to say what it is.
+
+| candidate | want | got |
+|---|---|---|
+| the stride-two difference | redundant | redundant |
+| a three-tap average | redundant | redundant |
+| a weighted window (a callable) | redundant | redundant |
+| a sliding median | nonlinear | nonlinear |
+| a sliding largest | nonlinear | nonlinear |
+| a sliding gap | nonlinear | nonlinear |
+
+**right 6/6, flattered 0, buried 0.** `flattered` is the number that matters: a candidate the
+algebra already contains, reported as a discovery. That is what a search with no algebra does
+silently, every time it rediscovers `4d − d∘d` under a fresh name. A test makes `new` return `True`
+for everything and asserts the exam catches it.
+
+### What this does not claim
+
+It does not claim primitives cannot be invented. It claims the **linear** ones cannot, proves it,
+and narrows where to look: anything that sorts or compares is outside the algebra entirely.
+Building a search over *that* family — and a world it can be tested on, which the two failures
+above show is harder than it sounds — is still owed. **Level 7 stays unclaimed.**
+
+---
+
+## V.89 — finding out what an operation is, by trying to break it
+
+V.88 proved the linear primitives contain nothing to discover and pointed at where novelty could
+still live: operations that sort, compare, rank, threshold. The obvious next move is to write those
+down and search them — **and that is the same mistake one level out.** A hand-written list of
+nonlinear operations is the supplied vocabulary again, just longer.
+
+So the question changes. Given an operation as a **black box** — inputs in, outputs out, no name, no
+source, no declared type — what can be established about it?
+
+### Only refutations
+
+No number of probes shows an operation is linear; each one only fails to show that it is not. So a
+finding reads `refuted`, with the counterexample that did it, or **`not refuted in 200 tries`** —
+and there is no third value.
+
+```
+op 5:
+   x  adds up                broken by f(a+b) against f(a)+f(b)
+   ~  scales                 not broken in 200 tries — which is not the same as true
+   ~  follows the level      not broken in 200 tries — which is not the same as true
+   x  settles                broken by applied twice
+   x  ignores order          broken by the input shuffled
+   x  stays local            broken by one input at 5 moved
+```
+
+The attempt count *is* the content of "not refuted": three tries and three hundred are not the same
+state of knowledge, and the number is carried rather than dropped.
+
+### The families are counted, not named
+
+Fourteen operations go in as `op 1` … `op 14`. What comes out is a partition built from which laws
+each one breaks — `family 1`, `family 2`. Two operations land together because nothing separated
+them, not because somebody called them both filters. `Family.christen` refuses a family that has not
+been separated from anything: a partition of one is not a discovery about operations, it is a
+statement that the probes are too blunt.
+
+| | |
+|---|---|
+| 14 operations → | **12 families**, 12 by construction |
+| 91 pairs, 88 genuinely differ | **invented 88** |
+| **flattered** (behave alike, called different) | **0** |
+| **buried** (genuinely differ, called alike) | **0** |
+
+### Behaviour beats names and source
+
+`op 6` is the identity written as `max(x, x)`. It **looks** nonlinear; a prober that reads source or
+names is fooled, and one that probes lands it with the identity. That is behavioural identification
+rather than metadata, and it is the reason the whole module exists.
+
+### The exam corrected me, not itself
+
+My truth table put `op 2` — a scaling by 2.5 — in with the identity, on the reasoning that a scaling
+is "the identity up to a constant". The prober separated them and was **right**: add a constant to a
+scaling's input and you get 2.5 times it back, and applying it twice gives 6.25×. It breaks *follows
+the level* and *settles*; the identity breaks neither. **The table was corrected. The probes were not
+weakened to agree with it.**
+
+### The battery's resolution, as a number
+
+`op 13` is linear plus a **thousandth** of a square — caught, its own family. `op 14` is linear plus
+a **quadrillionth** — lands with the identity, and always will. That is not the battery failing; it
+is its tolerance, stated as a measurement instead of as a worry.
+
+### The accounting that must outlive this version
+
+V.88 named the failure that grows as the proofs get stronger: *we could not express the difference,
+therefore there is none*. Over-eager closure. So `buried` is permanent, and there is a test that
+hands the prober **one law instead of nine** and asserts that almost everything collapses into under
+four families — a blunt battery looks decisive, and only this number tells the difference.
+
+### What is supplied, said plainly
+
+The nine laws. They are *properties*, not operations, and the partition they induce is not handed
+over — but they are a vocabulary, and pretending otherwise would be the promotion this package keeps
+refusing. **Discovering the laws themselves is the next debt.** Level 7 stays unclaimed.
+
+---
+
+## V.90 — generating a law nobody wrote down
+
+First, a correction to how V.89 was read back to me: **it did not claim Level 7.** The commit and
+the docs both say *Level 7 stays unclaimed*, because its nine laws were supplied. That is the gap
+this version attacks.
+
+V.89 could say what an operation *is* by trying to break nine laws. The laws were the vocabulary.
+Handing it those nine and asking it to rediscover them would be the same promotion one level out —
+so nothing here is given a law.
+
+What is given is a handful of **moves** — reverse, negate, slide, double, lift — each content-free.
+`reverse` is not *the operation is symmetric*; it is a thing one can do to seven numbers. A law is
+then a schema:
+
+> ⟨ one side ⟩ reduced somehow ⟨ related somehow ⟩ ⟨ the other side ⟩
+
+where a side is a move applied to the input **or** to the output. Neither half is a law. The
+**pairing** is, and the pairing is searched: **1,120 candidates**, enumerated exhaustively.
+
+### What fell out
+
+| | |
+|---|---|
+| searched | 1,120 |
+| say nothing about anything | 712 |
+| **draw distinct lines** | **42** |
+
+```
+! law 4    first: x >= f(x)              (and 9 others say the same)
+    obeyed by sort up, window min, hold first, leave alone
+    broken by sort down, window max, window middle, hold last
+! law 7    total: x == f(x)              (and 37 others say the same)
+    obeyed by sort up, sort down, leave alone
+    broken by window min, window max, hold first, hold last
+```
+
+`law 4` says *the first output is a lower bound on the first input*. `law 7` says *the total is
+conserved*. Nobody wrote either down; each is a side, a reduction and a relation, composed.
+
+### The milestone, which is not "laws were found"
+
+A schema of 1,120 candidates always yields true sentences. The test is whether a generated law
+draws a distinction the **supplied** vocabulary could not — and V.89's nine leave exactly three
+pairs merged, recomputed here rather than asserted:
+
+| merged by the nine supplied laws | rescued by a generated one |
+|---|---|
+| sort upward / sort downward | ✅ |
+| smallest window / largest window | ✅ |
+| hold first / hold last | ✅ |
+
+**All three.** `invented 35, flattered 0, buried 0, rightly merged 1` — and that last number is
+what makes `flattered 0` mean anything: `also leave alone` is the identity written through a
+comparison, and no law may separate it from `leave alone`.
+
+### Two defects, and the test found the worse one
+
+**Operations were compared on different rows.** A fresh seed was drawn per *operation* rather than
+per *rule*, so two operations were judged on two different draws — V.82's "before and after from
+different samples", arriving a third time. It manufactured a distinction between an operation and
+**an identical copy of itself**, which is how it was caught. One seed per rule now, shared.
+
+**Rules that never mention the operation were candidates.** `first: lifted(x) >= negated(x)` is a
+claim about seven random numbers, not about `f`. 336 such candidates are gone.
+
+### The fourth number, and the honest thing about it
+
+V.89 counted `invented`, `flattered`, `buried`. This adds **`resolution-limited`**: two operations
+that differ, merged, and **no rule in the whole schema** would have split them. It is distinct from
+`buried` — a search that failed — and telling them apart is possible *only because the search is
+exhaustive*.
+
+**Nothing in this exam exercises it, and the exam says so out loud.** Two fixtures were built for
+it and both failed:
+
+- A **sort** scaled by a part in ten million was caught instantly. A sort preserves the total
+  *exactly*, so `total: x >= f(x)` holds with **equality** — and a tight relation is an infinitely
+  sensitive detector of any scaling whatever.
+- A **median** scaled the same way looked out of reach on one draw of rows and was caught by
+  `last: f(x) >= slid by two(x)` on another. **Borderline, not beyond** — and one draw treated as
+  definitive is the exact error this whole line of work began by fixing. I made it again, in a
+  scratch probe, and the exam overruled me.
+
+So the category ships computed, labelled `unexercised`, with a test asserting that label. A gate
+nothing exercises has not been shown to work.
+
+### What is still supplied
+
+The seven moves, four reductions and two relations. Smaller than nine laws, and not nothing.
+**Level 7 stays unclaimed.**
+
+---
+
+## V.91 — earning the moves a law is made of
+
+V.90 generated laws from seven supplied **moves**. Smaller than nine laws, still a human-designed
+vocabulary. So: can the moves themselves be earned?
+
+### The substrate is four numbers
+
+```
+out[i] = scale · row[(stride·i + offset) mod n] + lift
+```
+
+All seven of V.90's moves are special cases — `reversed` is `stride −1, offset 6`; `negated` is
+`scale −1`; `lifted` is `lift 1` — checked against V.90's **own implementations**, not against the
+arithmetic here. At width seven: **252 behaviourally distinct moves, 7 supplied and 245 not.**
+
+**The overfitting guard is structural, not statistical.** Given a programming language a search
+finds `O(x) = lookup_table[x]` and manufactures perfect separation out of nothing. Four numbers
+cannot express a lookup table **at all**. The bound is on what is expressible, which is the only
+kind that cannot be argued around.
+
+### What a vocabulary can see, computed rather than felt
+
+Moves apply to **each side independently**, so a `first` law reads `f(x)[t₁]` against `x[t₂]` — the
+reachable set is a *product*.
+
+| | |
+|---|---|
+| supplied offsets | `{0, 1, 2, 6}` |
+| **pairs the supplied seven can read** | **16 of 49** |
+
+Two fixtures died producing that number. An even/odd pattern: 54 supplied laws separated it. A
+stride pair: 8, and stable across five seeds — so not a fluke, and the mechanism was the lesson
+(`first: slid-by-one(f(x)) == slid-by-two(x)` reads `f[1]` against `x[2]`). Each failure narrowed
+where a generated move could possibly be worth anything: **the other 33 pairs.**
+
+### The result
+
+`swap 3 and 4` against `swap 3 and 5` lives exactly there — identity everywhere the supplied
+offsets can look, both permutations so every total is preserved.
+
+| pair | want | supplied laws | bought by |
+|---|---|---|---|
+| **swap 3,4 / swap 3,5** | **a new move** | **0** | **`(-6, 3, -1, 0)`** |
+| stride two / stride three | no new move | 8 | — |
+| swap 0,1 / swap 0,2 | no new move | 48 | — |
+| leave alone / leave alone again | no new move | 0 | — |
+
+**right 4/4, flattered 0, missed 0.** Three of the four pairs had a real chance at `flattered`, and
+the last is the same operation written twice — no move may be paid there.
+
+### The test was wrong and the reason is worth keeping
+
+I asserted *a move reaching position 3 makes the difference statable*. It does not. A `first` law
+reads a **pair** of offsets, so one new offset only yields pairs with the four already present, and
+`(3,4)` is not among them. Plain slide-by-three buys nothing.
+
+Slide-by-three **negated** does — and 144 of the 252 moves buy it. The negation is what works:
+V.90 dropped `<=` as "`>=` with the sides swapped", which holds only when sides swap freely, and
+they do not — a law may not put `x` on both sides. `scale = −1` puts the missing direction back.
+
+### Where generation buys nothing, worked out rather than asserted
+
+A version that only showed its own successes would be advertising. For **stride permutations** the
+supplied seven always suffice: a law `first: slid-by-t₁(f) == slid-by-t₂(x)` holds for stride `s`
+exactly when `s·t₁ ≡ t₂`, and enumerating which strides could hide from all four supplied offsets
+at once gives **the empty set** — so two distinct strides can never both hide.
+
+### Where the ledger stands
+
+A generated move was load-bearing, and the region where generation is worth anything is now a
+number (33 of 49) rather than a feeling. But the substrate's *shape* — an index affine and a value
+affine, three scales, two lifts — is still chosen by hand. It is a far weaker thing to be given
+than seven named moves, and it is not nothing. **Level 7 stays unclaimed.**
+
+---
+
+## V.92 — what a vocabulary costs and what it buys
+
+V.91 ended owing the substrate itself. The obvious next version invents one — and it cannot
+honestly be written yet, because **"a better substrate" was not a claim anything could check.**
+
+There is also a specific danger, which is why this comes first: a search told to invent a
+representation will invent an enormous one. Everything becomes expressible, coverage looks perfect,
+and nothing has been learned. Guarding against that needs a number, and the number is not coverage:
+
+> **the whole thing, in bits** — what the vocabulary costs to write down, *plus* what is left
+> over, because every pair it cannot explain has to be described some other way, and that costs too.
+
+### The scale's first use demotes this repository's own work
+
+| | moves | bits | worth | **whole** | per bit |
+|---|---|---|---|---|---|
+| **slides only** | **7** | 3.81 | 105/105 | **3.8** | 27.6 |
+| slides and signs | 14 | 4.81 | 105/105 | 4.8 | 21.8 |
+| every regrouping | 84 | 7.39 | 105/105 | 7.4 | 14.2 |
+| **V.91's substrate** | **252** | 8.98 | 105/105 | **9.0** | 11.7 |
+| the supplied seven | 6 | 3.58 | 96/105 | 64.0 | 26.8 |
+| one move | 1 | 1.00 | 41/105 | 430.7 | 41.0 |
+
+**Seven plain slides describe the whole held-out set in 3.8 bits where V.91's 252-move substrate
+needs 9.0.** The stride and scale dimensions cost five extra bits and buy nothing here.
+
+That refines V.91 rather than contradicting it. V.91 concluded `scale = −1` was load-bearing, and
+it was — *given the supplied seven*, whose offsets are `{0,1,2,6}` and which spend three of their
+slots on moves all sitting at offset zero. **The cheap repair was never a new dimension. It was
+spending those slots on offsets three, four and five.**
+
+### My first measure committed the opposite failure
+
+`worth ÷ cost` put **`one move` first** — 41 of 105 pairs for one bit. A measure built to stop a
+search preferring enormous vocabularies was rewarding uselessness instead.
+
+Charging for the leftovers fixes it with no thumb on the scale: a vocabulary that explains nothing
+pays for all 105 pairs by hand; one that explains everything pays only for itself. That is
+description length, which is older than this repository. The ratio is kept as a **diagnostic only**,
+and a test asserts that `one move` still wins on it — because that is the evidence the ratio alone
+is hollow.
+
+Three metric defects now, all in this session's own instruments: a ranking by region size (V.84), a
+control shaped like the thing it guarded (V.85), and a ratio that prefers uselessness (V.92).
+
+### The measure only bites where the work is
+
+On **randomly drawn** pairs, five of six vocabularies explain every one. The measure saturates and
+would certify anything. It bites only on operations that are nearly identical — V.91's swap fixture
+generalised to every transposition — which is worth writing down on its own: **a vocabulary's
+quality is invisible on easy cases.**
+
+The exam guards both failures and checks that third fact:
+
+| condition | |
+|---|---|
+| order steady across three draws | ✅ |
+| the largest vocabulary does not win | ✅ |
+| the smallest does not win | ✅ |
+| the winner is **complete** | ✅ |
+| random pairs saturate, so the hard ones are doing the work | 5 of 6 |
+
+### And I destroyed a module doing it
+
+`njp/economy.py` already existed — a cognitive budget organ — and I wrote over it. Same failure as
+V.58's `tasks.py`, four months of versions later. Restored from git, verified byte-clean, rebuilt as
+`njp/worth.py`. **The check that would have caught it takes one second and I did not run it.**
+
+### What this is not
+
+No substrate is invented here. What is built is the scale a claim to have invented a better one
+would have to be weighed on. **Level 7 stays unclaimed** — but "a better substrate" is now a
+number, and the first number it produced was against me.
+
+---
+
+## V.93 — an experiment may not quietly edit the instruments
+
+### The one-second check, made automatic
+
+Twice this package destroyed a working module by writing a new one over it. V.58 took
+`njp/tasks.py`, a coding-task bank eight call sites depended on. V.92 took `njp/economy.py`, a
+cognitive budget organ — **while building the module that measures whether a vocabulary is honest.**
+
+Neither was caught by a test, and the reason is worth stating: *the tests that would have caught
+them belonged to the module that had just been deleted.* A green suite proves nothing about a file
+that no longer exists to be tested.
+
+`njp/integrity.py` stops it being something to remember:
+
+| | |
+|---|---|
+| `claim(path)` | refuses a path something already answers to — the **pre**-condition, and the one that matters, because by the time a fingerprint notices, only version control knows what was there |
+| `claim(path, rewriting=True)` | how a caller says replacing it is what it means — the dangerous case becomes something somebody typed |
+| `watch(roots, touching=[...])` | fingerprints the organs, runs the experiment, fingerprints again, and raises on any **undeclared** edit |
+
+```
+>>> claim("nyxara/njp/economy.py")
+Occupied: nyxara/njp/economy.py already exists (12023 bytes). Pass rewriting=True if
+replacing it is what you mean, or pick a name nothing answers to.
+```
+
+Both historical paths are pinned by tests. **155 instrument files fingerprint in well under a
+second.**
+
+It does not forbid change — every version here changes files and must. It forbids **undeclared**
+change, and the asymmetry is deliberate: a new file harms nothing, an edited or removed one is an
+instrument that moved while it was being used. A run that mutates the thing measuring it can
+produce any result at all and look calm doing it.
+
+That is the same sentence this package has now written at five levels: a spoiled experiment (V.83),
+a leaky apparatus (V.85), a control shaped like its target (V.85), a ratio that rewards uselessness
+(V.92), and now a scientist editing the laboratory.
+
+### And the benchmark saturation, narrowed
+
+V.92 found five of six vocabularies explaining every randomly drawn pair — the measure saturates
+and would certify anything. `contested()` keeps only the pairs the vocabularies **disagree** about:
+one that nothing explains distinguishes nothing, and one that everything explains distinguishes
+nothing either.
+
+The boundary is found on the half that is looked at and the measurement is taken on the half that
+is not, or the narrowing could be tuned into the answer.
+
+| | all 105 hard pairs | 64 contested |
+|---|---|---|
+| **slides only** | 105/105, **3.8 bits** | 64/64, **3.8 bits** |
+| V.91's substrate | 105/105, 9.0 bits | 64/64, 9.0 bits |
+| the supplied seven | 96/105, 64.0 bits | 55/64, 57.6 bits |
+| **one move** | **41/105** | **0/64** |
+
+**The winner does not change — and that is reported because it is what happened, not because it was
+hoped for.** What changes is the loser: `one move` looked like it explained 39% of pairs, and on the
+contested ones it explains **none**. The easy pairs were carrying it entirely.
+
+That is the argument for adversarial selection in one line: **an average over easy cases rewards a
+vocabulary that has never distinguished anything hard.**
+
+---
+
+## V.94 — finding the few things everything else is made of
+
+Every version from V.89 to V.92 was handed the thing it was supposed to be clever about. V.89 got
+nine laws. V.90 got seven moves. V.91 got a substrate of four numbers. V.92 got a list of
+vocabularies to weigh. Each search was real, and each time **the origin of the candidates was me.**
+
+So here nothing is given a parameterisation. The input is transformations observed **only as
+behaviour** — rows in, rows out — and one question: *can these be written down together more
+cheaply than one at a time?*
+
+When the answer is yes, it is a handful of the observations themselves: if some of them compose to
+give all the others, the set is described by naming those few and writing each remaining one as a
+short recipe. **Finding which few is the discovery**, and it is not a parameterisation anybody
+supplied.
+
+| family | needs | found | cost | longhand |
+|---|---|---|---|---|
+| turns | 1 | **1** | 53 bits | 192 |
+| turns and a flip | 2 | **2** | 142 bits | 384 |
+| swaps of neighbours | — | 0 | 168 | 168 |
+| **unrelated** | **—** | **0** | 192 | 192 |
+| **not rearrangements** | **n/a** | **0** | — | — |
+
+**right 5/5, flattered 0, buried 0.** Nothing anywhere says *stride* or *offset* or *rotation*. What
+comes back is `generator 1: (1, 2, 3, 4, 5, 6, 7, 0)`.
+
+### Declining is the harder half
+
+Three of the five families have nothing to find, and **a search that always produces generators
+would produce them for noise.** The first cost model did exactly that: three "generators" in eight
+unrelated permutations, at 184 bits against 192.
+
+The saving was an artefact, and the reason is worth keeping: **generators are drawn from the
+observed transformations**, so choosing any three writes three out in full and leaves five to be
+reached — which looks like compression whatever the five turn out to be. A description must now
+explain **everything** and save more than one member is worth. That margin is not a tuned constant:
+a description saving less than one transformation written longhand has found a rounding, not a
+structure.
+
+### The probe's basis was where the thing it looked for did not show
+
+The exam's last family is built of transformations that are *not* rearrangements — they add,
+average, square. All four should be undescribable this way. One was not: **`x²` read as the
+identity**, because the probe marked positions with a one, and `0² = 0`, `1² = 1`.
+
+The mark is now 3.0, and a test reconstructs the old probe to assert it really did read squaring as
+doing nothing. That is the V.89 lesson at a new level: a probe's resolution is a property of the
+probe, and this one's blind spot was sitting exactly on the fixture.
+
+### What this is and is not
+
+It is candidate generation whose origin is the data. It is **not** representation invention: the
+things it composes are the observations, and the composition operator — apply one, then the other —
+is supplied. A family with structure that needs more than composition to see would come back empty
+here, and `swaps of neighbours` is that case sitting in the exam, reported as found-nothing rather
+than explained away.
+
+The three pieces now stand together: V.92 says what a representation costs, V.93 says the
+laboratory did not edit itself while measuring, and V.94 says where a candidate came from.
+**Level 7 stays unclaimed.**
+
+---
+
+## V.95 — the haystack is charged to the needle
+
+V.94 found the few transformations everything else is made of, from behaviour alone. But it was
+still told **how** things are made of each other: *apply one, then the other*. Composition was
+supplied, and it was the last thing in the chain that was.
+
+Here that is searched too. A way of combining is a short **word**: `ab` means *look up through a,
+then through b*; `ba` is the other order; `a` alone ignores its second argument entirely. Nothing
+marks any of them as the right one, and composition is simply one member of a list of fourteen.
+
+### And then the search is charged for its own size
+
+This is the whole version. Told to invent a way of combining, a search considers an enormous number
+of them, finds one that fits, and reports a triumph — and the fit is a property of the haystack. So:
+
+> **total = log₂(ways considered) + the description V.94 would have given**
+
+| words up to | ways | charged | winner | total |
+|---|---|---|---|---|
+| one | 2 | 1.0 | **—** | 193.0 |
+| two | 6 | 2.6 | `ab` | **55.6** |
+| three | 14 | 3.8 | `ab` | 56.8 |
+| four | 30 | 4.9 | `ab` | 57.9 |
+
+**The same answer costs more as the search widens.** A wider search finds `ab` again and pays more
+for having looked in more places. A million candidates would owe twenty bits before saying
+anything at all.
+
+Without that line, *invent a way of combining* is an instruction a search can satisfy **by widening
+itself** — which is not an experiment.
+
+### The candidate list is not a hint
+
+The useless words are left in on purpose. `a` and `b` ignore an argument, so everything built from
+them collapses. With **only** those available — words up to one letter — **nothing is found**, which
+is the correct answer and the other half of the guard: a list containing only sensible candidates
+has had its answer chosen for it.
+
+| family | want | way | seeds | covered | cost | longhand |
+|---|---|---|---|---|---|---|
+| turns | something | `ab` | 1 | 8/8 | 57 | 192 |
+| turns and a flip | something | `ab` | 2 | 16/16 | 146 | 384 |
+| turns inside halves | something | `ab` | 1 | 4/4 | 35 | 96 |
+| **unrelated** | **nothing** | **—** | 0 | 0/8 | 196 | 192 |
+
+**right 4/4, flattered 0, buried 0, degenerate winners 0, cost climbs True.**
+
+### What it did not find
+
+**Composition won every time.** No word other than `ab` ever paid for itself on any family here,
+and that is reported as the result rather than dressed up: the search was real, the alternatives
+were available and charged for equally, and the thing that has always been supplied turned out to
+be the thing worth supplying. A version that only published the families where the answer was
+surprising would be advertising.
+
+### What is still supplied
+
+Observations, the letters a word may be made of, the comparison, and the compression criterion.
+The candidate ways are enumerated from two letters rather than listed — but *two letters and
+lookup* is a substrate, and it was chosen by hand.
+
+**Level 7 stays unclaimed.** What V.92, V.93, V.94 and V.95 have between them is a cost for a
+representation, a laboratory that cannot edit itself while measuring, an origin for candidates that
+is the data, and a price on the search that produced them.
+
+---
+
+## V.96 — where the tower stops, in bits
+
+V.95 charged a search for its own size. But it charged only for **picking from the list**, never for
+the list existing. *Words up to three* is a language, and somebody chose it — so the bill has
+another line, and adding that line opens a hole underneath:
+
+> a language is chosen from a family of languages, which is chosen from …
+
+That regress cannot be closed by asserting it stops. It closes by **arithmetic**. Each storey costs
+a fixed toll — the bits to say which option was taken — and buys whatever the storey below could not
+explain. **The toll does not shrink as you climb. The savings do**, because there is only so much
+structure in any set of observations. So there is a height above which climbing costs more than it
+returns, and that height is computed rather than judged.
+
+### Three worlds, three different answers, one arithmetic
+
+| world | storey 0 | storey 1 | storey 2 | **stops at** |
+|---|---|---|---|---|
+| a sensible default (words to 3) | 192.0 | **56.8** | 57.9 | **1** |
+| an absurd default (words to 8) | 192.0 | 62.0 | **57.9** | **2** |
+| nothing to explain | **192.0** | 195.8 | 195.3 | **0** |
+
+**right 3/3, heights seen [0, 1, 2], toll never falls True.**
+
+In the first, naming a language costs more than naming well inside one saves — 4.9 bits of toll
+against 3.8, for exactly the same 53.0 bits of description. **The tower stops at one.**
+
+In the second, the default is so wide that its toll alone is 9.0 bits, and paying 4.9 to be told to
+look in a smaller language pays for itself. **The tower goes to two.**
+
+A module that always answered *stop at one* would be a preference wearing a measurement's clothes.
+The second world exists so that the first is a result.
+
+### A parameter nothing reads is not a parameter
+
+`Language` carried two numbers at first — an alphabet size and a word length — and the search
+**never varied the alphabet**. Size was computed as `k + k² + …` over letters nothing used, which
+prices a language for expressiveness it does not have. Charging for that is charging for nothing,
+and a language here is now one number.
+
+### Where this leaves the ledger
+
+| | |
+|---|---|
+| V.92 | what a representation costs |
+| V.93 | a laboratory that cannot edit itself while measuring |
+| V.94 | an origin for candidates that is the data |
+| V.95 | a price on the search that produced them |
+| **V.96** | **a price on the language the search was written in — and the height where paying stops being worth it** |
+
+The regress the user named is real and it is now **visible in bits** rather than argued about. What
+is still supplied is the bottom of it: the family of languages is five entries long because I wrote
+five, and pricing *that* choice is the same problem one storey higher.
+
+**Level 7 stays unclaimed.** The gap is no longer "some vocabulary is still supplied" — it is one
+specific line of the bill, and the arithmetic that would settle it already exists.
+
+---
+
+## V.97 — the family of languages, taken off the shelf
+
+V.96 priced a tower and left one line unpaid, naming it: **the family of languages was five entries
+long because I wrote five.** The obvious next version writes a family of families and moves the same
+debt one storey up. So this one does not.
+
+The family is **derived**, by a rule with no free numbers in it, and the rules compete:
+
+| rule | the family it gives |
+|---|---|
+| `as long as it takes` | lengths one up to the shortest that could reach every observation — **a bound computed from the data** |
+| `a handful` | lengths one to five — **what V.96 used, here as a competitor** |
+| `one for each` | one length per observation |
+| `just the shortest` | length one only |
+
+Two things make this different from adding a storey. A rule **takes no parameters**, so it cannot be
+tuned toward an answer — where a five-entry list has five knobs, `as long as it takes` has none, and
+the family it produces changes with the observations rather than with me. And V.96's own choice is
+in the list, charged identically.
+
+### On eight observations
+
+| rule | langs | rule + lang + way + describing | total |
+|---|---|---|---|
+| **as long as it takes** | 3 | 2.0 + 1.6 + 2.6 + 53.0 | **59.2** |
+| a handful | 5 | 2.0 + 2.3 + 2.6 + 53.0 | 59.9 |
+| one for each | 8 | 2.0 + 3.0 + 2.6 + 53.0 | 60.6 |
+| just the shortest | 1 | 2.0 + 0.0 + 1.0 + 192.0 | 195.0 |
+
+All three working rules pick **the same language and the same way**. The difference is purely the
+cost of the shelf they were chosen from — which is what a derived family buys: not a better answer,
+a cheaper route to the same one.
+
+### And it is not universally better — the crossover is computed, not searched
+
+Because the working rules agree, the margin is exactly `log₂(5) − log₂(L)`:
+
+| needs L | observations | margin | winner |
+|---|---|---|---|
+| 2 | 3–4 | +1.32 | as long as it takes |
+| 3 | 5–8 | +0.74 | as long as it takes |
+| 4 | 9–16 | +0.32 | as long as it takes |
+| **5** | **17–32** | **+0.00** | **a tie** |
+| 6 | 33–64 | −0.26 | **a handful** |
+| 8 | 129–256 | −0.68 | **a handful** |
+
+Two points were measured end to end (+1.32 at four observations, +0.74 at eight) and match the
+formula to the digit. **Past thirty-two observations a hand-written cap of five is the cheaper
+shelf** — a real limit of deriving the family, written down rather than left to be found.
+
+### A collision this session created and did not notice for eight versions
+
+Wiring V.97 surfaced it. `njp/__init__.py` exported `Experiment` and `Outcome` from V.84's block —
+and `njp.universe` had exported an `Experiment` and `njp.agency` an `Outcome` long before. **Mine
+silently won both.** A duplicated entry in `__all__` is a name some module lost, and nothing
+complains.
+
+V.93's guard catches a *path* that is already occupied. It does not catch a *name*. Both are now
+qualified and the senior owners have them back; the four remaining duplicates predate this session.
+
+**Level 7 stays unclaimed.** The regress is now four rules deep with every line itemised, and
+somebody still chose four.
+
+---
+
+## V.98 — the layer did not pay, and that was provable without running anything
+
+V.97 left the next line named: **four rules, and somebody chose four.** The fork was clean — if the
+cost of that shelf is derivable, prove it; if not, search and make the search pay. So the proof was
+tried first.
+
+A shelf exists for exactly one purpose: **to let you name one language.** So it can be compared
+against naming that language straight out of the bound the data already gives. The language's own
+toll and the description are identical either way, so they cancel, and what is left is:
+
+| route | naming |
+|---|---|
+| via a shelf | `log₂(rules) + log₂(family)` |
+| directly | `log₂(L_max)` |
+
+> **the shelf pays if and only if `rules × family < L_max`**
+
+`L_max` is `reach_needed` — a function of the observations with no free numbers in it — so it costs
+nothing and **both sides have it**.
+
+### On the eight observations V.97 was built around
+
+`L_max` is three. The shelf is four rules over a family of three: **twelve against three.**
+
+| route | naming | toll | describing | total |
+|---|---|---|---|---|
+| **no shelf at all** | 0.0 + 1.6 | 2.6 | 53.0 | **57.2** |
+| as long as it takes | 2.0 + 1.6 | 2.6 | 53.0 | 59.2 |
+| a handful | 2.0 + 2.3 | 2.6 | 53.0 | 59.9 |
+| one for each | 2.0 + 3.0 | 2.6 | 53.0 | 60.6 |
+
+**A loss of exactly 2.00 bits — `log₂(4)`, the cost of choosing among four rules, buying nothing
+at all.** Every route picks the same language and the same way; the shelf is pure indirection.
+
+So V.97's headline was right about *which rule is best* and wrong about *whether having rules was
+worth it.*
+
+### What was kept, and why
+
+The machinery stays, because `pays(rules, family, bound)` says **when** a shelf would be worth
+having — a long bound and a small family — and deleting it would delete the ability to say that.
+But `direct` is the baseline now, and it competes **inside** the list rather than beside it: a route
+that is never made to compete is a route nobody has checked.
+
+And a test asserts the proof and the measured totals agree. If the derived condition and the
+arithmetic disagreed, one of them would be wrong, and neither would be worth having.
+
+### The pattern, four versions running
+
+| | searched | proved |
+|---|---|---|
+| V.88 | — | every linear stencil is a combination of iterated differences |
+| V.97 | two points | the crossover, `log₂(5) − log₂(L)`, for all sizes |
+| **V.98** | **nothing** | **the shelf pays iff `rules × family < L_max`** |
+
+V.88's rule keeps returning one level higher each time: **where it can be proved, do not search.** In
+V.97 a sixteen-observation run was killed for the formula. In V.98 no run was needed at all.
+
+**Level 7 stays unclaimed.** The regress now terminates by arithmetic at the storey below where I
+last put it — and the thing that terminated it was a proof that the layer I had just added was a
+net loss.
+
+---
+
+## V.99 — the bill charges for choosing, not for knowing
+
+The instruction was the same fork as V.98: **prove it before searching.** The thing to price was
+the hypothesis space behind the five families — where the rules themselves come from. The proof
+attempt did not produce a price. It produced a **hole in the instrument that was going to do the
+pricing**, and one line is the whole of it:
+
+```python
+charged(1) == 0.0
+```
+
+Every version from V.92 to V.98 prices a **choice**: how many options were on the table, and how
+many bits it takes to say which one was taken. Supplied structure involves no choosing. So under
+this accounting the cheapest description is always the one that considered nothing — **which is the
+one with the most handed to it.** That is the exact opposite of what all of it was built to measure.
+
+### Measured against V.98's own baseline
+
+Not argued — run, on the same eight observations V.97 and V.98 were built around, where
+`reach_needed` is 3:
+
+| route | naming | toll | describing | total |
+|---|---|---|---|---|
+| V.98's baseline, naming `L` out of three | 1.58 | 2.58 | 53.00 | 57.17 |
+| **somebody writes `L = 2` into the source** | **0.00** | 2.58 | 53.00 | **55.58** |
+
+Hard-coding wins by **1.58 bits — exactly `log₂(3)`**, which is exactly what naming the answer
+costs. The bill has no column for having been told, so the winning move is to be told.
+
+V.98 proved a shelf of four rules was a net loss against naming the language directly. V.99 finds
+that **naming it directly loses to not naming it at all** — and that the loss is the whole of the
+bill's own arithmetic, not a defect in any one module.
+
+### The closure: one world was the wrong unit
+
+A hard-coded `L` is right for the world it was written for and wrong for the next one, so **across**
+worlds it has to be re-supplied — and a constant drawn from `L_max` possibilities costs `log₂(L_max)`
+bits **of source**, which is precisely what deriving it costs at run time. The bits move from one
+column to the other, and a two-part code sees them either way.
+
+| worlds | derives it, every world | is told it, every world |
+|---|---|---|
+| 1 | 54.58 | 54.58 |
+| 3 | 468.91 | 468.91 |
+| 5 | 1654.30 | 1654.30 |
+
+Equal to the digit, at every width, because it is a theorem and not a coincidence:
+
+> **Nothing is free. A tower that pays nothing at run time is carrying the same bits in its source,
+> once per world it is right about.**
+
+### What this costs the eight versions above it
+
+The V.92–V.98 numbers are **valid between searches compared on the same worlds** and license nothing
+absolute. A single world cannot distinguish a search from a lookup, because on a single world a
+lookup is genuinely cheaper.
+
+So the reason **Level 7 stays unclaimed** is deeper than *some vocabulary is still supplied*. The
+instrument could not have detected the difference on one world. It can now, and only by being run
+on several — which is a requirement on every future measurement, not a result.
+
+### The defect the closure itself had
+
+`across([], []).same` returned `True`. Both routes totalled zero, the difference was under
+threshold, and the organ duly reported agreement — **a comparison of nothing with nothing, passing.**
+The test was right and the organ was wrong; `same` now requires `worlds >= 1`.
+
+That is the same shape as *a check that could not run being written down as one that passed*, which
+this package has caught at five levels — and now once more, in the module that exists to catch it.
+
+| | the apparatus encoded its own answer |
+|---|---|
+| V.83 | a spoiled experiment read as a refutation |
+| V.85 | a leaky apparatus, and a target-shaped control |
+| V.92 | a ratio that rewarded uselessness |
+| V.93 | the scientist editing the laboratory |
+| V.94 | compression finding structure in noise |
+| V.95 | an unpaid search |
+| V.96 | an unpaid language |
+| V.98 | an unpaid shelf |
+| **V.99** | **an unpaid supply — and then a vacuous agreement inside the fix** |

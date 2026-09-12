@@ -93,7 +93,7 @@ import itertools
 import random
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 __all__ = [
     "Truth", "Observation", "Task", "Stage", "Paper", "Report", "Discovery",

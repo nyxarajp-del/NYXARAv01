@@ -62,7 +62,7 @@ Pure standard library, no state, deterministic.
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional, Pattern, Tuple
+from typing import Any, List, Optional, Tuple
 
 __all__ = ["read_explanation_question", "candidates_for", "nominalise", "STOPPED"]
 

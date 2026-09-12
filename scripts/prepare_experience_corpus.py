@@ -84,7 +84,7 @@ import os
 import random
 import re
 import sys
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence
 
 _EXP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "experience")
 

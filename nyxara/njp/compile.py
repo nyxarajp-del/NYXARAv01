@@ -58,8 +58,8 @@ returns :data:`NONE_OP` and the turn completes exactly as it did before.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 __all__ = ["Verb", "Operation", "CognitiveOp", "ThoughtCompiler", "NONE_OP"]
 

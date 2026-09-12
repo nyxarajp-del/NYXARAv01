@@ -87,7 +87,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 __all__ = ["Episode", "ReplayReport", "ScenarioResult", "load_episodes", "replay"]
 

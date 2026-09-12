@@ -96,6 +96,7 @@ class SettleResult:
         return tuple(seen)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Auto-documented during self-optimization: missing_docstring at nyxara/njp/fabric.py:98 (to_dict)."""
         return {"steps": self.steps, "quiescent": self.quiescent,
                 "n_fired": len(self.fired), "ms": round(self.ms, 3),
                 "prediction_score": (round(self.prediction_score, 4)

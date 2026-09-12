@@ -573,7 +573,6 @@ class CognitiveEvolution:
         for name, strategy in strategies.items():
             for kind in (getattr(strategy, "kinds", ()) or ()):
                 eligible.setdefault(str(kind), []).append(name)
-        rates = {name: float(getattr(s, "rate", 0.0) or 0.0) for name, s in strategies.items()}
 
         for kind, pool in eligible.items():
             record = self._per_kind(brain, kind)

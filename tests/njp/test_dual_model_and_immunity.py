@@ -23,7 +23,6 @@ from __future__ import annotations
 from nyxara.njp.adversary import Stance
 from nyxara.njp.beliefs import BeliefLedger, EvidenceKind
 from nyxara.njp.brain import NJPBrain
-from nyxara.njp.cortex import CortexHypothesis
 from nyxara.njp.epistemic import EpistemicCompiler
 from nyxara.njp.router import DisagreementKind
 

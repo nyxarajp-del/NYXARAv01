@@ -8,7 +8,6 @@ from __future__ import annotations
 import gzip
 import json
 
-import pytest
 
 from nyxara.njp.breadth import Breadth, measure, render, sample_subjects
 

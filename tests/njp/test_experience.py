@@ -33,7 +33,7 @@ import prepare_experience_corpus as pe  # noqa: E402
 
 from nyxara.njp.brain import NJPBrain  # noqa: E402
 from nyxara.njp.experience import (  # noqa: E402
-    Episode, ReplayReport, load_episodes, replay,
+    ReplayReport, load_episodes, replay,
 )
 from nyxara.njp.predict import ErrorKind  # noqa: E402
 from nyxara.njp.universe import InternalUniverse  # noqa: E402

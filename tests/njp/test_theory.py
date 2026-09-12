@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.njp.theory import MIN_SITUATIONS, Hunter, Law, Situation, Theory
+from nyxara.njp.theory import MIN_SITUATIONS, Hunter, Situation
 
 
 def S(name, variables, relations):

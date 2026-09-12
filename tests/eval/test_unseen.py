@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import random
 
-from nyxara.eval.unseen import Stage, UnseenReport, World, _world, run, run_once
+from nyxara.eval.unseen import Stage, UnseenReport, _world, run, run_once
 
 
 def test_the_world_is_invented_and_seed_stable():

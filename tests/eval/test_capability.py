@@ -20,7 +20,6 @@ real run use a small slice and the full sweep lives behind the CLI.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -168,7 +167,6 @@ def test_the_planning_probe_can_fail():
     from nyxara.eval.capability import _probe_planning
     from nyxara.njp.brain import NJPBrain
     from nyxara.njp.rollout import Target
-    from nyxara.njp.universe import InternalUniverse
 
     brain = NJPBrain()
     universe = brain.universe

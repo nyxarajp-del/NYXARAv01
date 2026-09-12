@@ -56,8 +56,7 @@ here works with it absent — which is also what makes the acquisition benchmark
 
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 __all__ = [

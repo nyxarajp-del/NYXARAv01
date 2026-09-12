@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.njp.curriculum import STAGES, Curriculum, Stage
+from nyxara.njp.curriculum import STAGES, Curriculum
 from nyxara.njp.propose import Source, StageGenerator, _MIN_READINGS
 
 

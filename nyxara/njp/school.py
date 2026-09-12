@@ -1564,7 +1564,7 @@ class Saying(LanguageSubject):
                 meaning = dialect.meaning(utterance.meaning.subject, utterance.meaning.relation,
                                           utterance.meaning.object)
                 meaning.modality = "necessary"
-                question = Question(ask=f"say it, but as something that *must* be so",
+                question = Question(ask="say it, but as something that *must* be so",
                                     accept=(), silence_ok=True,
                                     note="control: a modality nobody demonstrated")
             else:
