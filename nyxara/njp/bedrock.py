@@ -30,6 +30,27 @@ here either — somebody chose four rules — but the bill now says so on its ow
 being bought with those two bits is a family that **varies with the data instead of with the
 author**, which is a different kind of purchase from anything below it.
 
+**V.98 — and then the layer turned out not to pay, which was provable without running anything.**
+A shelf exists for exactly one purpose: to let you name one language. So it can be compared against
+naming that language straight out of the bound the data already gives. The language's own toll and
+the description are identical either way, so they cancel, and what is left is:
+
+    via a shelf   log₂(rules) + log₂(family)
+    directly      log₂(L_max)
+
+    **the shelf pays if and only if  rules × family < L_max**
+
+``L_max`` is :func:`reach_needed`, a function of the observations with no free numbers in it, so it
+costs nothing and both sides have it. On the eight observations V.97 was built around, ``L_max`` is
+three and the shelf is four rules over a family of three: twelve against three. Measured, the two
+routes are **57.17 directly** and **59.17 through the best rule** — a loss of exactly 2.00 bits,
+which is ``log₂(4)``, the cost of choosing among four rules, buying nothing at all.
+
+So V.97's headline was right about which rule is best and wrong about whether having rules was worth
+it. The layer stays in the module because :func:`pays` says when it would be worth it — a shelf
+earns its place on data needing long words and a small family — and deleting the machinery would
+delete the ability to say that. But :func:`direct` is the baseline now, and on this data it wins.
+
 Pure standard library, and every price is V.92's, V.95's or V.96's.
 """
 
@@ -42,7 +63,8 @@ from nyxara.njp.combining import charged
 from nyxara.njp.generators import Observed, WIDTH, longhand
 from nyxara.njp.tower import Language, price
 
-__all__ = ["Rule", "RULES", "Footing", "reach_needed", "found_on", "stand", "SEED"]
+__all__ = ["Rule", "RULES", "Footing", "reach_needed", "found_on", "stand", "direct", "pays",
+           "SEED"]
 
 SEED = 97
 
@@ -159,8 +181,51 @@ def found_on(observed: Sequence[Observed], rule: Rule, *, rules: int = len(RULES
     return out
 
 
+def pays(rules: int, family: int, bound: int) -> bool:
+    """Would a shelf of this shape be worth having? Derived, not searched.
+
+    Both routes name one language and then pay the same toll and the same description, so those
+    cancel. What is left is the naming: ``log₂(rules) + log₂(family)`` against ``log₂(bound)``,
+    which is ``rules × family < bound``. No observations are needed to answer it — only the three
+    numbers — and that is why V.98 did not run a search to find out.
+    """
+    return max(1, rules) * max(1, family) < max(1, bound)
+
+
+def direct(observed: Sequence[Observed], *, width: int = WIDTH) -> Footing:
+    """Name the language straight out of the bound the data gives, with no shelf at all.
+
+    The baseline every rule has to beat. The bound is :func:`reach_needed`, which has no free
+    numbers, so nobody pays to choose it — and a shelf that cannot beat this is a layer of
+    indirection charging for itself.
+    """
+    unique = sorted(set(observed))
+    bound = reach_needed(unique)
+    out = Footing(rule=Rule("no shelf at all", None, "name the language from the data's own bound"),
+                  family=[Language(n) for n in range(1, bound + 1)],
+                  choosing_a_rule=0.0, choosing_a_language=charged(bound))
+    best: Optional[Tuple[float, Language, float, bool, str]] = None
+    for length in range(1, bound + 1):
+        language = Language(length)
+        bare, ok, note = price(unique, language, width=width)
+        here = language.toll + bare
+        if best is None or here < best[0]:
+            best = (here, language, bare, ok, note)
+    _, chosen, bare, ok, note = best
+    out.choosing_a_way = chosen.toll
+    out.description = bare
+    out.explained = ok
+    out.chose = f"{chosen.name}; {note}" if ok else "nothing at any length paid"
+    return out
+
+
 def stand(observed: Sequence[Observed], *, rules: Sequence[Rule] = RULES,
           width: int = WIDTH) -> List[Footing]:
-    """Every rule priced on the same observations, cheapest first."""
-    return sorted((found_on(observed, rule, rules=len(rules), width=width) for rule in rules),
-                  key=lambda f: f.total)
+    """Every rule priced on the same observations — **and no shelf at all** — cheapest first.
+
+    The baseline is in the list rather than beside it, because a route that is never made to
+    compete is a route nobody has checked.
+    """
+    out = [found_on(observed, rule, rules=len(rules), width=width) for rule in rules]
+    out.append(direct(observed, width=width))
+    return sorted(out, key=lambda f: f.total)

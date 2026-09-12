@@ -7589,3 +7589,67 @@ qualified and the senior owners have them back; the four remaining duplicates pr
 
 **Level 7 stays unclaimed.** The regress is now four rules deep with every line itemised, and
 somebody still chose four.
+
+---
+
+## V.98 — the layer did not pay, and that was provable without running anything
+
+V.97 left the next line named: **four rules, and somebody chose four.** The fork was clean — if the
+cost of that shelf is derivable, prove it; if not, search and make the search pay. So the proof was
+tried first.
+
+A shelf exists for exactly one purpose: **to let you name one language.** So it can be compared
+against naming that language straight out of the bound the data already gives. The language's own
+toll and the description are identical either way, so they cancel, and what is left is:
+
+| route | naming |
+|---|---|
+| via a shelf | `log₂(rules) + log₂(family)` |
+| directly | `log₂(L_max)` |
+
+> **the shelf pays if and only if `rules × family < L_max`**
+
+`L_max` is `reach_needed` — a function of the observations with no free numbers in it — so it costs
+nothing and **both sides have it**.
+
+### On the eight observations V.97 was built around
+
+`L_max` is three. The shelf is four rules over a family of three: **twelve against three.**
+
+| route | naming | toll | describing | total |
+|---|---|---|---|---|
+| **no shelf at all** | 0.0 + 1.6 | 2.6 | 53.0 | **57.2** |
+| as long as it takes | 2.0 + 1.6 | 2.6 | 53.0 | 59.2 |
+| a handful | 2.0 + 2.3 | 2.6 | 53.0 | 59.9 |
+| one for each | 2.0 + 3.0 | 2.6 | 53.0 | 60.6 |
+
+**A loss of exactly 2.00 bits — `log₂(4)`, the cost of choosing among four rules, buying nothing
+at all.** Every route picks the same language and the same way; the shelf is pure indirection.
+
+So V.97's headline was right about *which rule is best* and wrong about *whether having rules was
+worth it.*
+
+### What was kept, and why
+
+The machinery stays, because `pays(rules, family, bound)` says **when** a shelf would be worth
+having — a long bound and a small family — and deleting it would delete the ability to say that.
+But `direct` is the baseline now, and it competes **inside** the list rather than beside it: a route
+that is never made to compete is a route nobody has checked.
+
+And a test asserts the proof and the measured totals agree. If the derived condition and the
+arithmetic disagreed, one of them would be wrong, and neither would be worth having.
+
+### The pattern, four versions running
+
+| | searched | proved |
+|---|---|---|
+| V.88 | — | every linear stencil is a combination of iterated differences |
+| V.97 | two points | the crossover, `log₂(5) − log₂(L)`, for all sizes |
+| **V.98** | **nothing** | **the shelf pays iff `rules × family < L_max`** |
+
+V.88's rule keeps returning one level higher each time: **where it can be proved, do not search.** In
+V.97 a sixteen-observation run was killed for the formula. In V.98 no run was needed at all.
+
+**Level 7 stays unclaimed.** The regress now terminates by arithmetic at the storey below where I
+last put it — and the thing that terminated it was a proof that the layer I had just added was a
+net loss.

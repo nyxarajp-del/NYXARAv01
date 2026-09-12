@@ -162,3 +162,63 @@ def test_the_measured_margins_match_the_formula():
         handful = next(f for f in got if f.rule.name == "a handful").total
         assert reach_needed(_turns(width)) == needs
         assert handful - best == pytest.approx(charged(5) - charged(needs), abs=0.02)
+
+
+# --------------------------------------------------------------------------------------------- #
+#  V.98 — the layer turned out not to pay, and that was provable without running anything
+# --------------------------------------------------------------------------------------------- #
+def test_whether_a_shelf_pays_is_derived_not_searched():
+    """Both routes name one language and then pay the same toll and description, so those cancel.
+
+    What is left is `log2(rules) + log2(family)` against `log2(bound)` — which is
+    `rules x family < bound`, answerable from three numbers with no observations at all.
+    """
+    from nyxara.njp.bedrock import pays
+
+    assert not pays(4, 3, 3), "four rules over a family of three, against a bound of three"
+    assert not pays(4, 5, 5)
+    assert pays(4, 3, 16), "a long bound and a small family is when a shelf earns its place"
+    assert pays(1, 1, 2)
+    assert not pays(2, 2, 4), "twice two is four, which is not less than four"
+
+
+def test_naming_the_language_directly_beats_every_rule_on_this_data():
+    """V.97's headline was right about which rule is best and wrong about having rules at all."""
+    from nyxara.njp.bedrock import direct
+
+    got = stand(_turns())
+    assert got[0].rule.name == "no shelf at all"
+    straight = direct(_turns())
+    best_rule = next(f for f in got if f.rule.name != "no shelf at all" and f.explained)
+    assert straight.total < best_rule.total
+    assert best_rule.total - straight.total == pytest.approx(2.0, abs=0.01), \
+        "exactly log2(4) — the cost of choosing among four rules, buying nothing"
+
+
+def test_the_baseline_pays_nothing_to_choose_a_rule():
+    """The bound has no free numbers in it, so nobody pays to pick it."""
+    from nyxara.njp.bedrock import direct
+
+    got = direct(_turns())
+    assert got.choosing_a_rule == 0.0
+    assert got.choosing_a_language > 0, "it still pays to name which length"
+    assert len(got.family) == reach_needed(_turns())
+
+
+def test_the_baseline_competes_in_the_list_rather_than_beside_it():
+    """A route that is never made to compete is a route nobody has checked."""
+    names = {f.rule.name for f in stand(_turns())}
+    assert "no shelf at all" in names
+    assert len(names) == len(RULES) + 1
+
+
+def test_the_derived_condition_agrees_with_the_measured_totals():
+    """The proof and the arithmetic have to say the same thing, or one of them is wrong."""
+    from nyxara.njp.bedrock import direct, pays
+
+    obs = _turns()
+    bound = reach_needed(obs)
+    straight = direct(obs)
+    shelf = next(f for f in stand(obs) if f.rule.name == "as long as it takes")
+    predicted = pays(len(RULES), len(shelf.family), bound)
+    assert predicted == (shelf.total < straight.total), (predicted, shelf.total, straight.total)
