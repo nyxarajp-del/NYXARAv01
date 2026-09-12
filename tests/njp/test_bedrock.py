@@ -77,8 +77,11 @@ def test_the_derived_rule_wins_and_for_the_right_reason():
     working = [f for f in got if f.explained]
     assert len(working) >= 3
     assert len({f.chose for f in working}) == 1, "same language, same way, different shelf"
-    assert got[0].rule.name == "as long as it takes"
-    assert got[0].total < next(f for f in got if f.rule.name == "a handful").total
+    # Among the **rules**. V.98 added `no shelf at all` to the same list and it beats all of them,
+    # which is that version's result; this one is about which rule is best if you are having rules.
+    rules_only = [f for f in got if f.rule.name != "no shelf at all"]
+    assert rules_only[0].rule.name == "as long as it takes"
+    assert rules_only[0].total < next(f for f in got if f.rule.name == "a handful").total
 
 
 def test_the_advantage_shrinks_as_the_data_grows():
@@ -90,7 +93,8 @@ def test_the_advantage_shrinks_as_the_data_grows():
     margins = []
     for width in (4, 8):
         got = stand(_turns(width), width=width)
-        best = min(f.total for f in got if f.explained)
+        best = min(f.total for f in got
+                   if f.explained and f.rule.name != "no shelf at all")
         handful = next(f for f in got if f.rule.name == "a handful").total
         margins.append(round(handful - best, 2))
     assert all(m > 0 for m in margins)
@@ -158,7 +162,8 @@ def test_the_measured_margins_match_the_formula():
 
     for width, needs in ((4, 2), (8, 3)):
         got = stand(_turns(width), width=width)
-        best = min(f.total for f in got if f.explained)
+        best = min(f.total for f in got
+                   if f.explained and f.rule.name != "no shelf at all")
         handful = next(f for f in got if f.rule.name == "a handful").total
         assert reach_needed(_turns(width)) == needs
         assert handful - best == pytest.approx(charged(5) - charged(needs), abs=0.02)
