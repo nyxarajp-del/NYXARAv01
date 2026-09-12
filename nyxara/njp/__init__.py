@@ -503,6 +503,9 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.99. `Route` is free and `Across` is free; `carried` and `across` are far too general to take
+# bare, and `free_lunch` reads as a joke rather than a name without its module around it.
+from nyxara.njp.supply import Across, Route, across as price_across_worlds, carried, free_lunch
 # V.97. `Rule` is `njp.finding`'s and `njp.regularity`'s already, and `Footing` is
 # `njp.discourse`'s — where it is how one speaker stands to another, not what a tower rests on.
 # Both qualified; `stand` is far too general to take bare.
@@ -931,6 +934,7 @@ __all__ = [
     "Way", "Found", "ways", "charged", "search_ways",
     "Language", "Storey", "Climb", "price_the_tower", "price_a_storey",
     "FamilyRule", "PricedFooting", "reach_needed", "price_the_footings",
+    "Route", "Across", "carried", "free_lunch", "price_across_worlds",
     "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",

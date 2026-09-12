@@ -7653,3 +7653,87 @@ V.97 a sixteen-observation run was killed for the formula. In V.98 no run was ne
 **Level 7 stays unclaimed.** The regress now terminates by arithmetic at the storey below where I
 last put it — and the thing that terminated it was a proof that the layer I had just added was a
 net loss.
+
+---
+
+## V.99 — the bill charges for choosing, not for knowing
+
+The instruction was the same fork as V.98: **prove it before searching.** The thing to price was
+the hypothesis space behind the five families — where the rules themselves come from. The proof
+attempt did not produce a price. It produced a **hole in the instrument that was going to do the
+pricing**, and one line is the whole of it:
+
+```python
+charged(1) == 0.0
+```
+
+Every version from V.92 to V.98 prices a **choice**: how many options were on the table, and how
+many bits it takes to say which one was taken. Supplied structure involves no choosing. So under
+this accounting the cheapest description is always the one that considered nothing — **which is the
+one with the most handed to it.** That is the exact opposite of what all of it was built to measure.
+
+### Measured against V.98's own baseline
+
+Not argued — run, on the same eight observations V.97 and V.98 were built around, where
+`reach_needed` is 3:
+
+| route | naming | toll | describing | total |
+|---|---|---|---|---|
+| V.98's baseline, naming `L` out of three | 1.58 | 2.58 | 53.00 | 57.17 |
+| **somebody writes `L = 2` into the source** | **0.00** | 2.58 | 53.00 | **55.58** |
+
+Hard-coding wins by **1.58 bits — exactly `log₂(3)`**, which is exactly what naming the answer
+costs. The bill has no column for having been told, so the winning move is to be told.
+
+V.98 proved a shelf of four rules was a net loss against naming the language directly. V.99 finds
+that **naming it directly loses to not naming it at all** — and that the loss is the whole of the
+bill's own arithmetic, not a defect in any one module.
+
+### The closure: one world was the wrong unit
+
+A hard-coded `L` is right for the world it was written for and wrong for the next one, so **across**
+worlds it has to be re-supplied — and a constant drawn from `L_max` possibilities costs `log₂(L_max)`
+bits **of source**, which is precisely what deriving it costs at run time. The bits move from one
+column to the other, and a two-part code sees them either way.
+
+| worlds | derives it, every world | is told it, every world |
+|---|---|---|
+| 1 | 54.58 | 54.58 |
+| 3 | 468.91 | 468.91 |
+| 5 | 1654.30 | 1654.30 |
+
+Equal to the digit, at every width, because it is a theorem and not a coincidence:
+
+> **Nothing is free. A tower that pays nothing at run time is carrying the same bits in its source,
+> once per world it is right about.**
+
+### What this costs the eight versions above it
+
+The V.92–V.98 numbers are **valid between searches compared on the same worlds** and license nothing
+absolute. A single world cannot distinguish a search from a lookup, because on a single world a
+lookup is genuinely cheaper.
+
+So the reason **Level 7 stays unclaimed** is deeper than *some vocabulary is still supplied*. The
+instrument could not have detected the difference on one world. It can now, and only by being run
+on several — which is a requirement on every future measurement, not a result.
+
+### The defect the closure itself had
+
+`across([], []).same` returned `True`. Both routes totalled zero, the difference was under
+threshold, and the organ duly reported agreement — **a comparison of nothing with nothing, passing.**
+The test was right and the organ was wrong; `same` now requires `worlds >= 1`.
+
+That is the same shape as *a check that could not run being written down as one that passed*, which
+this package has caught at five levels — and now once more, in the module that exists to catch it.
+
+| | the apparatus encoded its own answer |
+|---|---|
+| V.83 | a spoiled experiment read as a refutation |
+| V.85 | a leaky apparatus, and a target-shaped control |
+| V.92 | a ratio that rewarded uselessness |
+| V.93 | the scientist editing the laboratory |
+| V.94 | compression finding structure in noise |
+| V.95 | an unpaid search |
+| V.96 | an unpaid language |
+| V.98 | an unpaid shelf |
+| **V.99** | **an unpaid supply — and then a vacuous agreement inside the fix** |

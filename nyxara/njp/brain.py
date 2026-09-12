@@ -2846,6 +2846,26 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def does_the_bill_charge_for_being_told(self) -> Any:
+        """The limit of everything V.92 to V.98 measured, stated as a number.
+
+        ``charged(1)`` is zero: a choice among one option costs nothing, so the cheapest
+        description is the one that considered nothing — which is the one with the most handed to
+        it. A hard-coded answer beat V.98's own baseline, 55.58 against 57.17. It closes only
+        across worlds, where a constant has to be re-supplied in the source once per world it is
+        right about, and the two columns then balance to the digit.
+
+        So those numbers rank searches against each other on the same worlds and license nothing
+        absolute. **One world cannot tell a search from a lookup.**
+        """
+        try:
+            from nyxara.njp.supply import across, free_lunch
+
+            return {"a choice among one option costs": free_lunch(),
+                    "across three worlds": across([3, 4, 5], [53.0, 120.0, 290.0]).to_dict()}
+        except Exception:  # noqa: BLE001
+            return None
+
     def where_did_the_family_come_from(self, observed: Any = ()) -> Any:
         """Price rules for **deriving** the family of languages, instead of writing one down.
 
