@@ -2846,6 +2846,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def where_does_the_tower_stop(self) -> Any:
+        """Price the storeys and let the arithmetic say how high is worth climbing.
+
+        V.95 charged for picking a way out of a language and never for the language existing.
+        Adding that line opens a regress — a language is chosen from a family, which is chosen
+        from — and it closes by arithmetic: each storey's toll does not shrink as you climb, and
+        the savings do. ``stops_at`` is where that crosses, and it is 0, 1 or 2 depending on the
+        world rather than on anybody's preference.
+        """
+        try:
+            from nyxara.njp.towerschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_combining_school(self) -> Any:
         """Sit the audit where even *how things combine* is searched, and the search pays its rent.
 

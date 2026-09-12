@@ -7465,3 +7465,62 @@ lookup* is a substrate, and it was chosen by hand.
 **Level 7 stays unclaimed.** What V.92, V.93, V.94 and V.95 have between them is a cost for a
 representation, a laboratory that cannot edit itself while measuring, an origin for candidates that
 is the data, and a price on the search that produced them.
+
+---
+
+## V.96 — where the tower stops, in bits
+
+V.95 charged a search for its own size. But it charged only for **picking from the list**, never for
+the list existing. *Words up to three* is a language, and somebody chose it — so the bill has
+another line, and adding that line opens a hole underneath:
+
+> a language is chosen from a family of languages, which is chosen from …
+
+That regress cannot be closed by asserting it stops. It closes by **arithmetic**. Each storey costs
+a fixed toll — the bits to say which option was taken — and buys whatever the storey below could not
+explain. **The toll does not shrink as you climb. The savings do**, because there is only so much
+structure in any set of observations. So there is a height above which climbing costs more than it
+returns, and that height is computed rather than judged.
+
+### Three worlds, three different answers, one arithmetic
+
+| world | storey 0 | storey 1 | storey 2 | **stops at** |
+|---|---|---|---|---|
+| a sensible default (words to 3) | 192.0 | **56.8** | 57.9 | **1** |
+| an absurd default (words to 8) | 192.0 | 62.0 | **57.9** | **2** |
+| nothing to explain | **192.0** | 195.8 | 195.3 | **0** |
+
+**right 3/3, heights seen [0, 1, 2], toll never falls True.**
+
+In the first, naming a language costs more than naming well inside one saves — 4.9 bits of toll
+against 3.8, for exactly the same 53.0 bits of description. **The tower stops at one.**
+
+In the second, the default is so wide that its toll alone is 9.0 bits, and paying 4.9 to be told to
+look in a smaller language pays for itself. **The tower goes to two.**
+
+A module that always answered *stop at one* would be a preference wearing a measurement's clothes.
+The second world exists so that the first is a result.
+
+### A parameter nothing reads is not a parameter
+
+`Language` carried two numbers at first — an alphabet size and a word length — and the search
+**never varied the alphabet**. Size was computed as `k + k² + …` over letters nothing used, which
+prices a language for expressiveness it does not have. Charging for that is charging for nothing,
+and a language here is now one number.
+
+### Where this leaves the ledger
+
+| | |
+|---|---|
+| V.92 | what a representation costs |
+| V.93 | a laboratory that cannot edit itself while measuring |
+| V.94 | an origin for candidates that is the data |
+| V.95 | a price on the search that produced them |
+| **V.96** | **a price on the language the search was written in — and the height where paying stops being worth it** |
+
+The regress the user named is real and it is now **visible in bits** rather than argued about. What
+is still supplied is the bottom of it: the family of languages is five entries long because I wrote
+five, and pricing *that* choice is the same problem one storey higher.
+
+**Level 7 stays unclaimed.** The gap is no longer "some vocabulary is still supplied" — it is one
+specific line of the bill, and the arithmetic that would settle it already exists.

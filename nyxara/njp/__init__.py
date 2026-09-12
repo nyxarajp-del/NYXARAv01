@@ -503,6 +503,15 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.96. `Language` is free — `njp.language` is a module, not a class — and `Storey` and `Climb`
+# are free. `price` and `climb` are both far too general to take bare.
+from nyxara.njp.tower import (
+    Climb,
+    Language,
+    Storey,
+    climb as price_the_tower,
+    price as price_a_storey,
+)
 # V.95. `Way` is free and `Found` is free; `search` is `njp.interact`'s already under a qualified
 # name, so this one is qualified too.
 from nyxara.njp.combining import Found, Way, charged, search as search_ways, ways
@@ -907,6 +916,7 @@ __all__ = [
     "Fingerprint", "Occupied", "Disturbed", "fingerprint", "claim_path", "watch_instruments",
     "Description", "Recipe", "describe_transformations", "watch_behaviour", "longhand",
     "Way", "Found", "ways", "charged", "search_ways",
+    "Language", "Storey", "Climb", "price_the_tower", "price_a_storey",
     "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
