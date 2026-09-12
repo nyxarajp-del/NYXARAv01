@@ -7524,3 +7524,68 @@ five, and pricing *that* choice is the same problem one storey higher.
 
 **Level 7 stays unclaimed.** The gap is no longer "some vocabulary is still supplied" — it is one
 specific line of the bill, and the arithmetic that would settle it already exists.
+
+---
+
+## V.97 — the family of languages, taken off the shelf
+
+V.96 priced a tower and left one line unpaid, naming it: **the family of languages was five entries
+long because I wrote five.** The obvious next version writes a family of families and moves the same
+debt one storey up. So this one does not.
+
+The family is **derived**, by a rule with no free numbers in it, and the rules compete:
+
+| rule | the family it gives |
+|---|---|
+| `as long as it takes` | lengths one up to the shortest that could reach every observation — **a bound computed from the data** |
+| `a handful` | lengths one to five — **what V.96 used, here as a competitor** |
+| `one for each` | one length per observation |
+| `just the shortest` | length one only |
+
+Two things make this different from adding a storey. A rule **takes no parameters**, so it cannot be
+tuned toward an answer — where a five-entry list has five knobs, `as long as it takes` has none, and
+the family it produces changes with the observations rather than with me. And V.96's own choice is
+in the list, charged identically.
+
+### On eight observations
+
+| rule | langs | rule + lang + way + describing | total |
+|---|---|---|---|
+| **as long as it takes** | 3 | 2.0 + 1.6 + 2.6 + 53.0 | **59.2** |
+| a handful | 5 | 2.0 + 2.3 + 2.6 + 53.0 | 59.9 |
+| one for each | 8 | 2.0 + 3.0 + 2.6 + 53.0 | 60.6 |
+| just the shortest | 1 | 2.0 + 0.0 + 1.0 + 192.0 | 195.0 |
+
+All three working rules pick **the same language and the same way**. The difference is purely the
+cost of the shelf they were chosen from — which is what a derived family buys: not a better answer,
+a cheaper route to the same one.
+
+### And it is not universally better — the crossover is computed, not searched
+
+Because the working rules agree, the margin is exactly `log₂(5) − log₂(L)`:
+
+| needs L | observations | margin | winner |
+|---|---|---|---|
+| 2 | 3–4 | +1.32 | as long as it takes |
+| 3 | 5–8 | +0.74 | as long as it takes |
+| 4 | 9–16 | +0.32 | as long as it takes |
+| **5** | **17–32** | **+0.00** | **a tie** |
+| 6 | 33–64 | −0.26 | **a handful** |
+| 8 | 129–256 | −0.68 | **a handful** |
+
+Two points were measured end to end (+1.32 at four observations, +0.74 at eight) and match the
+formula to the digit. **Past thirty-two observations a hand-written cap of five is the cheaper
+shelf** — a real limit of deriving the family, written down rather than left to be found.
+
+### A collision this session created and did not notice for eight versions
+
+Wiring V.97 surfaced it. `njp/__init__.py` exported `Experiment` and `Outcome` from V.84's block —
+and `njp.universe` had exported an `Experiment` and `njp.agency` an `Outcome` long before. **Mine
+silently won both.** A duplicated entry in `__all__` is a name some module lost, and nothing
+complains.
+
+V.93's guard catches a *path* that is already occupied. It does not catch a *name*. Both are now
+qualified and the senior owners have them back; the four remaining duplicates predate this session.
+
+**Level 7 stays unclaimed.** The regress is now four rules deep with every line itemised, and
+somebody still chose four.

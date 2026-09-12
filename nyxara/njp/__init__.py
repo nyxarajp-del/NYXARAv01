@@ -503,6 +503,15 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.97. `Rule` is `njp.finding`'s and `njp.regularity`'s already, and `Footing` is
+# `njp.discourse`'s — where it is how one speaker stands to another, not what a tower rests on.
+# Both qualified; `stand` is far too general to take bare.
+from nyxara.njp.bedrock import (
+    Footing as PricedFooting,
+    Rule as FamilyRule,
+    reach_needed,
+    stand as price_the_footings,
+)
 # V.96. `Language` is free — `njp.language` is a module, not a class — and `Storey` and `Climb`
 # are free. `price` and `climb` are both far too general to take bare.
 from nyxara.njp.tower import (
@@ -621,16 +630,20 @@ from nyxara.njp.interact import (
     mechanisms,
     search as search_interactions,
 )
-# V.84. `Map` is free; `Knob`, `Held`, `Intervention`, `Outcome` and `Gap` are free; `survey`,
+# V.84. `Map` is free; `Intervention` and `Outcome` are **not** — `njp.universe` has exported an
+# `Experiment` since long before this, and `njp.agency` an `Outcome`, and the first version of this
+# block took both bare names and silently shadowed them for eight versions. A duplicated entry in
+# `__all__` is a name one module lost, and nothing complains about it.
+# `Map` is free; `Knob`, `Held`, `Intervention`, `Outcome` and `Gap` are free; `survey`,
 # `gaps` and `propose` are free. `Intervention` is qualified anyway — `njp.causal` has a notion of
 # intervening on a graph, and a bare name here would read as the general case of that.
 from nyxara.njp.space import (
     Gap as BlindSpot,
     Held,
-    Intervention as Experiment,
+    Intervention as ProbeExperiment,
     Knob,
     Map as HypothesisSpace,
-    Outcome,
+    Outcome as ProbeOutcome,
     gaps,
     propose,
     survey,
@@ -901,7 +914,7 @@ __all__ = [
     # `njp.programming`'s, so the loop's carry qualified names.
     "Ascent", "LoopTurn", "CandidateRepair", "ascend",
     "Fieldwork", "MeasuredStage", "diagnose", "span_stage",
-    "HypothesisSpace", "Knob", "Held", "Experiment", "Outcome", "BlindSpot",
+    "HypothesisSpace", "Knob", "Held", "ProbeExperiment", "ProbeOutcome", "BlindSpot",
     "survey", "gaps", "propose",
     "Interaction", "PerItemReading", "interaction", "mechanisms",
     "search_interactions", "compose_interventions",
@@ -917,6 +930,7 @@ __all__ = [
     "Description", "Recipe", "describe_transformations", "watch_behaviour", "longhand",
     "Way", "Found", "ways", "charged", "search_ways",
     "Language", "Storey", "Climb", "price_the_tower", "price_a_storey",
+    "FamilyRule", "PricedFooting", "reach_needed", "price_the_footings",
     "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",

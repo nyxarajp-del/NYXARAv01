@@ -2846,6 +2846,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def where_did_the_family_come_from(self, observed: Any = ()) -> Any:
+        """Price rules for **deriving** the family of languages, instead of writing one down.
+
+        V.96's family was five entries long because five were written. Writing a family of families
+        moves that debt one storey up, so the family is derived by rules with no free numbers — and
+        V.96's own hand-written choice competes in the same list, charged identically. It wins past
+        thirty-two observations, which is a real limit of deriving the family and is computed
+        rather than searched for.
+        """
+        try:
+            from nyxara.njp.bedrock import stand
+
+            return [f.to_dict() for f in stand(observed)] if observed else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def where_does_the_tower_stop(self) -> Any:
         """Price the storeys and let the arithmetic say how high is worth climbing.
 
