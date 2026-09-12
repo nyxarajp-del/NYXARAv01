@@ -503,6 +503,9 @@ from nyxara.njp.ascent import (
     Repair as CandidateRepair,
     ascend,
 )
+# V.95. `Way` is free and `Found` is free; `search` is `njp.interact`'s already under a qualified
+# name, so this one is qualified too.
+from nyxara.njp.combining import Found, Way, charged, search as search_ways, ways
 # V.94. `Description` is free, `Recipe` is free; `describe` is far too general to take bare and
 # `Observed` is a type alias rather than a class, so it stays inside its module.
 from nyxara.njp.generators import (
@@ -903,6 +906,7 @@ __all__ = [
     "Vocabulary", "Weighed", "compare_vocabularies", "weigh_vocabulary",
     "Fingerprint", "Occupied", "Disturbed", "fingerprint", "claim_path", "watch_instruments",
     "Description", "Recipe", "describe_transformations", "watch_behaviour", "longhand",
+    "Way", "Found", "ways", "charged", "search_ways",
     "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",

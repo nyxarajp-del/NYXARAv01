@@ -7398,3 +7398,70 @@ than explained away.
 The three pieces now stand together: V.92 says what a representation costs, V.93 says the
 laboratory did not edit itself while measuring, and V.94 says where a candidate came from.
 **Level 7 stays unclaimed.**
+
+---
+
+## V.95 — the haystack is charged to the needle
+
+V.94 found the few transformations everything else is made of, from behaviour alone. But it was
+still told **how** things are made of each other: *apply one, then the other*. Composition was
+supplied, and it was the last thing in the chain that was.
+
+Here that is searched too. A way of combining is a short **word**: `ab` means *look up through a,
+then through b*; `ba` is the other order; `a` alone ignores its second argument entirely. Nothing
+marks any of them as the right one, and composition is simply one member of a list of fourteen.
+
+### And then the search is charged for its own size
+
+This is the whole version. Told to invent a way of combining, a search considers an enormous number
+of them, finds one that fits, and reports a triumph — and the fit is a property of the haystack. So:
+
+> **total = log₂(ways considered) + the description V.94 would have given**
+
+| words up to | ways | charged | winner | total |
+|---|---|---|---|---|
+| one | 2 | 1.0 | **—** | 193.0 |
+| two | 6 | 2.6 | `ab` | **55.6** |
+| three | 14 | 3.8 | `ab` | 56.8 |
+| four | 30 | 4.9 | `ab` | 57.9 |
+
+**The same answer costs more as the search widens.** A wider search finds `ab` again and pays more
+for having looked in more places. A million candidates would owe twenty bits before saying
+anything at all.
+
+Without that line, *invent a way of combining* is an instruction a search can satisfy **by widening
+itself** — which is not an experiment.
+
+### The candidate list is not a hint
+
+The useless words are left in on purpose. `a` and `b` ignore an argument, so everything built from
+them collapses. With **only** those available — words up to one letter — **nothing is found**, which
+is the correct answer and the other half of the guard: a list containing only sensible candidates
+has had its answer chosen for it.
+
+| family | want | way | seeds | covered | cost | longhand |
+|---|---|---|---|---|---|---|
+| turns | something | `ab` | 1 | 8/8 | 57 | 192 |
+| turns and a flip | something | `ab` | 2 | 16/16 | 146 | 384 |
+| turns inside halves | something | `ab` | 1 | 4/4 | 35 | 96 |
+| **unrelated** | **nothing** | **—** | 0 | 0/8 | 196 | 192 |
+
+**right 4/4, flattered 0, buried 0, degenerate winners 0, cost climbs True.**
+
+### What it did not find
+
+**Composition won every time.** No word other than `ab` ever paid for itself on any family here,
+and that is reported as the result rather than dressed up: the search was real, the alternatives
+were available and charged for equally, and the thing that has always been supplied turned out to
+be the thing worth supplying. A version that only published the families where the answer was
+surprising would be advertising.
+
+### What is still supplied
+
+Observations, the letters a word may be made of, the comparison, and the compression criterion.
+The candidate ways are enumerated from two letters rather than listed — but *two letters and
+lookup* is a substrate, and it was chosen by hand.
+
+**Level 7 stays unclaimed.** What V.92, V.93, V.94 and V.95 have between them is a cost for a
+representation, a laboratory that cannot edit itself while measuring, an origin for candidates that
+is the data, and a price on the search that produced them.

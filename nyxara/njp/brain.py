@@ -2846,6 +2846,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def go_to_combining_school(self) -> Any:
+        """Sit the audit where even *how things combine* is searched, and the search pays its rent.
+
+        V.94 found what to combine and was told how. Here the how is a short word over two letters
+        — ``ab`` happens to be composition, ``a`` ignores its second argument — and the total
+        includes ``log2`` of how many words were considered. ``cost_climbs_with_the_search`` is the
+        number: a wider search finds the same answer and pays more, which is what stops *invent a
+        way of combining* being an instruction a search can satisfy by widening itself.
+        """
+        try:
+            from nyxara.njp.combiningschool import examine
+
+            return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
     def go_to_generator_school(self) -> Any:
         """Sit the audit that asks where the candidates come from at all.
 
