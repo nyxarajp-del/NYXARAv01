@@ -136,3 +136,85 @@ def test_the_grounder_this_module_destroyed_is_still_there():
     from nyxara.njp.grounding import Grounder
 
     assert Grounder is not None
+
+
+# --------------------------------------------------------------------------------------------- #
+#  V.101: extent, discovered rather than supplied
+# --------------------------------------------------------------------------------------------- #
+def test_extent_follows_the_question_instead_of_being_a_constant():
+    """The V.100 transfer defect: 3-word spans whatever the corpus wanted.
+
+    A question that quotes most of its sentence must leave a short remainder, and one that shares
+    only a topic word a long one. Same organ, same passage, two extents.
+    """
+    from nyxara.njp.askable import _by_extent
+
+    sentence = ("Marie Curie won the Nobel Prize in Physics in 1903 for her research on "
+                "radiation phenomena discovered by Henri Becquerel")
+    narrow = _by_extent(sentence, "What did Marie Curie win the Nobel Prize in Physics in 1903 for?")
+    wide = _by_extent(sentence, "Tell me about Curie")
+    assert len(wide.split()) > len(narrow.split()), (narrow, wide)
+
+
+def test_the_remainder_is_what_the_question_did_not_already_say():
+    from nyxara.njp.askable import _runs_absent_from
+
+    runs = _runs_absent_from("Drilling began in 1970 and reached 12,262 metres",
+                             "When did drilling begin?")
+    words = {w for _, _, run in runs for w in run}
+    assert "Drilling" not in words, "the question already said it"
+    assert "1970" in words
+
+
+def test_a_tie_is_broken_by_evidence_and_not_by_position():
+    """Two sentences sharing the same words: the one holding the demanded type wins.
+
+    On the develop split 48 of 51 tie-abstentions had real overlap and were answerable. Position
+    order would have been a coin-flip; the answer's own type is evidence about where it lives.
+    """
+    world = read_world("The programme was praised widely. The programme cost 4.2 million dollars.")
+    got = ask(world, "How much did the programme cost?")
+    assert "4.2" in got.text
+
+
+def test_the_answer_type_table_has_exactly_one_copy():
+    """Three drifting copies of the same table is its own defect; the chooser and both answerers
+    read `SATISFIES`."""
+    from nyxara.njp.askable import SATISFIES
+
+    assert SATISFIES["date"] == ("date",)
+    assert "measure" in SATISFIES["number"]
+
+
+def test_the_gain_did_not_come_from_the_split_it_was_tuned_on():
+    """Recorded, not asserted live: develop 0.243, held 0.240, sealed 0.246.
+
+    `sealed` was carved from rows no other split touches and scored once, after every change. Three
+    numbers within 0.006 of each other is what "not overfitted to 300 rows" looks like; had they
+    diverged, the develop figure would have been the one to disbelieve.
+    """
+    from nyxara.njp.askableschool import SEALED, splits
+
+    made = splits()
+    seen = {(r.passage, r.question) for r in made["develop"]} | {
+        (r.passage, r.question) for r in made["held"]}
+    fresh = {(r.passage, r.question) for r in made["sealed"]}
+    assert len(made["sealed"]) == SEALED
+    assert not (fresh & seen), "a sealed split that overlaps another split is not sealed"
+
+
+def test_the_transfer_gate_is_still_failed_and_that_is_recorded():
+    """Pinned as a negative. transfer 0.054 against the same null's 0.072.
+
+    Extent discovery narrowed the gap from roughly threefold to roughly a third and did not close
+    it. If someone later makes this pass, that is a result worth noticing rather than a test that
+    quietly started succeeding.
+    """
+    from nyxara.njp.askableschool import grade, splits
+
+    rows = splits()["transfer"][:120]
+    mine = grade("world model", "transfer", rows, ask)
+    null = grade("word overlap", "transfer", rows, overlap_span)
+    assert mine.accuracy <= null.accuracy + 0.05, (
+        "the transfer gate may have been passed — re-measure on the full split and update the "
+        "documented result rather than deleting this test")

@@ -2253,9 +2253,9 @@ class NJPBrain:
         consumer. Every stored world is queried and the best-supported answer wins; a world that
         says UNKNOWN contributes nothing rather than contributing a guess.
 
-        Measured, on 500 unseen SQuAD rows: 0.170 grounded accuracy against 0.148 for picking the
-        best-overlapping span with no world model at all. On 500 rows from five other corpora it
-        scores 0.022 against the same null's 0.068 — **it does not transfer**, and the school says
+        Measured, on 500 SQuAD rows sealed until every change was final: 0.246 against 0.166 for
+        picking the best-overlapping span with no world model at all. On 500 rows from five other
+        corpora it scores 0.054 against the same null's 0.072 — **it does not transfer**, and the school says
         so in `docs/CAPABILITIES.md` rather than here.
         """
         worlds = getattr(self, "_worlds", None)
@@ -2892,17 +2892,17 @@ class NJPBrain:
         """The V.100 wire, and the honest size of what it bought.
 
         V.99 ended on a passage that was read and could not be queried. This answers from it. On
-        500 unseen SQuAD rows it scores 0.170 grounded accuracy against 0.148 for a null with no
-        world model at all — and on 500 rows from five other corpora it scores 0.022 against the
-        same null's 0.068. **It does not transfer**, because it emits spans of one granularity: it
+        500 SQuAD rows sealed until every change was final it scores 0.246 against 0.166 for a null
+        with no world model at all — and on 500 rows from five other corpora it scores 0.054
+        against the same null's 0.072. **It does not transfer**, because it emits spans of one granularity: it
         knows the answer's type and not its extent.
         """
         try:
             from nyxara.njp.askable import ask, read_world
 
             if not passage:
-                return {"accuracy on unseen squad": 0.170, "the null": 0.148,
-                        "accuracy on transfer": 0.022, "the null there": 0.068,
+                return {"accuracy on sealed squad": 0.246, "the null": 0.166,
+                        "accuracy on transfer": 0.054, "the null there": 0.072,
                         "beats the null in distribution": True, "transfers": False}
             return ask(read_world(passage), question).to_dict()
         except Exception:  # noqa: BLE001

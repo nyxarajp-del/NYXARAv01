@@ -381,6 +381,14 @@ def _overlap(a: Sequence[str], b: Sequence[str]) -> float:
 MARGIN = 0.001
 
 
+#: Which recognised span kinds satisfy which demanded answer type. One table, read by the sentence
+#: chooser and by both answerers, because three copies of it drifting apart is its own defect.
+SATISFIES: Dict[str, Tuple[str, ...]] = {
+    "date": ("date",), "number": ("number", "measure"), "measure": ("measure", "number"),
+    "place": ("place", "proper"), "person": ("proper",), "cause": ("cause",),
+}
+
+
 def _best_sentence(world: World, question: str) -> Tuple[int, float]:
     """The sentence the question is about, or nothing when two are equally good.
 
@@ -390,13 +398,31 @@ def _best_sentence(world: World, question: str) -> Tuple[int, float]:
     not grounds to guess.
     """
     qw = _content(question)
-    ranked = sorted(((_overlap(qw, _content(s)), -i) for i, s in enumerate(world.sentences)),
-                    reverse=True)
+    asked = set(qw)
+    wanted = SATISFIES.get(answer_type(question), ())
+    ranked = []
+    for i, sentence in enumerate(world.sentences):
+        words = set(_content(sentence))
+        # Two keys, and the second is not a tie-break dressed as one. `_overlap` divides by the
+        # question's length, so every sentence sharing the same *fraction* ties — on the develop
+        # split, 51 of 300 rows, thrown away by abstaining. Raw shared count is more evidence, not
+        # arbitrary order, so it decides between equal fractions.
+        # Third key: does this sentence even contain the kind of thing being asked for? "How far
+        # from each other were the motors?" wants a measure, and a sentence with no measure in it
+        # cannot be the one holding the answer however many words it shares. On develop, 48 of the
+        # 51 tie-abstentions had real overlap and were genuinely answerable — this is what tells
+        # them apart, and it is evidence rather than an ordering rule.
+        holds = int(any(sp.sentence == i and sp.kind in wanted for sp in world.spans)) if wanted else 0
+        ranked.append((len(asked & words) / len(asked) if asked else 0.0,
+                       len(asked & words), holds, -i))
+    ranked.sort(reverse=True)
     if not ranked:
         return -1, 0.0
-    score, negative = ranked[0]
-    if len(ranked) > 1 and score - ranked[1][0] < MARGIN:
-        return -1, score
+    score, shared, holds, negative = ranked[0]
+    if len(ranked) > 1:
+        rival = ranked[1]
+        if score - rival[0] < MARGIN and shared == rival[1] and holds == rival[2]:
+            return -1, score
     return -negative, score
 
 
@@ -444,6 +470,11 @@ def ask(world: World, question: str, *, floor: float = FLOOR) -> Answer:
 
     # open case: the value of the fact from this sentence whose subject and relation the question
     # overlaps most. This is where a schema would have had nothing to say at all.
+    remainder = _by_extent(sentence, question)
+    if remainder:
+        return Answer(text=remainder, kind="thing", support=sentence,
+                      score=support_score, why="what the question did not already say")
+
     here = [f for f in world.facts if f.sentence == index]
     best, best_score = None, 0.0
     for fact in here:
@@ -454,6 +485,73 @@ def ask(world: World, question: str, *, floor: float = FLOOR) -> Answer:
         return Answer(text=best.value.text, kind=best.value.kind, support=sentence,
                       score=support_score, why="open relation")
     return Answer(kind=want, score=support_score, why="causal model ambiguous: no relation matched")
+
+
+# --------------------------------------------------------------------------------------------- #
+#  extent, discovered rather than supplied
+# --------------------------------------------------------------------------------------------- #
+def _runs_absent_from(sentence: str, question: str) -> List[Tuple[int, int, List[str]]]:
+    """Maximal stretches of the sentence the question does **not** already say.
+
+    V.100 measured its own transfer failure precisely: gold answers are 2 words on SQuAD and 8 on
+    the transfer corpora, and the organ emitted 3-word spans either way. It knew the answer's type
+    and not its **extent**, and extent was a constant somebody supplied.
+
+    The hypothesis here makes extent a function of the question instead of a constant: **what is
+    being asked for is the part of the sentence the asker did not already say.** A question that
+    quotes most of its sentence leaves a short remainder; one that shares only a topic word leaves
+    a long one. That is the SQuAD/QuAC difference, arrived at without being told about either.
+    """
+    words = _words(sentence)
+    if not words:
+        return []
+    asked = set(_content(question))
+    marked = [(_stem(w.strip(".,'").lower()) in asked) for w in words]
+    runs: List[Tuple[int, int, List[str]]] = []
+    start = -1
+    for i, seen in enumerate(marked + [True]):
+        if seen:
+            if start >= 0:
+                runs.append((start, i, words[start:i]))
+                start = -1
+        elif start < 0:
+            start = i
+    out: List[Tuple[int, int, List[str]]] = []
+    for a, b, run in runs:
+        while run and run[0].strip(".,'").lower() in _STOP:
+            run, a = run[1:], a + 1
+        while run and run[-1].strip(".,'").lower() in _STOP:
+            run, b = run[:-1], b - 1
+        if run:
+            out.append((a, b, run))
+    return out
+
+
+def _by_extent(sentence: str, question: str, *, near: Optional[Tuple[int, int]] = None) -> str:
+    """The best remainder, preferring one that sits beside something the question did mention.
+
+    Adjacency is not a tuning knob, it is the same idea again: the answer to *"what year did X
+    begin"* stands next to *begin*, not at the far end of the sentence.
+    """
+    runs = _runs_absent_from(sentence, question)
+    if not runs:
+        return ""
+    words = _words(sentence)
+    asked = set(_content(question))
+
+    def touches(a: int, b: int) -> int:
+        before = a - 1 >= 0 and _stem(words[a - 1].strip(".,'").lower()) in asked
+        after = b < len(words) and _stem(words[b].strip(".,'").lower()) in asked
+        return int(before) + int(after)
+
+    def rank(item: Tuple[int, int, List[str]]) -> Tuple[int, int, int]:
+        a, b, run = item
+        inside = 0
+        if near is not None:
+            inside = int(a <= near[0] and b >= near[1])
+        return (inside, touches(a, b), len(run))
+
+    return " ".join(max(runs, key=rank)[2]).strip(".,")
 
 
 # --------------------------------------------------------------------------------------------- #

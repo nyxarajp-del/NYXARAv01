@@ -882,7 +882,7 @@ __all__ = [
     "Exchange", "Figure", "Footing", "Induction", "Interpretation", "ClaimLedger", "Link", "Minds", "Readings", "Reference",
     "Register", "Reply", "Resolution", "Retelling", "Scale", "Standing", "TurnSurprise", "Uptake",
     # NJP V.36 — what, how and why (njp/explain.py)
-    "Chain", "Explainer", "CausalExplanation", "Plan", "Step", "read_explanation_question",
+    "Chain", "Explainer", "CausalExplanation", "Plan", "read_explanation_question",
     # NJP V.38/V.39 — the question form induced, and the predator over explanations
     "Asking", "QuestionCue", "QuestionFrame",
     "Predator", "ExplanationAttack", "Survival",
@@ -955,7 +955,7 @@ __all__ = [
     "read_world", "ask_passage", "overlap_span", "always_unknown", "answer_type",
     "supplied_price",
     "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
-    "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
+    "Surgeon", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
@@ -975,14 +975,14 @@ __all__ = [
     # NJP V.10 — required computation, not maximum computation
     "CognitiveEconomy", "Budget", "Tier", "budget_for",
     # NJP V.11 — the third knowledge state: what her model assumes and nothing has examined
-    "AssumptionMiner", "Assumption", "AssumptionKind", "AssumptionStatus",
+    "AssumptionMiner", "AssumptionKind", "AssumptionStatus",
     # NJP V.12 — one row per act of thinking, so a failure *mode* can be read off a join
     "BlackBox", "Episode", "FailureMode",
     # NJP V.13 — structural change to her own cognition, adopted only on measured evidence
-    "CognitiveEvolution", "Mutation", "EvolutionTrial", "Measurement", "Situation",
+    "CognitiveEvolution", "Mutation", "EvolutionTrial", "Measurement",
     # NJP V.14 — Phase 4: a teacher's *structure*, verified and kept after the teacher is gone
     "Teacher", "TeacherCouncil", "RecordedTeacher", "CortexTeacher",
-    "Lesson", "Step", "Verification", "TeachingVerdict", "Distiller", "Distillation",
+    "Lesson", "Verification", "TeachingVerdict", "Distiller", "Distillation",
     # NJP V.15 — §7 goal → plan → action → outcome, and §19 eight specialists over one claim
     "CognitiveAgency", "Goal", "Affordance",
     "CognitiveSociety", "Role", "Case", "Contribution",

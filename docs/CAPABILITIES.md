@@ -7853,3 +7853,66 @@ vanished was a **name**.
 | V.98 | an unpaid shelf |
 | V.99 | an unpaid supply, and a vacuous agreement inside the fix |
 | **V.100** | **an hour of measurements taken against a package the measurer had broken** |
+
+---
+
+## V.101 — extent, discovered rather than supplied
+
+V.100 measured its own transfer failure exactly: gold answers are 2 words on SQuAD and 8 on the
+transfer corpora, and the organ emitted 3-word spans either way. **It knew the answer's type and
+not its extent**, and extent was a constant somebody supplied.
+
+The hypothesis that replaces the constant: **what is being asked for is the part of the sentence
+the asker did not already say.** A question that quotes most of its sentence leaves a short
+remainder; one sharing only a topic word leaves a long one. That is the SQuAD/QuAC difference,
+arrived at without being told either corpus exists.
+
+Two tie-breaks went in alongside it, both evidence rather than ordering rules: raw count of shared
+words when the shared *fraction* ties, and — deciding 6 of the remaining 51 — whether a sentence
+even contains a span of the demanded type. *"How far were the motors?"* wants a measure, and a
+sentence with no measure in it cannot be holding the answer however many words it shares.
+
+### A split that had never been scored
+
+`held` and `transfer` had been read twice by this point, and **a held-out set stops being held out
+the moment a decision is taken after seeing it.** So `sealed` was carved from SQuAD rows no other
+split touches, and scored once, after every change was final.
+
+| method | split | n | accuracy | exact | confabulation |
+|---|---|---|---|---|---|
+| world model | develop (tuned on) | 300 | 0.243 | — | 0.696 |
+| world model | held | 500 | 0.240 | 0.118 | 0.701 |
+| **world model** | **sealed (scored once)** | **500** | **0.246** | 0.120 | 0.693 |
+| word overlap | sealed | 500 | 0.166 | 0.092 | 0.785 |
+| world model | transfer | 500 | 0.054 | 0.014 | 0.892 |
+| word overlap | transfer | 500 | **0.072** | 0.014 | 0.848 |
+| world model | absent | 499 | 0.954 | 0.954 | 0.046 |
+| word overlap | absent | 499 | **0.962** | 0.962 | 0.038 |
+
+**0.243, 0.240, 0.246 — develop, held and sealed within 0.006 of each other.** That is what a gain
+that is not overfitted to 300 rows looks like. Had they diverged, the develop figure would have
+been the one to disbelieve.
+
+### What it bought, and what it cost
+
+| | V.100 | V.101 |
+|---|---|---|
+| held | 0.170 | **0.240** |
+| sealed | — | **0.246** vs null 0.166 |
+| transfer | 0.022 (null 0.068) | **0.054** (null 0.072) |
+| absent | 0.974 (null 0.962) | **0.954** (null 0.962) |
+
+- **In distribution, a real gain**, confirmed on data never scored before: +0.080 over the null.
+- **Transfer narrowed from roughly threefold to roughly a third — and is still failed.** The gate
+  the user set is not passed, and it is pinned as a failing-by-design test so that passing it later
+  is something someone notices rather than something that quietly happens.
+- **Absence got worse and now loses to the null.** Answering more means confabulating more on rows
+  where the answer is not there. That is the honest cost of the change and it is not netted away
+  against the gain.
+
+### The thing this still is not
+
+Extent is now a function of the question rather than a constant, which is one small piece of the
+roadmap's representation-discovery layer. The representation itself — spans over sentences — is
+still supplied, still 48 charged bits, and still cannot become something else when the problem
+would be easier in another form. **V.101 claims a better wire, not a discovered representation.**

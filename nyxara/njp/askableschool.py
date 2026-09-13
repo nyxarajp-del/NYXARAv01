@@ -60,6 +60,10 @@ def intact() -> Tuple[str, ...]:
 CORPUS = os.path.join(os.path.dirname(__file__), "data", "flan_reading.jsonl.gz")
 SEED = 100
 DEVELOP, HELD, TRANSFER, ABSENT = 300, 500, 500, 500
+#: A split scored **once**, at the end, and never looked at while anything was being changed.
+#: `held` and `transfer` have now been read more than once, which makes them weaker evidence every
+#: time — a held-out set stops being held out the moment a decision is taken after seeing it.
+SEALED = 500
 
 
 @dataclass(frozen=True)
@@ -98,6 +102,10 @@ def splits(path: str = CORPUS) -> Dict[str, List[Row]]:
     held = rows(squad[DEVELOP:DEVELOP + HELD])
     transfer = rows(other[:TRANSFER])
 
+    # sealed: drawn from squad rows no other split touches, scored once at the very end.
+    used = DEVELOP + HELD
+    sealed = rows(squad[used + ABSENT * 3: used + ABSENT * 3 + SEALED])
+
     # absent: a real question against a passage from a different row. The answer is genuinely not
     # there — this is a real absence, not one manufactured to look like the organ's blind spot.
     pool = squad[DEVELOP + HELD:DEVELOP + HELD + ABSENT * 3]
@@ -108,7 +116,8 @@ def splits(path: str = CORPUS) -> Dict[str, List[Row]]:
             continue  # the answer happens to be in the other passage: not an absence
         absent.append(Row(passage=p["passage"], question=q["question"],
                           answer="", family="absent", absent=True))
-    return {"develop": develop, "held": held, "transfer": transfer, "absent": absent}
+    return {"develop": develop, "held": held, "transfer": transfer, "absent": absent,
+            "sealed": sealed}
 
 
 # --------------------------------------------------------------------------------------------- #
