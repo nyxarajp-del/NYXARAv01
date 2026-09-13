@@ -7916,3 +7916,22 @@ Extent is now a function of the question rather than a constant, which is one sm
 roadmap's representation-discovery layer. The representation itself — spans over sentences — is
 still supplied, still 48 charged bits, and still cannot become something else when the problem
 would be easier in another form. **V.101 claims a better wire, not a discovered representation.**
+
+### V.101a — the wire answered from the wrong article
+
+The full sweep caught what the five suites run before committing did not. After
+`learn_encyclopedia` read 40 astronomy articles, *"what does black hole mean?"* came back with a
+line about the Milky Way.
+
+`_from_passages` was ranking every stored world by its best **sentence** overlap and taking the
+winner, so a stray sentence in an unrelated article beat the grounded path that had the right
+answer. The same shape as the dialysis tie one version earlier: **a weak signal intercepting a
+strong one.**
+
+Fixed by separating the two decisions that were being made at once — **choose the document, then
+the sentence** — and abstaining when two documents tie, because an unrelated passage that matches
+as well as the best one is not evidence about the question either. Pinned, along with the rule that
+a decision procedure still beats a passage: arithmetic must survive having read something.
+
+Worth stating plainly: the five targeted suites passed before this commit and the defect was
+real. **A subset that passes is evidence about the subset.**

@@ -2265,15 +2265,31 @@ class NJPBrain:
             from nyxara.njp.askable import ask
         except Exception:  # noqa: BLE001
             return None
-        best, best_score = None, 0.0
-        for world in worlds:
-            try:
-                got = ask(world, question)
-            except Exception:  # noqa: BLE001
-                continue
-            if not got.unknown and got.score > best_score:
-                best, best_score = got, got.score
-        return best.text if best is not None else None
+        # **Choose the document, then the sentence.** Doing both at once let a stray sentence in
+        # an unrelated article win on sentence overlap alone: after reading 40 astronomy articles,
+        # "what does black hole mean?" came back with a line about the Milky Way, beating the
+        # grounded path that had the right answer. The same shape as the dialysis tie — a weak
+        # signal intercepting a strong one.
+        try:
+            from nyxara.njp.askable import _content, _overlap
+        except Exception:  # noqa: BLE001
+            return None
+        asked = _content(question)
+        if not asked:
+            return None
+        scored = sorted(((_overlap(asked, _content(w.text)), i) for i, w in enumerate(worlds)),
+                        reverse=True)
+        top, index = scored[0]
+        if top <= 0.0:
+            return None
+        # An unrelated passage that ties the best one is not evidence about this question either.
+        if len(scored) > 1 and scored[1][0] >= top and len(worlds) > 1:
+            return None
+        try:
+            got = ask(worlds[index], question)
+        except Exception:  # noqa: BLE001
+            return None
+        return got.text if not got.unknown else None
 
     def learn_passage(self, text: str, *, concept: str = "", source: str = "",
                       confidence: float = 0.7) -> Dict[str, Any]:

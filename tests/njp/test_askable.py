@@ -218,3 +218,31 @@ def test_the_transfer_gate_is_still_failed_and_that_is_recorded():
     assert mine.accuracy <= null.accuracy + 0.05, (
         "the transfer gate may have been passed — re-measure on the full split and update the "
         "documented result rather than deleting this test")
+
+
+def test_many_passages_do_not_let_a_stray_sentence_win():
+    """Choose the document, then the sentence — doing both at once let the wrong article answer.
+
+    After 40 astronomy articles were read, *"what does black hole mean?"* came back with a line
+    about the Milky Way: an unrelated passage whose one sentence happened to overlap. The full
+    suite caught it; this pins it so the next reader does not have to.
+    """
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    brain.learn_passage("The Milky Way is the galaxy that contains the Solar System. "
+                        "Its name describes its appearance from Earth.")
+    brain.learn_passage("A black hole is a region of spacetime where gravity is so strong "
+                        "that nothing can escape from it.")
+    got = brain._from_passages("what does black hole mean?") or ""
+    assert "Milky Way" not in got, got
+    assert "gravity" in got or "spacetime" in got or got == "", got
+
+
+def test_the_wire_does_not_intercept_arithmetic():
+    """A decision procedure beats a passage, and the passage branch sits after the mathematician."""
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    brain.learn_passage("The number 43 appears nowhere in this sentence about geology.")
+    assert (brain.think("What is 17 plus 26?").answer or "").strip() == "43"
