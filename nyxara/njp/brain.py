@@ -2245,6 +2245,36 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _from_passages(self, question: str) -> Optional[str]:
+        """Answer from a passage that was actually read, or return None. **The V.100 wire.**
+
+        V.99 ended on the failure this closes: ``learn_passage`` filed the Kola passage, ``12,262
+        metres`` was in it, and ``how deep did it reach?`` returned ``''``. The reader had no
+        consumer. Every stored world is queried and the best-supported answer wins; a world that
+        says UNKNOWN contributes nothing rather than contributing a guess.
+
+        Measured, on 500 unseen SQuAD rows: 0.170 grounded accuracy against 0.148 for picking the
+        best-overlapping span with no world model at all. On 500 rows from five other corpora it
+        scores 0.022 against the same null's 0.068 — **it does not transfer**, and the school says
+        so in `docs/CAPABILITIES.md` rather than here.
+        """
+        worlds = getattr(self, "_worlds", None)
+        if not worlds or not str(question or "").strip():
+            return None
+        try:
+            from nyxara.njp.askable import ask
+        except Exception:  # noqa: BLE001
+            return None
+        best, best_score = None, 0.0
+        for world in worlds:
+            try:
+                got = ask(world, question)
+            except Exception:  # noqa: BLE001
+                continue
+            if not got.unknown and got.score > best_score:
+                best, best_score = got, got.score
+        return best.text if best is not None else None
+
     def learn_passage(self, text: str, *, concept: str = "", source: str = "",
                       confidence: float = 0.7) -> Dict[str, Any]:
         """Read a paragraph and file what it says, one relation at a time.
@@ -2259,6 +2289,18 @@ class NJPBrain:
         that cannot see which claims entered the store cannot audit them later.
         """
         out: Dict[str, Any] = {"filed": [], "read": 0, "concept": "", "skipped": []}
+        # V.100. Filing relations is not the same as being able to answer from them, and for eight
+        # versions only the first happened. The world is built here, beside the filing, so that
+        # anything read is also askable.
+        try:
+            from nyxara.njp.askable import read_world
+
+            if not hasattr(self, "_worlds"):
+                self._worlds: List[Any] = []
+            self._worlds.append(read_world(text, source=source))
+            del self._worlds[:-64]
+        except Exception:  # noqa: BLE001
+            pass
         obj = self.read_passage(text, concept=concept, source=source)
         if obj is None:
             return out
@@ -2843,6 +2885,26 @@ class NJPBrain:
             from nyxara.njp.substrateschool import examine
 
             return examine()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def can_what_she_read_be_asked(self, passage: str = "", question: str = "") -> Any:
+        """The V.100 wire, and the honest size of what it bought.
+
+        V.99 ended on a passage that was read and could not be queried. This answers from it. On
+        500 unseen SQuAD rows it scores 0.170 grounded accuracy against 0.148 for a null with no
+        world model at all — and on 500 rows from five other corpora it scores 0.022 against the
+        same null's 0.068. **It does not transfer**, because it emits spans of one granularity: it
+        knows the answer's type and not its extent.
+        """
+        try:
+            from nyxara.njp.askable import ask, read_world
+
+            if not passage:
+                return {"accuracy on unseen squad": 0.170, "the null": 0.148,
+                        "accuracy on transfer": 0.022, "the null there": 0.068,
+                        "beats the null in distribution": True, "transfers": False}
+            return ask(read_world(passage), question).to_dict()
         except Exception:  # noqa: BLE001
             return None
 
@@ -5431,6 +5493,16 @@ class NJPBrain:
                 # falling through to recall would offer the nearest thing in the store to a
                 # question that has none — which is how "what is 7 divided by 0" came back 0.7.
                 return ""
+
+            # 0.75. GROUNDED IN SOMETHING ACTUALLY READ.
+            #
+            # After the mathematician, because a decision procedure beats a passage, and before
+            # recall, because a passage the Master just handed her is better evidence about his
+            # question than the nearest thing in a general store. Returns None unless a passage was
+            # read and answers, so a brain that has read nothing is unchanged by this branch.
+            grounded = self._from_passages(thought.stimulus)
+            if grounded:
+                return str(grounded)[:1000]
 
             # 1. She was asked something and the structure knows the answer.
             #

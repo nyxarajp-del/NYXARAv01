@@ -7737,3 +7737,119 @@ this package has caught at five levels — and now once more, in the module that
 | V.96 | an unpaid language |
 | V.98 | an unpaid shelf |
 | **V.99** | **an unpaid supply — and then a vacuous agreement inside the fix** |
+
+---
+
+## V.100 — the wire from reading to answering, and the module it destroyed on the way
+
+V.99 ended on a live failure. A three-sentence passage was read, `12,262 metres` was in it, and
+*"how deep did it reach?"* returned `''`. The reader produced `relations=()` and nothing
+downstream could query it: **information entered the system in a form nothing could ask a
+question of.**
+
+The instruction was to join that wire and *not* to add a module stack. So one module was added —
+`nyxara/njp/askable.py` — and the protocol for judging it was written and committed **first**, as
+`docs/V100_PROTOCOL.md`, before a line of the organ existed.
+
+### What it does
+
+    passage → typed spans and open triples with provenance → a question turned into a query
+            → an answer, or UNKNOWN with a reason
+
+A fixed schema — measurement, time, cause, location — was tried and covers a minority of real
+questions. *"What type of animal crosses between Europe and Africa during the Autumn?"* has no
+slot. So facts carry an **open relation** — whatever the sentence puts between subject and value —
+and the wh-word constrains the **type of the answer**, not the name of the relation.
+
+### The exam, on data neither of us wrote
+
+29,256 human-written passage/question/answer triples already in the repo (SQuAD, QuAC, DROP,
+Quoref, ROPES, MRQA, ViquiQuAD). Four frozen splits, three buckets, two nulls.
+
+| method | split | n | accuracy | exact | confabulation |
+|---|---|---|---|---|---|
+| world model | held (unseen SQuAD) | 500 | **0.170** | 0.090 | 0.724 |
+| word overlap | held | 500 | 0.148 | 0.068 | 0.802 |
+| always unknown | held | 500 | 0.000 | 0.000 | 0.000 |
+| world model | **transfer** | 500 | **0.022** | 0.008 | 0.896 |
+| word overlap | transfer | 500 | **0.068** | 0.014 | 0.850 |
+| world model | absent | 499 | 0.974 | 0.974 | 0.026 |
+| always unknown | absent | 499 | 1.000 | 1.000 | 0.000 |
+
+- **In distribution it beats the null**, on accuracy *and* on confabulation. Modestly, and really.
+- **On transfer it loses to the null**, by more than a factor of two.
+- **On absence it is nearly perfect** — 0.974 of the questions whose answer is not in the passage
+  get UNKNOWN. It does not bluff.
+
+#### The three accuracy points a correctness fix cost
+
+An existing test — `test_passage.py::test_what_she_learns_from_prose_is_answerable_in_english` —
+failed once the wire was live. *"What does dialysis require?"* returned the definition instead of
+the requirement, because `require` and `requires` share no token without stemming, the two
+sentences therefore **tied**, and the tie went to whichever came first. A coin-flip wearing the
+clothes of a decision, intercepting a path that had the right answer.
+
+Both were fixed: crude suffix stemming, and abstention on a tie. Attributed separately rather than
+reported as one movement:
+
+| | held accuracy | confabulation |
+|---|---|---|
+| before either fix | 0.200 | 0.726 |
+| stemming only | 0.200 | 0.735 |
+| **stemming + tie margin (shipped)** | **0.170** | **0.724** |
+
+**The margin costs the whole three points.** It is kept anyway: an ambiguous best sentence is
+grounds to abstain, not grounds to guess, and the aggregate cannot see that it was also silently
+overriding a working capability. The price is written down rather than absorbed.
+
+### Why transfer fails, measured rather than guessed
+
+| split | gold answer, median | world model emits | null emits |
+|---|---|---|---|
+| held | **2 words** | 3 words | 20 words |
+| transfer | **8 words** | 3.5 words | 22 words |
+
+The world model emits spans of one granularity. SQuAD's answers are short, so it wins; QuAC's are
+long, so it loses to a null that dumps whole sentences. **The defect is deeper than "does not
+transfer": it knows the answer's type and not its extent.** Extent is a representational choice
+that was supplied and cannot adapt — which is the roadmap's representation-discovery layer, and it
+is not attempted here. V.100 claims **a wire, not a representation**, and the protocol said so in
+advance.
+
+The supplied grammar is charged per V.99: **48.0 bits**, eight rules and eight answer types.
+
+### The module this version destroyed
+
+`nyxara/njp/grounding.py` already existed — **3,770 lines, the `Grounder`, the organ every question
+travels through** — and the first draft of this module overwrote it in place. The brain then built
+no grounder, `percept.grounding` stayed `None` for every input, `_deliberate` returned at its first
+line, and the calculator, the causal engine and the whole strategy table became unreachable.
+
+**Four findings were measured and reported off that wreck, and every one was false:**
+
+| reported | true |
+|---|---|
+| arithmetic no longer reproduces | it does — `'43'`, before and after |
+| `grounding` is `None` for every question | only because the Grounder was gone |
+| the deliberation ladder is dead wiring | it works |
+| a container restart changed something | it did not |
+
+Restored byte-clean from git. This is the **third** time in this project — V.58 `tasks.py`, V.92
+`economy.py`, V.100 `grounding.py` — and V.93 wrote `nyxara/njp/integrity.py` precisely to stop it.
+It has `claim(path, rewriting=False)`, it takes one second, and **it was not called.**
+
+### The fix is not "remember next time"
+
+A guard you must remember to call is a guard that has already failed. So the precondition now runs
+itself: `askableschool.intact()` checks that a list of **load-bearing symbols** still resolves, and
+`examine()` refuses to produce a number until it does.
+
+Symbols, not file hashes — because nothing about the destruction looked unusual to a path
+fingerprint. One tracked file changed, which is what every ordinary edit looks like. What actually
+vanished was a **name**.
+
+| | the apparatus encoded its own answer |
+|---|---|
+| V.98 | an unpaid shelf |
+| V.99 | an unpaid supply, and a vacuous agreement inside the fix |
+| **V.100** | **an hour of measurements taken against a package the measurer had broken** |

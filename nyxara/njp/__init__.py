@@ -506,6 +506,22 @@ from nyxara.njp.ascent import (
 # V.99. `Route` is free and `Across` is free; `carried` and `across` are far too general to take
 # bare, and `free_lunch` reads as a joke rather than a name without its module around it.
 from nyxara.njp.supply import Across, Route, across as price_across_worlds, carried, free_lunch
+# V.100. Every one of these is free at package level today and every one of them is generic enough
+# to be claimed later — which is exactly how `Experiment` and `Outcome` shadowed two modules for
+# eight versions before V.97 noticed. Qualified now, while it costs nothing.
+from nyxara.njp.askable import (
+    Answer as PassageAnswer,
+    Fact as PassageFact,
+    Span as PassageSpan,
+    World as PassageWorld,
+    UNKNOWN as PASSAGE_UNKNOWN,
+    answer_type,
+    ask as ask_passage,
+    always_unknown,
+    overlap_span,
+    read_world,
+    supplied_price,
+)
 # V.97. `Rule` is `njp.finding`'s and `njp.regularity`'s already, and `Footing` is
 # `njp.discourse`'s — where it is how one speaker stands to another, not what a tower rests on.
 # Both qualified; `stand` is far too general to take bare.
@@ -935,6 +951,9 @@ __all__ = [
     "Language", "Storey", "Climb", "price_the_tower", "price_a_storey",
     "FamilyRule", "PricedFooting", "reach_needed", "price_the_footings",
     "Route", "Across", "carried", "free_lunch", "price_across_worlds",
+    "PassageWorld", "PassageFact", "PassageSpan", "PassageAnswer", "PASSAGE_UNKNOWN",
+    "read_world", "ask_passage", "overlap_span", "always_unknown", "answer_type",
+    "supplied_price",
     "MoveShape", "Earned", "every_move", "readable_pairs", "separations", "move_earns",
     "Surgeon", "Observation", "CausalStructure", "StructureVerdict",
     "Fusion", "Analogy", "Abstraction", "ShapePattern",
